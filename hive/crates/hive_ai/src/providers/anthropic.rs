@@ -398,8 +398,9 @@ impl AiProvider for AnthropicProvider {
 
                 // Process complete lines.
                 while let Some(newline_pos) = buffer.find('\n') {
-                    let line: String = buffer.drain(..=newline_pos).collect();
-                    let line = line.trim_end();
+                    let line = buffer[..newline_pos].trim_end().to_owned();
+                    buffer.drain(..=newline_pos);
+                    let line = line.as_str();
 
                     if line.is_empty() {
                         // Empty line after event+data = end of SSE event block.

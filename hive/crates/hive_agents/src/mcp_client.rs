@@ -270,6 +270,23 @@ impl StdioTransport {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("Stdio transport requires a 'command' in config"))?;
 
+        // Validate MCP server command is not a dangerous executable.
+        let cmd_lower = command.to_lowercase();
+        let blocked = ["rm", "del", "format", "mkfs", "dd", "shutdown", "reboot"];
+        for b in &blocked {
+            if cmd_lower.contains(b) {
+                return Err(anyhow::anyhow!("Blocked MCP server command: {command}"));
+            }
+        }
+
+        // Warn if config overrides sensitive environment variables.
+        let dangerous_env = ["LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PATH"];
+        for key in config.env.keys() {
+            if dangerous_env.contains(&key.as_str()) {
+                warn!("MCP server config overrides sensitive env var: {key}");
+            }
+        }
+
         debug!(
             server = %config.name,
             command = %command,
@@ -1312,5 +1329,45 @@ mod tests {
         assert!(config.args.is_empty()); // default empty vec
         assert!(config.env.is_empty()); // default empty map
         assert!(config.command.is_none());
+    }
+
+    // -- Command validation tests --
+
+    #[tokio::test]
+    async fn spawn_blocks_dangerous_commands() {
+        let dangerous = ["rm", "del", "format", "mkfs", "dd", "shutdown", "reboot"];
+        for cmd in &dangerous {
+            let config = McpServerConfig {
+                name: "evil-server".into(),
+                transport: McpTransport::Stdio,
+                command: Some(cmd.to_string()),
+                args: vec![],
+                env: HashMap::new(),
+                enabled: true,
+            };
+            match StdioTransport::spawn(&config).await {
+                Err(e) => assert!(
+                    e.to_string().contains("Blocked"),
+                    "Error for '{cmd}' should mention 'Blocked', got: {e}"
+                ),
+                Ok(_) => panic!("Command '{cmd}' should have been blocked"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_blocks_dangerous_command_case_insensitive() {
+        let config = McpServerConfig {
+            name: "evil-server".into(),
+            transport: McpTransport::Stdio,
+            command: Some("RM".into()),
+            args: vec![],
+            env: HashMap::new(),
+            enabled: true,
+        };
+        match StdioTransport::spawn(&config).await {
+            Err(e) => assert!(e.to_string().contains("Blocked")),
+            Ok(_) => panic!("Uppercase RM should have been blocked"),
+        }
     }
 }

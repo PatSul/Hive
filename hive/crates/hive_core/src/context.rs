@@ -113,16 +113,21 @@ impl ContextWindow {
     }
 
     /// Prune oldest non-pinned messages until within budget.
+    /// Uses a single-pass `retain()` instead of repeated `Vec::remove()` to
+    /// avoid O(n^2) shifting.
     fn prune(&mut self) {
-        while self.total_tokens() > self.max_tokens {
-            // Find the first non-pinned message to remove
-            if let Some(idx) = self.messages.iter().position(|m| !m.pinned) {
-                self.messages.remove(idx);
-            } else {
-                // All messages are pinned — can't prune further
-                break;
-            }
+        let total = self.total_tokens();
+        if total <= self.max_tokens {
+            return;
         }
+        let mut budget = total - self.max_tokens; // tokens we need to shed
+        self.messages.retain(|m| {
+            if budget == 0 || m.pinned {
+                return true;
+            }
+            budget = budget.saturating_sub(m.tokens);
+            false
+        });
     }
 
     /// Clear all messages.

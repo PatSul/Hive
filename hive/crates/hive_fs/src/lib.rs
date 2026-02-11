@@ -7,5 +7,5 @@ pub mod watcher;
 
 pub use files::{DirEntry, FileService, FileStats};
 pub use git::{FileStatusType, GitFileStatus, GitLogEntry, GitService};
-pub use search::{SearchOptions, SearchResult, SearchService};
+pub use search::{SearchOptions, SearchResult, SearchService, is_likely_binary};
 pub use watcher::{FileWatcher, WatchEvent};

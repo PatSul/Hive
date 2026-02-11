@@ -117,21 +117,23 @@ mod tests {
 
     #[test]
     fn test_translate_create_event() {
+        let fake_path = std::env::temp_dir().join("new.txt");
         let event = Event {
             kind: EventKind::Create(notify::event::CreateKind::File),
-            paths: vec![PathBuf::from("/tmp/new.txt")],
+            paths: vec![fake_path.clone()],
             attrs: Default::default(),
         };
         let translated = translate_event(&event);
         assert_eq!(translated.len(), 1);
-        assert!(matches!(&translated[0], WatchEvent::Created(p) if p == Path::new("/tmp/new.txt")));
+        assert!(matches!(&translated[0], WatchEvent::Created(p) if p == &fake_path));
     }
 
     #[test]
     fn test_translate_delete_event() {
+        let fake_path = std::env::temp_dir().join("gone.txt");
         let event = Event {
             kind: EventKind::Remove(notify::event::RemoveKind::File),
-            paths: vec![PathBuf::from("/tmp/gone.txt")],
+            paths: vec![fake_path],
             attrs: Default::default(),
         };
         let translated = translate_event(&event);
@@ -141,20 +143,22 @@ mod tests {
 
     #[test]
     fn test_translate_rename_event() {
+        let old_path = std::env::temp_dir().join("old.txt");
+        let new_path = std::env::temp_dir().join("new.txt");
         let event = Event {
             kind: EventKind::Modify(notify::event::ModifyKind::Name(
                 notify::event::RenameMode::Both,
             )),
             paths: vec![
-                PathBuf::from("/tmp/old.txt"),
-                PathBuf::from("/tmp/new.txt"),
+                old_path.clone(),
+                new_path.clone(),
             ],
             attrs: Default::default(),
         };
         let translated = translate_event(&event);
         assert_eq!(translated.len(), 1);
         assert!(matches!(&translated[0], WatchEvent::Renamed { from, to }
-            if from == Path::new("/tmp/old.txt") && to == Path::new("/tmp/new.txt")
+            if from == &old_path && to == &new_path
         ));
     }
 }

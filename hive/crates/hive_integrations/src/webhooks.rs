@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::net::IpAddr;
 use tracing::{debug, warn};
+use url::Url;
 use uuid::Uuid;
 
 /// A registered webhook that receives event notifications.
@@ -35,6 +37,48 @@ impl Webhook {
     }
 }
 
+/// Validate that a webhook URL is safe to deliver to.
+///
+/// Enforces HTTPS and blocks private/internal IP addresses to prevent SSRF.
+fn validate_webhook_url(raw: &str) -> Result<(), String> {
+    let parsed = Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
+
+    if parsed.scheme() != "https" {
+        return Err("Webhook URLs must use HTTPS".into());
+    }
+
+    if let Some(host) = parsed.host_str() {
+        let blocked_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"];
+        if blocked_hosts.contains(&host) {
+            return Err(format!("Webhook URL blocked: {host} is a local address"));
+        }
+
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            match ip {
+                IpAddr::V4(v4)
+                    if v4.is_private()
+                        || v4.is_loopback()
+                        || v4.is_link_local()
+                        || v4.is_broadcast()
+                        || v4.is_unspecified() =>
+                {
+                    return Err(format!(
+                        "Webhook URL blocked: {ip} is a private/reserved address"
+                    ));
+                }
+                IpAddr::V6(v6) if v6.is_loopback() || v6.is_unspecified() => {
+                    return Err(format!(
+                        "Webhook URL blocked: {ip} is a private/reserved address"
+                    ));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Registry that manages webhook subscriptions and dispatches events.
 pub struct WebhookRegistry {
     webhooks: Vec<Webhook>,
@@ -51,11 +95,15 @@ impl WebhookRegistry {
     }
 
     /// Register a new webhook and return its ID.
-    pub fn register(&mut self, webhook: Webhook) -> String {
+    ///
+    /// Returns an error if the webhook URL fails validation (non-HTTPS or
+    /// targets a private/local address).
+    pub fn register(&mut self, webhook: Webhook) -> Result<String, String> {
+        validate_webhook_url(&webhook.url)?;
         let id = webhook.id.clone();
         debug!(id = %id, name = %webhook.name, "registering webhook");
         self.webhooks.push(webhook);
-        id
+        Ok(id)
     }
 
     /// Unregister a webhook by ID. Returns `true` if it was found and removed.
@@ -205,7 +253,7 @@ mod tests {
         assert!(registry.is_empty());
 
         let wh = sample_webhook("deploy", vec!["deploy"]);
-        let id = registry.register(wh);
+        let id = registry.register(wh).unwrap();
 
         assert_eq!(registry.len(), 1);
         assert!(!registry.is_empty());
@@ -219,7 +267,7 @@ mod tests {
     fn test_unregister() {
         let mut registry = WebhookRegistry::new();
         let wh = sample_webhook("temp", vec!["test"]);
-        let id = registry.register(wh);
+        let id = registry.register(wh).unwrap();
         assert_eq!(registry.len(), 1);
 
         assert!(registry.unregister(&id));
@@ -233,7 +281,7 @@ mod tests {
     fn test_get_by_id() {
         let mut registry = WebhookRegistry::new();
         let wh = sample_webhook("finder", vec!["event"]);
-        let id = registry.register(wh);
+        let id = registry.register(wh).unwrap();
 
         let found = registry.get(&id);
         assert!(found.is_some());
@@ -258,9 +306,9 @@ mod tests {
     #[test]
     fn test_multiple_webhooks_different_events() {
         let mut registry = WebhookRegistry::new();
-        registry.register(sample_webhook("a", vec!["push"]));
-        registry.register(sample_webhook("b", vec!["deploy"]));
-        registry.register(sample_webhook("c", vec!["push", "deploy"]));
+        registry.register(sample_webhook("a", vec!["push"])).unwrap();
+        registry.register(sample_webhook("b", vec!["deploy"])).unwrap();
+        registry.register(sample_webhook("c", vec!["push", "deploy"])).unwrap();
 
         assert_eq!(registry.len(), 3);
 
@@ -286,5 +334,62 @@ mod tests {
             .trigger("unknown_event", &serde_json::json!({}))
             .await;
         assert_eq!(count, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // URL validation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_rejects_http() {
+        let wh = Webhook::new("bad", "http://example.com/hook", vec!["push".into()]);
+        let mut registry = WebhookRegistry::new();
+        let err = registry.register(wh).unwrap_err();
+        assert!(err.contains("HTTPS"), "expected HTTPS error, got: {err}");
+    }
+
+    #[test]
+    fn test_validate_rejects_localhost() {
+        let wh = Webhook::new("bad", "https://localhost/hook", vec!["push".into()]);
+        let mut registry = WebhookRegistry::new();
+        let err = registry.register(wh).unwrap_err();
+        assert!(err.contains("local address"), "expected local address error, got: {err}");
+    }
+
+    #[test]
+    fn test_validate_rejects_private_ip() {
+        for url in [
+            "https://127.0.0.1/hook",
+            "https://10.0.0.1/hook",
+            "https://192.168.1.1/hook",
+            "https://172.16.0.1/hook",
+        ] {
+            let wh = Webhook::new("bad", url, vec!["push".into()]);
+            let mut registry = WebhookRegistry::new();
+            let result = registry.register(wh);
+            assert!(result.is_err(), "expected rejection for {url}");
+        }
+    }
+
+    #[test]
+    fn test_validate_rejects_link_local() {
+        let wh = Webhook::new("bad", "https://169.254.169.254/hook", vec!["push".into()]);
+        let mut registry = WebhookRegistry::new();
+        assert!(registry.register(wh).is_err());
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_https() {
+        let wh = Webhook::new("good", "https://hooks.example.com/event", vec!["push".into()]);
+        let mut registry = WebhookRegistry::new();
+        assert!(registry.register(wh).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_invalid_url() {
+        let wh = Webhook::new("bad", "not a url", vec!["push".into()]);
+        let mut registry = WebhookRegistry::new();
+        let err = registry.register(wh).unwrap_err();
+        assert!(err.contains("Invalid URL"), "expected Invalid URL error, got: {err}");
     }
 }

@@ -10,8 +10,28 @@ pub fn show_toast(title: &str, body: &str) {
     }
     #[cfg(not(windows))]
     {
+        // TODO: Add cross-platform notifications using the `notify-rust` crate
+        // (https://crates.io/crates/notify-rust), which supports Linux (via
+        // D-Bus/libnotify) and macOS (via NSUserNotification / UNUserNotification).
+        //
+        // Implementation would be:
+        //   use notify_rust::Notification;
+        //   if let Err(e) = Notification::new()
+        //       .summary(title)
+        //       .body(body)
+        //       .appname("Hive")
+        //       .show()
+        //   {
+        //       tracing::warn!("Failed to show notification: {e}");
+        //   }
+        //
+        // Steps to enable:
+        //   1. Add `notify-rust = "4"` to [workspace.dependencies] in hive/Cargo.toml
+        //   2. Add `notify-rust.workspace = true` under [target.'cfg(not(windows))'.dependencies]
+        //      in hive/crates/hive_assistant/Cargo.toml
+        //   3. Replace this block with the implementation above
         let _ = (title, body);
-        tracing::debug!("OS notifications not implemented for this platform");
+        tracing::debug!("OS notifications not yet implemented for this platform (see TODO in os_notifications.rs)");
     }
 }
 

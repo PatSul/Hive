@@ -719,11 +719,13 @@ mod tests {
     fn automation_screenshot_returns_path() {
         let mut auto = BrowserAutomation::new(BrowserPoolConfig::default());
         let id = auto.pool_mut().acquire().expect("acquire");
+        let shot_path = std::env::temp_dir().join("shot.png");
+        let shot_str = shot_path.to_string_lossy().to_string();
         let result = auto
-            .screenshot(&id, "/tmp/shot.png")
+            .screenshot(&id, &shot_str)
             .expect("screenshot");
         assert!(result.success);
-        assert_eq!(result.value.as_deref(), Some("/tmp/shot.png"));
+        assert_eq!(result.value.as_deref(), Some(shot_str.as_str()));
     }
 
     #[test]

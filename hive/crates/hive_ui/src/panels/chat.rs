@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use gpui::*;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
 
@@ -5,6 +7,295 @@ use hive_ai::MessageRole;
 use crate::chat_service;
 use crate::theme::HiveTheme;
 use crate::welcome::WelcomeScreen;
+
+// ---------------------------------------------------------------------------
+// Markdown cache — parsed AST intermediate representation
+// ---------------------------------------------------------------------------
+
+/// Owned intermediate representation of a parsed markdown document.
+/// Avoids re-parsing pulldown_cmark on every render frame.
+type MarkdownIR = Vec<MarkdownBlock>;
+
+/// A single block-level element in the parsed markdown.
+#[derive(Clone)]
+enum MarkdownBlock {
+    Paragraph(Vec<InlineSegment>),
+    Heading { level: u8, segments: Vec<InlineSegment> },
+    CodeBlock { lang: String, code: String },
+    List(Vec<Vec<InlineSegment>>),
+    HorizontalRule,
+}
+
+/// An inline segment within a paragraph, heading, or list item.
+#[derive(Clone)]
+enum InlineSegment {
+    Text { content: String, bold: bool, italic: bool },
+    InlineCode(String),
+}
+
+/// Cache of parsed markdown keyed by a simple content hash.
+///
+/// Since message content is immutable once finalized, the cache grows at most
+/// to the number of distinct messages ever displayed. During streaming, the
+/// last message keeps changing, so its entry is evicted and re-inserted each
+/// time the content changes.
+pub struct MarkdownCache {
+    entries: HashMap<u64, MarkdownIR>,
+}
+
+impl MarkdownCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Clear the entire cache (e.g. when switching conversations).
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Get or parse the markdown IR for the given source content.
+    fn get_or_parse(&mut self, source: &str) -> &MarkdownIR {
+        let hash = Self::hash_content(source);
+        self.entries.entry(hash).or_insert_with(|| Self::parse_to_ir(source))
+    }
+
+    fn hash_content(source: &str) -> u64 {
+        // FNV-1a for speed — good enough for a display cache key.
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for byte in source.as_bytes() {
+            hash ^= *byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash
+    }
+
+    fn parse_to_ir(source: &str) -> MarkdownIR {
+        let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES;
+        let parser = Parser::new_ext(source, options);
+
+        let mut blocks: Vec<MarkdownBlock> = Vec::new();
+
+        // State tracking
+        let mut in_code_block = false;
+        let mut code_block_content = String::new();
+        let mut code_block_lang = String::new();
+        let mut bold_active = false;
+        let mut emphasis_active = false;
+        let mut _in_heading = false;
+        let mut heading_level: u8 = 0;
+        let mut inline_segments: Vec<InlineSegment> = Vec::new();
+        let mut _in_list = false;
+        let mut list_items: Vec<Vec<InlineSegment>> = Vec::new();
+        let mut list_item_segments: Vec<InlineSegment> = Vec::new();
+        let mut in_list_item = false;
+
+        for event in parser {
+            match event {
+                // -- Code blocks --
+                Event::Start(Tag::CodeBlock(kind)) => {
+                    if !inline_segments.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph(
+                            std::mem::take(&mut inline_segments),
+                        ));
+                    }
+                    in_code_block = true;
+                    code_block_content.clear();
+                    code_block_lang = match kind {
+                        CodeBlockKind::Fenced(lang) => lang.to_string(),
+                        CodeBlockKind::Indented => String::new(),
+                    };
+                }
+                Event::End(TagEnd::CodeBlock) => {
+                    in_code_block = false;
+                    blocks.push(MarkdownBlock::CodeBlock {
+                        lang: std::mem::take(&mut code_block_lang),
+                        code: std::mem::take(&mut code_block_content),
+                    });
+                }
+
+                // -- Headings --
+                Event::Start(Tag::Heading { level, .. }) => {
+                    if !inline_segments.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph(
+                            std::mem::take(&mut inline_segments),
+                        ));
+                    }
+                    _in_heading = true;
+                    heading_level = level as u8;
+                }
+                Event::End(TagEnd::Heading(_)) => {
+                    _in_heading = false;
+                    blocks.push(MarkdownBlock::Heading {
+                        level: heading_level,
+                        segments: std::mem::take(&mut inline_segments),
+                    });
+                    heading_level = 0;
+                }
+
+                // -- Paragraphs --
+                Event::Start(Tag::Paragraph) => {}
+                Event::End(TagEnd::Paragraph) => {
+                    if !inline_segments.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph(
+                            std::mem::take(&mut inline_segments),
+                        ));
+                    }
+                }
+
+                // -- Bold / Emphasis --
+                Event::Start(Tag::Strong) => { bold_active = true; }
+                Event::End(TagEnd::Strong) => { bold_active = false; }
+                Event::Start(Tag::Emphasis) => { emphasis_active = true; }
+                Event::End(TagEnd::Emphasis) => { emphasis_active = false; }
+
+                // -- Lists --
+                Event::Start(Tag::List(_)) => {
+                    if !inline_segments.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph(
+                            std::mem::take(&mut inline_segments),
+                        ));
+                    }
+                    _in_list = true;
+                    list_items.clear();
+                }
+                Event::End(TagEnd::List(_)) => {
+                    if in_list_item && !list_item_segments.is_empty() {
+                        list_items.push(std::mem::take(&mut list_item_segments));
+                        in_list_item = false;
+                    }
+                    _in_list = false;
+                    blocks.push(MarkdownBlock::List(std::mem::take(&mut list_items)));
+                }
+                Event::Start(Tag::Item) => {
+                    if in_list_item && !list_item_segments.is_empty() {
+                        list_items.push(std::mem::take(&mut list_item_segments));
+                    }
+                    in_list_item = true;
+                    list_item_segments.clear();
+                }
+                Event::End(TagEnd::Item) => {
+                    if !list_item_segments.is_empty() {
+                        list_items.push(std::mem::take(&mut list_item_segments));
+                    }
+                    in_list_item = false;
+                }
+
+                // -- Inline code --
+                Event::Code(text) => {
+                    let seg = InlineSegment::InlineCode(text.to_string());
+                    if in_list_item {
+                        list_item_segments.push(seg);
+                    } else {
+                        inline_segments.push(seg);
+                    }
+                }
+
+                // -- Text --
+                Event::Text(text) => {
+                    if in_code_block {
+                        code_block_content.push_str(&text);
+                    } else {
+                        let seg = InlineSegment::Text {
+                            content: text.to_string(),
+                            bold: bold_active,
+                            italic: emphasis_active,
+                        };
+                        if in_list_item {
+                            list_item_segments.push(seg);
+                        } else {
+                            inline_segments.push(seg);
+                        }
+                    }
+                }
+
+                // -- Breaks --
+                Event::SoftBreak | Event::HardBreak => {
+                    if in_code_block {
+                        code_block_content.push('\n');
+                    }
+                }
+
+                // -- Horizontal rule --
+                Event::Rule => {
+                    if !inline_segments.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph(
+                            std::mem::take(&mut inline_segments),
+                        ));
+                    }
+                    blocks.push(MarkdownBlock::HorizontalRule);
+                }
+
+                _ => {}
+            }
+        }
+
+        // Flush remaining inline segments
+        if !inline_segments.is_empty() {
+            blocks.push(MarkdownBlock::Paragraph(inline_segments));
+        }
+
+        blocks
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cached chat data — avoids per-frame string cloning from ChatService
+// ---------------------------------------------------------------------------
+
+/// Cached display state derived from `ChatService`. Stored on the workspace
+/// and rebuilt only when the service's generation counter advances.
+pub struct CachedChatData {
+    pub display_messages: Vec<DisplayMessage>,
+    pub total_cost: f64,
+    pub total_tokens: u32,
+    generation: u64,
+    pub markdown_cache: MarkdownCache,
+}
+
+impl CachedChatData {
+    pub fn new() -> Self {
+        Self {
+            display_messages: Vec::new(),
+            total_cost: 0.0,
+            total_tokens: 0,
+            generation: u64::MAX, // Force rebuild on first access
+            markdown_cache: MarkdownCache::new(),
+        }
+    }
+
+    /// Sync cached display messages from `ChatService` data. Returns `true`
+    /// if the cache was rebuilt (i.e. the generation changed).
+    pub fn sync_from_service(&mut self, svc: &chat_service::ChatService) -> bool {
+        let svc_gen = svc.generation();
+        if svc_gen == self.generation {
+            return false;
+        }
+
+        self.display_messages.clear();
+        self.total_cost = 0.0;
+        self.total_tokens = 0;
+
+        for msg in svc.messages() {
+            // Skip empty placeholder assistant messages
+            if msg.role == chat_service::MessageRole::Assistant && msg.content.is_empty() {
+                continue;
+            }
+            let display_msg = convert_service_message(msg);
+            if let Some(c) = display_msg.cost {
+                self.total_cost += c;
+            }
+            if let Some(t) = display_msg.tokens {
+                self.total_tokens += t;
+            }
+            self.display_messages.push(display_msg);
+        }
+
+        self.generation = svc_gen;
+        true
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Display types
@@ -188,10 +479,76 @@ impl ChatPanel {
         content.into_any_element()
     }
 
+    /// Render the chat panel from pre-cached display data.
+    ///
+    /// Uses `CachedChatData` (synced from `ChatService` via
+    /// [`CachedChatData::sync_from_service`]) to avoid per-frame string
+    /// cloning, and a `MarkdownCache` inside `CachedChatData` to avoid
+    /// re-parsing markdown ASTs for immutable messages.
+    pub fn render_cached(
+        cached: &mut CachedChatData,
+        streaming_content: &str,
+        is_streaming: bool,
+        current_model: &str,
+        theme: &HiveTheme,
+    ) -> AnyElement {
+        if cached.display_messages.is_empty() && !is_streaming {
+            return div()
+                .flex_1()
+                .size_full()
+                .child(WelcomeScreen::render(theme))
+                .into_any_element();
+        }
+
+        let mut content = div()
+            .id("chat-messages")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .size_full()
+            .overflow_y_scroll()
+            .p(theme.space_4)
+            .gap(theme.space_3);
+
+        // Render cached display messages
+        for msg in &cached.display_messages {
+            content = content.child(render_message_bubble_cached(
+                msg,
+                &mut cached.markdown_cache,
+                theme,
+            ));
+        }
+
+        // Streaming bubble (always re-rendered since content changes per frame)
+        if is_streaming {
+            content = content.child(render_streaming_bubble_cached(
+                streaming_content,
+                None,
+                current_model,
+                &mut cached.markdown_cache,
+                theme,
+            ));
+        }
+
+        // Session totals
+        if cached.total_cost > 0.0 || cached.total_tokens > 0 {
+            content = content.child(render_session_totals(
+                cached.total_cost,
+                cached.total_tokens,
+                theme,
+            ));
+        }
+
+        content.into_any_element()
+    }
+
     /// Render the chat panel from ChatService data (used by the workspace).
     ///
     /// Converts `ChatService::ChatMessage` → `DisplayMessage` on the fly and
     /// renders using the same bubble/markdown infrastructure.
+    ///
+    /// **Note:** Prefer [`render_cached`] for production use. This method
+    /// re-converts messages and re-parses markdown on every call.
     pub fn render_from_service(
         messages: &[chat_service::ChatMessage],
         streaming_content: &str,
@@ -380,9 +737,164 @@ fn render_message_bubble(msg: &DisplayMessage, theme: &HiveTheme) -> AnyElement 
     row.child(bubble).into_any_element()
 }
 
+/// Cached variant of `render_message_bubble` — renders markdown from pre-parsed IR.
+fn render_message_bubble_cached(
+    msg: &DisplayMessage,
+    md_cache: &mut MarkdownCache,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let is_user = msg.role == MessageRole::User;
+    let is_error = msg.role == MessageRole::Error;
+
+    let bg = match msg.role {
+        MessageRole::User => theme.bg_tertiary,
+        MessageRole::Assistant | MessageRole::System => theme.bg_surface,
+        MessageRole::Error => theme.accent_red,
+    };
+
+    let role_label = match msg.role {
+        MessageRole::User => "You",
+        MessageRole::Assistant => "Hive",
+        MessageRole::System => "System",
+        MessageRole::Error => "Error",
+    };
+
+    let role_color = match msg.role {
+        MessageRole::User => theme.accent_powder,
+        MessageRole::Assistant => theme.accent_cyan,
+        MessageRole::System => theme.accent_yellow,
+        MessageRole::Error => theme.text_on_accent,
+    };
+
+    let text_color = if is_error {
+        theme.text_on_accent
+    } else {
+        theme.text_primary
+    };
+
+    let ts = msg.timestamp.format("%H:%M").to_string();
+
+    let mut bubble = div()
+        .max_w(px(720.0))
+        .p(theme.space_3)
+        .rounded(theme.radius_md)
+        .bg(bg);
+
+    let mut header = div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .mb(theme.space_1)
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(role_color)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(role_label),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(ts),
+        );
+
+    if let Some(ref model) = msg.model {
+        header = header.child(render_model_badge(model, theme));
+    }
+
+    if let Some(cost) = msg.cost {
+        if cost > 0.0 {
+            header = header.child(render_cost_badge(cost, msg.tokens, theme));
+        }
+    }
+
+    bubble = bubble.child(header);
+
+    if let Some(ref thinking) = msg.thinking {
+        bubble = bubble.child(render_thinking_section(thinking, msg.show_thinking, theme));
+    }
+
+    // Content — cached markdown parse for assistant/system, plain for user
+    let content_el = if is_user {
+        div()
+            .text_size(theme.font_size_base)
+            .text_color(text_color)
+            .child(msg.content.clone())
+            .into_any_element()
+    } else {
+        render_markdown_cached(&msg.content, md_cache, theme)
+    };
+    bubble = bubble.child(content_el);
+
+    let row = div().flex().w_full();
+    let row = if is_user {
+        row.flex_row_reverse()
+    } else {
+        row.flex_row()
+    };
+    row.child(bubble).into_any_element()
+}
+
 // ---------------------------------------------------------------------------
 // Streaming bubble
 // ---------------------------------------------------------------------------
+
+/// Cached variant of `render_streaming_bubble`.
+fn render_streaming_bubble_cached(
+    content: &str,
+    thinking: Option<&str>,
+    model: &str,
+    md_cache: &mut MarkdownCache,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let mut bubble = div()
+        .max_w(px(720.0))
+        .p(theme.space_3)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.accent_cyan);
+
+    let header = div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .mb(theme.space_1)
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.accent_cyan)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("Hive"),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.accent_cyan)
+                .child("Generating..."),
+        )
+        .child(render_model_badge(model, theme));
+
+    bubble = bubble.child(header);
+
+    if let Some(thinking_text) = thinking {
+        bubble = bubble.child(render_thinking_section(thinking_text, true, theme));
+    }
+
+    if !content.is_empty() {
+        bubble = bubble.child(render_markdown_cached(content, md_cache, theme));
+    } else {
+        bubble = bubble.child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_muted)
+                .child("..."),
+        );
+    }
+
+    div().flex().w_full().child(bubble).into_any_element()
+}
 
 fn render_streaming_bubble(
     content: &str,
@@ -561,6 +1073,148 @@ fn render_session_totals(cost: f64, tokens: u32, theme: &HiveTheme) -> AnyElemen
 // ---------------------------------------------------------------------------
 // Markdown renderer
 // ---------------------------------------------------------------------------
+
+/// Render markdown from cached IR (avoids re-parsing the AST every frame).
+fn render_markdown_cached(
+    source: &str,
+    md_cache: &mut MarkdownCache,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let ir = md_cache.get_or_parse(source);
+    render_markdown_ir(ir, theme)
+}
+
+/// Convert a pre-parsed `MarkdownIR` into GPUI elements.
+fn render_markdown_ir(ir: &MarkdownIR, theme: &HiveTheme) -> AnyElement {
+    let mut container_children: Vec<AnyElement> = Vec::with_capacity(ir.len());
+
+    for block in ir {
+        match block {
+            MarkdownBlock::Paragraph(segments) => {
+                let children: Vec<AnyElement> = segments
+                    .iter()
+                    .map(|seg| render_inline_segment(seg, theme))
+                    .collect();
+                if !children.is_empty() {
+                    container_children.push(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(0.0))
+                            .text_size(theme.font_size_base)
+                            .children(children)
+                            .into_any_element(),
+                    );
+                }
+            }
+            MarkdownBlock::Heading { level, segments } => {
+                let size = match level {
+                    1 => theme.font_size_xl,
+                    2 => theme.font_size_lg,
+                    _ => theme.font_size_base,
+                };
+                let children: Vec<AnyElement> = segments
+                    .iter()
+                    .map(|seg| render_inline_segment(seg, theme))
+                    .collect();
+                container_children.push(
+                    div()
+                        .mt(theme.space_2)
+                        .mb(theme.space_1)
+                        .text_size(size)
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(theme.text_primary)
+                        .children(children)
+                        .into_any_element(),
+                );
+            }
+            MarkdownBlock::CodeBlock { lang, code } => {
+                container_children.push(render_code_block(code, lang, theme));
+            }
+            MarkdownBlock::List(items) => {
+                let item_elements: Vec<AnyElement> = items
+                    .iter()
+                    .map(|segments| {
+                        let children: Vec<AnyElement> = segments
+                            .iter()
+                            .map(|seg| render_inline_segment(seg, theme))
+                            .collect();
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(0.0))
+                            .text_size(theme.font_size_base)
+                            .child(
+                                div()
+                                    .text_color(theme.text_muted)
+                                    .mr(theme.space_1)
+                                    .child("\u{2022}"),
+                            )
+                            .children(children)
+                            .into_any_element()
+                    })
+                    .collect();
+                container_children.push(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(theme.space_1)
+                        .pl(theme.space_3)
+                        .my(theme.space_1)
+                        .children(item_elements)
+                        .into_any_element(),
+                );
+            }
+            MarkdownBlock::HorizontalRule => {
+                container_children.push(
+                    div()
+                        .w_full()
+                        .h(px(1.0))
+                        .my(theme.space_2)
+                        .bg(theme.border)
+                        .into_any_element(),
+                );
+            }
+        }
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_1)
+        .text_color(theme.text_primary)
+        .children(container_children)
+        .into_any_element()
+}
+
+/// Render a single inline segment to a GPUI element.
+fn render_inline_segment(seg: &InlineSegment, theme: &HiveTheme) -> AnyElement {
+    match seg {
+        InlineSegment::Text { content, bold, italic } => {
+            let mut el = div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_primary);
+            if *bold {
+                el = el.font_weight(FontWeight::BOLD);
+            }
+            if *italic {
+                el = el.italic();
+            }
+            el.child(content.clone()).into_any_element()
+        }
+        InlineSegment::InlineCode(text) => {
+            div()
+                .px(theme.space_1)
+                .rounded(theme.radius_sm)
+                .bg(theme.bg_tertiary)
+                .text_size(theme.font_size_sm)
+                .font_family(theme.font_mono.clone())
+                .text_color(theme.accent_powder)
+                .child(text.clone())
+                .into_any_element()
+        }
+    }
+}
 
 /// Render a markdown string into GPUI elements.
 fn render_markdown(source: &str, theme: &HiveTheme) -> AnyElement {

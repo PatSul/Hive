@@ -18,7 +18,7 @@ use crate::globals::{
 use crate::panels::{
     agents::{AgentsPanelData, AgentsPanel},
     assistant::{AssistantPanelData, AssistantPanel},
-    chat::ChatPanel,
+    chat::{CachedChatData, ChatPanel},
     costs::{CostData, CostsPanel},
     files::{FilesData, FilesPanel},
     help::HelpPanel,
@@ -202,6 +202,10 @@ pub struct HiveWorkspace {
     /// The conversation ID at the time of the last session save. Used to
     /// detect when a new conversation was auto-saved by `finalize_stream`.
     last_saved_conversation_id: Option<String>,
+    /// Cached display data for the chat panel. Rebuilt only when the
+    /// `ChatService` generation counter changes, avoiding per-frame string
+    /// cloning and enabling markdown parse caching.
+    cached_chat_data: CachedChatData,
 }
 
 impl HiveWorkspace {
@@ -364,6 +368,7 @@ impl HiveWorkspace {
             _stream_task: None,
             session_dirty: false,
             last_saved_conversation_id: session.active_conversation_id.clone(),
+            cached_chat_data: CachedChatData::new(),
         }
     }
 
@@ -751,10 +756,13 @@ impl HiveWorkspace {
 
     // -- Rendering -----------------------------------------------------------
 
-    fn render_active_panel(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn render_active_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.sidebar.active_panel == Panel::Chat {
+            return self.render_chat_cached(cx);
+        }
         let theme = &self.theme;
         match self.sidebar.active_panel {
-            Panel::Chat => self.render_chat_from_service(cx).into_any_element(),
+            Panel::Chat => unreachable!(),
             Panel::History => HistoryPanel::render(&self.history_data, theme).into_any_element(),
             Panel::Files => FilesPanel::render(&self.files_data, theme).into_any_element(),
             Panel::Kanban => KanbanPanel::render(&self.kanban_data, theme).into_any_element(),
@@ -775,14 +783,26 @@ impl HiveWorkspace {
         }
     }
 
-    /// Render the chat panel by reading data from ChatService entity.
-    fn render_chat_from_service(&self, cx: &Context<Self>) -> AnyElement {
+    /// Render the chat panel using cached display data.
+    ///
+    /// Syncs `CachedChatData` from `ChatService` only when the generation
+    /// counter has changed, then renders from the cached `DisplayMessage`
+    /// vec and pre-parsed markdown IR.
+    fn render_chat_cached(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let svc = self.chat_service.read(cx);
-        ChatPanel::render_from_service(
-            svc.messages(),
-            svc.streaming_content(),
-            svc.is_streaming(),
-            svc.current_model(),
+
+        // Rebuild display messages only when the service has mutated.
+        self.cached_chat_data.sync_from_service(svc);
+
+        let streaming_content = svc.streaming_content().to_string();
+        let is_streaming = svc.is_streaming();
+        let current_model = svc.current_model().to_string();
+
+        ChatPanel::render_cached(
+            &mut self.cached_chat_data,
+            &streaming_content,
+            is_streaming,
+            &current_model,
             &self.theme,
         )
     }
@@ -799,6 +819,7 @@ impl HiveWorkspace {
         self.chat_service.update(cx, |svc, _cx| {
             svc.new_conversation();
         });
+        self.cached_chat_data.markdown_cache.clear();
         self.refresh_history();
         self.sidebar.active_panel = Panel::Chat;
         self.session_dirty = true;
@@ -815,6 +836,7 @@ impl HiveWorkspace {
         self.chat_service.update(cx, |svc, _cx| {
             svc.clear();
         });
+        self.cached_chat_data.markdown_cache.clear();
         cx.notify();
     }
 
@@ -1070,6 +1092,26 @@ impl HiveWorkspace {
             self.files_data = FilesData::from_path(&new_path);
         } else {
             let file_path = self.files_data.current_path.join(&action.name);
+            // Security: canonicalize and validate path stays within current_path
+            // to prevent path traversal before passing to OS shell commands.
+            let file_path = match file_path.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Files: cannot resolve path: {e}");
+                    return;
+                }
+            };
+            let base = match self.files_data.current_path.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Files: cannot resolve base path: {e}");
+                    return;
+                }
+            };
+            if !file_path.starts_with(&base) {
+                error!("Files: path traversal blocked: {}", file_path.display());
+                return;
+            }
             info!("Files: open file {}", file_path.display());
             self.files_data.selected_file = Some(action.name.clone());
             // Open in default system editor
@@ -1090,6 +1132,26 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         let target = self.files_data.current_path.join(&action.name);
+        // Security: canonicalize and validate target stays within current_path
+        // to prevent path traversal attacks (e.g. action.name = "../../etc").
+        let target = match target.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Files: cannot resolve path: {e}");
+                return;
+            }
+        };
+        let base = match self.files_data.current_path.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Files: cannot resolve base path: {e}");
+                return;
+            }
+        };
+        if !target.starts_with(&base) {
+            error!("Files: path traversal blocked: {}", target.display());
+            return;
+        }
         info!("Files: delete {}", target.display());
         let result = if target.is_dir() {
             std::fs::remove_dir_all(&target)
@@ -1159,6 +1221,7 @@ impl HiveWorkspace {
         });
         match result {
             Ok(()) => {
+                self.cached_chat_data.markdown_cache.clear();
                 self.sidebar.active_panel = Panel::Chat;
                 self.session_dirty = true;
             }
@@ -1302,6 +1365,7 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Review: stage all");
+        // Security: bypasses SecurityGateway — args are hardcoded literals, no user input.
         let _ = std::process::Command::new("git").args(["add", "-A"]).output();
         self.review_data = ReviewData::from_cwd();
         cx.notify();
@@ -1314,6 +1378,7 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Review: unstage all");
+        // Security: bypasses SecurityGateway — args are hardcoded literals, no user input.
         let _ = std::process::Command::new("git").args(["reset", "HEAD"]).output();
         self.review_data = ReviewData::from_cwd();
         cx.notify();
@@ -1336,6 +1401,7 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Review: discard all");
+        // Security: bypasses SecurityGateway — args are hardcoded literals, no user input.
         let _ = std::process::Command::new("git").args(["checkout", "--", "."]).output();
         self.review_data = ReviewData::from_cwd();
         cx.notify();
@@ -1522,6 +1588,9 @@ impl Render for HiveWorkspace {
             }
         }
 
+        // Render the active panel first (may require &mut self for cache updates).
+        let active_panel_el = self.render_active_panel(cx);
+
         let theme = &self.theme;
         let active_panel = self.sidebar.active_panel;
         let chat_input = self.chat_input.clone();
@@ -1612,7 +1681,7 @@ impl Render for HiveWorkspace {
                             .flex_col()
                             .flex_1()
                             .overflow_hidden()
-                            .child(self.render_active_panel(cx))
+                            .child(active_panel_el)
                             // Chat input (only shown on Chat panel)
                             .when(active_panel == Panel::Chat, |el: Div| {
                                 el.child(chat_input)

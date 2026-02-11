@@ -158,6 +158,10 @@ pub struct ChatService {
     /// Last time we notified the UI during streaming. Used to throttle
     /// re-renders to ~15 fps instead of per-token.
     last_stream_notify: std::time::Instant,
+    /// Monotonically increasing counter bumped on every mutation to the
+    /// message list. Used by the UI to detect when cached display messages
+    /// need to be rebuilt, avoiding per-frame string cloning.
+    generation: u64,
 }
 
 impl ChatService {
@@ -171,6 +175,7 @@ impl ChatService {
             _stream_task: None,
             conversation_id: None,
             last_stream_notify: std::time::Instant::now(),
+            generation: 0,
         }
     }
 
@@ -201,6 +206,12 @@ impl ChatService {
         self.conversation_id.as_deref()
     }
 
+    /// Returns the current generation counter. Incremented on every mutation
+    /// to the message list, allowing the UI to detect stale caches.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     // -- Mutators -----------------------------------------------------------
 
     pub fn set_model(&mut self, model: String) {
@@ -213,6 +224,7 @@ impl ChatService {
         self.is_streaming = false;
         self.error = None;
         self._stream_task = None;
+        self.generation += 1;
     }
 
     // -- Persistence --------------------------------------------------------
@@ -323,6 +335,7 @@ impl ChatService {
         self.is_streaming = false;
         self.error = None;
         self._stream_task = None;
+        self.generation += 1;
 
         info!(
             "ChatService: loaded conversation {} ({} messages)",
@@ -378,6 +391,8 @@ impl ChatService {
         // 3. Add a placeholder assistant message that will be finalized later.
         let placeholder = ChatMessage::assistant_placeholder();
         self.messages.push(placeholder);
+
+        self.generation += 1;
 
         info!(
             "ChatService: user message queued, awaiting stream attachment (model={})",
@@ -535,6 +550,7 @@ impl ChatService {
         self.streaming_content.clear();
         self.is_streaming = false;
         self._stream_task = None;
+        self.generation += 1;
 
         info!(
             "ChatService: stream finalized ({} messages, model={})",
@@ -582,6 +598,7 @@ impl ChatService {
 
         // Push an error message so the user sees what happened.
         self.messages.push(ChatMessage::error(msg));
+        self.generation += 1;
         cx.notify();
     }
 }

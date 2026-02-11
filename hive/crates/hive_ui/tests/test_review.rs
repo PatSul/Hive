@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use hive_ui::panels::review::*;
 use hive_fs::git::FileStatusType;
 
@@ -114,7 +112,8 @@ fn format_time_ago_recent() {
 #[test]
 fn non_repo_path_returns_empty() {
     // A path that definitely is not a git repo.
-    let data = ReviewData::from_git(Path::new("/tmp/nonexistent_git_repo_12345"));
+    let bad_path = std::env::temp_dir().join("nonexistent_git_repo_12345");
+    let data = ReviewData::from_git(&bad_path);
     assert!(!data.is_repo);
     assert!(data.files.is_empty());
 }

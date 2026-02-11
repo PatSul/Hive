@@ -291,8 +291,9 @@ impl AiProvider for OllamaProvider {
 
                 // Process complete lines (NDJSON).
                 while let Some(newline_pos) = buffer.find('\n') {
-                    let line: String = buffer.drain(..=newline_pos).collect();
-                    let line = line.trim();
+                    let line = buffer[..newline_pos].trim().to_owned();
+                    buffer.drain(..=newline_pos);
+                    let line = line.as_str();
                     if line.is_empty() {
                         continue;
                     }

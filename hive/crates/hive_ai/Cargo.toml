@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 hive_core = { path = "../hive_core" }
+hive_fs = { path = "../hive_fs" }
 
 async-trait = "0.1"
 once_cell = "1"

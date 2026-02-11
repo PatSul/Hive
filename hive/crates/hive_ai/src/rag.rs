@@ -4,6 +4,7 @@
 //! for feeding relevant code/document snippets into LLM prompts.
 
 use anyhow::{Context, Result};
+use hive_fs::is_likely_binary;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -144,6 +145,12 @@ pub struct RagService {
     index: Vec<DocumentChunk>,
     chunk_size: usize,
     overlap: usize,
+    /// Cached IDF values for all terms across indexed documents.
+    cached_idf: HashMap<String, f32>,
+    /// Cached token sets per document chunk (parallel to `index`).
+    cached_doc_tokens: Vec<HashSet<String>>,
+    /// Cached TF-IDF vectors per document chunk (parallel to `index`).
+    cached_tfidf_vectors: Vec<HashMap<String, f32>>,
 }
 
 impl RagService {
@@ -156,11 +163,21 @@ impl RagService {
             index: Vec::new(),
             chunk_size: chunk_size.max(1),
             overlap: overlap.min(chunk_size.saturating_sub(1)),
+            cached_idf: HashMap::new(),
+            cached_doc_tokens: Vec::new(),
+            cached_tfidf_vectors: Vec::new(),
         }
     }
 
     /// Split a file's content into chunks and add them to the index.
     pub fn index_file(&mut self, path: &str, content: &str) {
+        self.add_file_chunks(path, content);
+        self.rebuild_cache();
+    }
+
+    /// Add chunks for a file without rebuilding the cache.
+    /// Use `rebuild_cache()` after batch additions.
+    fn add_file_chunks(&mut self, path: &str, content: &str) {
         let lines: Vec<&str> = content.lines().collect();
         if lines.is_empty() {
             return;
@@ -196,11 +213,56 @@ impl RagService {
         );
     }
 
+    /// Rebuild cached IDF map, document token sets, and TF-IDF vectors.
+    fn rebuild_cache(&mut self) {
+        // Build token sets for all chunks.
+        self.cached_doc_tokens = self
+            .index
+            .iter()
+            .map(|chunk| tokenize(&chunk.content).into_iter().collect())
+            .collect();
+
+        // Collect all unique terms.
+        let all_terms: HashSet<String> = self
+            .cached_doc_tokens
+            .iter()
+            .flat_map(|s| s.iter().cloned())
+            .collect();
+
+        // Compute IDF for all terms.
+        self.cached_idf = all_terms
+            .iter()
+            .map(|term| {
+                (
+                    term.clone(),
+                    inverse_document_frequency(term, &self.cached_doc_tokens),
+                )
+            })
+            .collect();
+
+        // Compute TF-IDF vector for each chunk.
+        self.cached_tfidf_vectors = self
+            .cached_doc_tokens
+            .iter()
+            .map(|token_set| {
+                let tokens: Vec<String> = token_set.iter().cloned().collect();
+                tfidf_vector(&tokens, &self.cached_idf)
+            })
+            .collect();
+    }
+
     /// Recursively index all text files in a directory.
     ///
     /// Skips binary files and hidden directories. Returns the number of
     /// files successfully indexed.
     pub fn index_directory(&mut self, path: &Path) -> Result<usize> {
+        let count = self.index_directory_inner(path)?;
+        self.rebuild_cache();
+        Ok(count)
+    }
+
+    /// Recursive directory indexing without cache rebuild (called by `index_directory`).
+    fn index_directory_inner(&mut self, path: &Path) -> Result<usize> {
         let mut count = 0;
 
         let entries: Vec<_> = fs::read_dir(path)
@@ -221,7 +283,7 @@ impl RagService {
             }
 
             if entry_path.is_dir() {
-                count += self.index_directory(&entry_path)?;
+                count += self.index_directory_inner(&entry_path)?;
             } else if entry_path.is_file() {
                 // Skip likely binary files
                 if is_likely_binary(&entry_path) {
@@ -229,7 +291,7 @@ impl RagService {
                 }
                 if let Ok(content) = fs::read_to_string(&entry_path) {
                     let path_str = entry_path.to_string_lossy().to_string();
-                    self.index_file(&path_str, &content);
+                    self.add_file_chunks(&path_str, &content);
                     count += 1;
                 }
             }
@@ -247,55 +309,35 @@ impl RagService {
             });
         }
 
-        // Build document token sets for IDF
-        let doc_token_sets: Vec<HashSet<String>> = self
-            .index
-            .iter()
-            .map(|chunk| tokenize(&chunk.content).into_iter().collect())
-            .collect();
-
-        // Collect all unique terms
-        let all_terms: HashSet<String> = doc_token_sets
-            .iter()
-            .flat_map(|s| s.iter().cloned())
-            .collect();
-
-        // Compute IDF for all terms
-        let idf_map: HashMap<String, f32> = all_terms
-            .iter()
-            .map(|term| {
-                (
-                    term.clone(),
-                    inverse_document_frequency(term, &doc_token_sets),
-                )
-            })
-            .collect();
-
-        // Compute TF-IDF vector for the query
+        // Compute TF-IDF vector for the query using the cached IDF map.
         let query_tokens = tokenize(&rag_query.query);
-        let query_vec = tfidf_vector(&query_tokens, &idf_map);
+        let query_vec = tfidf_vector(&query_tokens, &self.cached_idf);
 
-        // Score each chunk
-        let mut scored: Vec<ScoredChunk> = self
-            .index
+        // Score each chunk using the cached TF-IDF vectors.
+        // Collect indices + scores first, then clone only the top results.
+        let mut scored_indices: Vec<(usize, f32)> = self
+            .cached_tfidf_vectors
             .iter()
             .enumerate()
-            .map(|(i, chunk)| {
-                let chunk_tokens: Vec<String> =
-                    doc_token_sets[i].iter().cloned().collect();
-                let chunk_vec = tfidf_vector(&chunk_tokens, &idf_map);
-                let score = cosine_similarity(&query_vec, &chunk_vec);
-                ScoredChunk {
-                    chunk: chunk.clone(),
-                    score,
-                }
+            .map(|(i, chunk_vec)| {
+                let score = cosine_similarity(&query_vec, chunk_vec);
+                (i, score)
             })
-            .filter(|sc| sc.score >= rag_query.min_similarity)
+            .filter(|(_, score)| *score >= rag_query.min_similarity)
             .collect();
 
         // Sort by descending score
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(rag_query.max_results);
+        scored_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored_indices.truncate(rag_query.max_results);
+
+        // Clone only the top-scoring chunks.
+        let scored: Vec<ScoredChunk> = scored_indices
+            .iter()
+            .map(|&(i, score)| ScoredChunk {
+                chunk: self.index[i].clone(),
+                score,
+            })
+            .collect();
 
         // Assemble context
         let context = scored
@@ -351,6 +393,9 @@ impl RagService {
     /// Clear the entire index.
     pub fn clear_index(&mut self) {
         self.index.clear();
+        self.cached_idf.clear();
+        self.cached_doc_tokens.clear();
+        self.cached_tfidf_vectors.clear();
     }
 
     /// Return statistics about the current index.
@@ -383,20 +428,6 @@ impl Default for RagService {
     fn default() -> Self {
         Self::new(50, 10) // 50-line chunks with 10-line overlap
     }
-}
-
-/// Heuristic: check first 512 bytes for null bytes.
-fn is_likely_binary(path: &Path) -> bool {
-    let Ok(file) = fs::File::open(path) else {
-        return false;
-    };
-    use std::io::Read;
-    let mut buf = [0u8; 512];
-    let mut reader = std::io::BufReader::new(file);
-    let Ok(n) = reader.read(&mut buf) else {
-        return false;
-    };
-    buf[..n].contains(&0)
 }
 
 // ---------------------------------------------------------------------------

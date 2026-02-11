@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn new_with_nonexistent_directory() {
-        let result = CommandExecutor::new(PathBuf::from("/tmp/nonexistent_hive_test_dir_12345"));
+        let result = CommandExecutor::new(std::env::temp_dir().join("nonexistent_hive_test_dir_12345"));
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("does not exist"), "got: {msg}");
@@ -261,7 +261,8 @@ mod tests {
     #[test]
     fn set_working_dir_rejects_nonexistent() {
         let (_dir, mut executor) = temp_executor();
-        let result = executor.set_working_dir(Path::new("/tmp/no_such_dir_hive_999"));
+        let bad_dir = std::env::temp_dir().join("no_such_dir_hive_999");
+        let result = executor.set_working_dir(&bad_dir);
         assert!(result.is_err());
     }
 

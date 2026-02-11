@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -111,6 +112,82 @@ pub struct AvailableSkill {
     pub repo_url: String,
     pub category: SkillCategory,
 }
+
+// ---------------------------------------------------------------------------
+// Pre-compiled injection patterns (built once on first access)
+// ---------------------------------------------------------------------------
+
+/// Prompt override patterns — Critical severity.
+static COMPILED_OVERRIDE_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let patterns: &[&str] = &[
+        r"(?i)ignore\s+(all\s+)?previous\s+instructions",
+        r"(?i)disregard\s+(all\s+)?previous",
+        r"(?i)you\s+are\s+now\s+a",
+        r"(?i)system\s*:\s*you\s+are",
+        r"(?i)override\s+(all\s+)?safety",
+        r"(?i)jailbreak",
+        r"(?i)<\|im_start\|>",
+        r"(?i)\[\[system\]\]",
+        r"(?i)act\s+as\s+(if\s+you\s+are\s+)?an?\s+unrestricted",
+        r"(?i)do\s+not\s+follow\s+(any\s+)?rules",
+    ];
+    patterns
+        .iter()
+        .filter_map(|p| Regex::new(p).ok().map(|re| (re, *p)))
+        .collect()
+});
+
+/// Data exfiltration patterns — High severity.
+static COMPILED_EXFIL_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let patterns: &[&str] = &[
+        r"(?i)send\s+(all\s+)?(data|information|content|files)\s+to",
+        r"(?i)exfiltrate",
+        r"(?i)upload\s+(all\s+)?(data|files|content)\s+to",
+        r"(?i)forward\s+(all\s+)?(messages|data)\s+to",
+    ];
+    patterns
+        .iter()
+        .filter_map(|p| Regex::new(p).ok().map(|re| (re, *p)))
+        .collect()
+});
+
+/// API key reference patterns — High severity.
+static COMPILED_API_KEY_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let patterns: &[&str] = &[
+        r"(?i)(api[_\-]?key|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)\s*[=:]\s*\S+",
+        r"(?i)(sk-[a-zA-Z0-9]{20,})",
+        r"(?i)(AKIA[A-Z0-9]{16})",
+    ];
+    patterns
+        .iter()
+        .filter_map(|p| Regex::new(p).ok().map(|re| (re, *p)))
+        .collect()
+});
+
+/// Zero-width character pattern — Medium severity.
+static COMPILED_ZWC_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[\u{200B}\u{200C}\u{200D}\u{FEFF}\u{00AD}]").unwrap()
+});
+
+/// Base64 payload pattern — Medium severity.
+static COMPILED_B64_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[A-Za-z0-9+/]{64,}={0,2}").unwrap()
+});
+
+/// Suspicious URL patterns — High severity.
+static COMPILED_URL_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let patterns: &[&str] = &[
+        r"(?i)https?://[^\s]+\.(ru|cn|tk|ml|ga|cf)/",
+        r"(?i)https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[:/]",
+        r"(?i)webhook\.site",
+        r"(?i)ngrok\.io",
+        r"(?i)requestbin",
+    ];
+    patterns
+        .iter()
+        .filter_map(|p| Regex::new(p).ok().map(|re| (re, *p)))
+        .collect()
+});
 
 // ---------------------------------------------------------------------------
 // SkillMarketplace
@@ -266,108 +343,64 @@ impl SkillMarketplace {
         let mut issues = Vec::new();
 
         // 1. Prompt override patterns
-        let override_patterns: &[&str] = &[
-            r"(?i)ignore\s+(all\s+)?previous\s+instructions",
-            r"(?i)disregard\s+(all\s+)?previous",
-            r"(?i)you\s+are\s+now\s+a",
-            r"(?i)system\s*:\s*you\s+are",
-            r"(?i)override\s+(all\s+)?safety",
-            r"(?i)jailbreak",
-            r"(?i)<\|im_start\|>",
-            r"(?i)\[\[system\]\]",
-            r"(?i)act\s+as\s+(if\s+you\s+are\s+)?an?\s+unrestricted",
-            r"(?i)do\s+not\s+follow\s+(any\s+)?rules",
-        ];
-        for pat in override_patterns {
-            if let Ok(re) = Regex::new(pat) {
-                if re.is_match(text) {
-                    issues.push(SecurityIssue {
-                        issue_type: SecurityIssueType::PromptOverride,
-                        description: format!("Prompt override pattern detected: {pat}"),
-                        severity: Severity::Critical,
-                    });
-                }
+        for (re, pat) in COMPILED_OVERRIDE_PATTERNS.iter() {
+            if re.is_match(text) {
+                issues.push(SecurityIssue {
+                    issue_type: SecurityIssueType::PromptOverride,
+                    description: format!("Prompt override pattern detected: {pat}"),
+                    severity: Severity::Critical,
+                });
             }
         }
 
         // 2. Data exfiltration patterns
-        let exfil_patterns: &[&str] = &[
-            r"(?i)send\s+(all\s+)?(data|information|content|files)\s+to",
-            r"(?i)exfiltrate",
-            r"(?i)upload\s+(all\s+)?(data|files|content)\s+to",
-            r"(?i)forward\s+(all\s+)?(messages|data)\s+to",
-        ];
-        for pat in exfil_patterns {
-            if let Ok(re) = Regex::new(pat) {
-                if re.is_match(text) {
-                    issues.push(SecurityIssue {
-                        issue_type: SecurityIssueType::DataExfiltration,
-                        description: format!("Data exfiltration pattern detected: {pat}"),
-                        severity: Severity::High,
-                    });
-                }
+        for (re, pat) in COMPILED_EXFIL_PATTERNS.iter() {
+            if re.is_match(text) {
+                issues.push(SecurityIssue {
+                    issue_type: SecurityIssueType::DataExfiltration,
+                    description: format!("Data exfiltration pattern detected: {pat}"),
+                    severity: Severity::High,
+                });
             }
         }
 
         // 3. API key references
-        let api_key_patterns: &[&str] = &[
-            r"(?i)(api[_\-]?key|secret[_\-]?key|access[_\-]?token|auth[_\-]?token)\s*[=:]\s*\S+",
-            r"(?i)(sk-[a-zA-Z0-9]{20,})",
-            r"(?i)(AKIA[A-Z0-9]{16})",
-        ];
-        for pat in api_key_patterns {
-            if let Ok(re) = Regex::new(pat) {
-                if re.is_match(text) {
-                    issues.push(SecurityIssue {
-                        issue_type: SecurityIssueType::ApiKeyReference,
-                        description: format!("API key / secret reference detected: {pat}"),
-                        severity: Severity::High,
-                    });
-                }
+        for (re, pat) in COMPILED_API_KEY_PATTERNS.iter() {
+            if re.is_match(text) {
+                issues.push(SecurityIssue {
+                    issue_type: SecurityIssueType::ApiKeyReference,
+                    description: format!("API key / secret reference detected: {pat}"),
+                    severity: Severity::High,
+                });
             }
         }
 
         // 4. Zero-width characters (often used for steganographic injection)
-        let zwc_pattern = r"[\u{200B}\u{200C}\u{200D}\u{FEFF}\u{00AD}]";
-        if let Ok(re) = Regex::new(zwc_pattern) {
-            if re.is_match(text) {
-                issues.push(SecurityIssue {
-                    issue_type: SecurityIssueType::ZeroWidthChars,
-                    description: "Zero-width characters detected (possible steganographic injection)".into(),
-                    severity: Severity::Medium,
-                });
-            }
+        if COMPILED_ZWC_PATTERN.is_match(text) {
+            issues.push(SecurityIssue {
+                issue_type: SecurityIssueType::ZeroWidthChars,
+                description: "Zero-width characters detected (possible steganographic injection)".into(),
+                severity: Severity::Medium,
+            });
         }
 
         // 5. Base64 payloads (long base64-encoded strings)
-        let b64_pattern = r"[A-Za-z0-9+/]{64,}={0,2}";
-        if let Ok(re) = Regex::new(b64_pattern) {
-            if re.is_match(text) {
-                issues.push(SecurityIssue {
-                    issue_type: SecurityIssueType::Base64Payload,
-                    description: "Possible base64-encoded payload detected".into(),
-                    severity: Severity::Medium,
-                });
-            }
+        if COMPILED_B64_PATTERN.is_match(text) {
+            issues.push(SecurityIssue {
+                issue_type: SecurityIssueType::Base64Payload,
+                description: "Possible base64-encoded payload detected".into(),
+                severity: Severity::Medium,
+            });
         }
 
         // 6. Suspicious URLs (data exfiltration endpoints)
-        let url_patterns: &[&str] = &[
-            r"(?i)https?://[^\s]+\.(ru|cn|tk|ml|ga|cf)/",
-            r"(?i)https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}[:/]",
-            r"(?i)webhook\.site",
-            r"(?i)ngrok\.io",
-            r"(?i)requestbin",
-        ];
-        for pat in url_patterns {
-            if let Ok(re) = Regex::new(pat) {
-                if re.is_match(text) {
-                    issues.push(SecurityIssue {
-                        issue_type: SecurityIssueType::SuspiciousUrl,
-                        description: format!("Suspicious URL pattern detected: {pat}"),
-                        severity: Severity::High,
-                    });
-                }
+        for (re, pat) in COMPILED_URL_PATTERNS.iter() {
+            if re.is_match(text) {
+                issues.push(SecurityIssue {
+                    issue_type: SecurityIssueType::SuspiciousUrl,
+                    description: format!("Suspicious URL pattern detected: {pat}"),
+                    severity: Severity::High,
+                });
             }
         }
 

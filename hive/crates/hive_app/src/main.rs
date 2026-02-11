@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod tray;
 
 use std::borrow::Cow;
@@ -79,6 +81,10 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     cx.set_global(AppNotifications(hive_core::notifications::NotificationStore::new()));
 
+    // TODO(perf): Database::open, LearningService::open, and AssistantService::open are
+    // independent and could be parallelized with std::thread::scope. However, the interleaved
+    // cx.set_global / cx.global_mut calls between them (e.g. wiring LearnerTierAdjuster into
+    // AppAiService) prevent a straightforward refactor since &mut App is not Send.
     let db = Database::open().inspect_err(|e| error!("Database open failed: {e}"))?;
     cx.set_global(AppDatabase(db));
     info!("Database opened");
@@ -228,6 +234,29 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
 /// Register global keyboard shortcuts and action handlers.
 fn register_actions(cx: &mut App) {
+    // macOS uses Cmd for shortcuts; all other platforms use Ctrl.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        // App-level actions
+        KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
+        KeyBinding::new("cmd-p", TogglePrivacy, None),
+        // Chat actions
+        KeyBinding::new("cmd-n", NewConversation, None),
+        KeyBinding::new("cmd-l", ClearChat, None),
+        // Panel switching: cmd-1..cmd-0 map to first 10 sidebar panels
+        KeyBinding::new("cmd-1", SwitchToChat, None),
+        KeyBinding::new("cmd-2", SwitchToHistory, None),
+        KeyBinding::new("cmd-3", SwitchToFiles, None),
+        KeyBinding::new("cmd-4", SwitchToSpecs, None),
+        KeyBinding::new("cmd-5", SwitchToAgents, None),
+        KeyBinding::new("cmd-6", SwitchToKanban, None),
+        KeyBinding::new("cmd-7", SwitchToMonitor, None),
+        KeyBinding::new("cmd-8", SwitchToLogs, None),
+        KeyBinding::new("cmd-9", SwitchToCosts, None),
+        KeyBinding::new("cmd-0", SwitchToReview, None),
+    ]);
+    #[cfg(not(target_os = "macos"))]
     cx.bind_keys([
         // App-level actions
         KeyBinding::new("ctrl-q", Quit, None),

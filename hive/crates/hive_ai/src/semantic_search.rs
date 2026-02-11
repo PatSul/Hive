@@ -5,6 +5,7 @@
 //! for recall and analytics.
 
 use chrono::{DateTime, Utc};
+use hive_fs::is_likely_binary;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -65,11 +66,39 @@ fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Pre-computed query data passed into `score_line` to avoid per-line recomputation.
+struct QueryContext {
+    query_lower: String,
+    bigrams: Vec<(String, String)>,
+}
+
+impl QueryContext {
+    fn new(query_raw: &str, query_terms: &[String]) -> Self {
+        let bigrams = if query_terms.len() >= 2 {
+            query_terms
+                .windows(2)
+                .map(|pair| {
+                    (
+                        format!("{} {}", pair[0], pair[1]),
+                        format!("{}_{}", pair[0], pair[1]),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            query_lower: query_raw.to_lowercase(),
+            bigrams,
+        }
+    }
+}
+
 /// Score a line against query terms using a simple term-overlap metric.
 ///
 /// Returns a value between 0.0 and 1.0 indicating the fraction of
 /// query terms that appear in the line (with bonus for exact substring match).
-fn score_line(line: &str, query_terms: &[String], query_raw: &str) -> f32 {
+fn score_line(line: &str, query_terms: &[String], ctx: &QueryContext) -> f32 {
     if query_terms.is_empty() {
         return 0.0;
     }
@@ -87,7 +116,7 @@ fn score_line(line: &str, query_terms: &[String], query_raw: &str) -> f32 {
     let overlap_score = matched as f32 / query_terms.len() as f32;
 
     // Bonus for exact substring match of the full query
-    let exact_bonus = if line_lower.contains(&query_raw.to_lowercase()) {
+    let exact_bonus = if line_lower.contains(&ctx.query_lower) {
         0.3
     } else {
         0.0
@@ -95,38 +124,20 @@ fn score_line(line: &str, query_terms: &[String], query_raw: &str) -> f32 {
 
     // Bonus for consecutive term matches
     let consecutive_bonus = if query_terms.len() >= 2 {
-        let bigrams_matched = query_terms
-            .windows(2)
-            .filter(|pair| {
-                let bigram = format!("{} {}", pair[0], pair[1]);
-                line_lower.contains(&bigram)
-                    || line_lower.contains(&format!("{}_{}", pair[0], pair[1]))
+        let bigrams_matched = ctx
+            .bigrams
+            .iter()
+            .filter(|(space_bigram, underscore_bigram)| {
+                line_lower.contains(space_bigram.as_str())
+                    || line_lower.contains(underscore_bigram.as_str())
             })
             .count();
-        if query_terms.len() > 1 {
-            0.2 * (bigrams_matched as f32 / (query_terms.len() - 1) as f32)
-        } else {
-            0.0
-        }
+        0.2 * (bigrams_matched as f32 / (query_terms.len() - 1) as f32)
     } else {
         0.0
     };
 
     (overlap_score + exact_bonus + consecutive_bonus).min(1.0)
-}
-
-/// Heuristic: check first 512 bytes for null bytes.
-fn is_likely_binary(path: &Path) -> bool {
-    let Ok(file) = fs::File::open(path) else {
-        return false;
-    };
-    use std::io::Read;
-    let mut buf = [0u8; 512];
-    let mut reader = std::io::BufReader::new(file);
-    let Ok(n) = reader.read(&mut buf) else {
-        return false;
-    };
-    buf[..n].contains(&0)
 }
 
 // ---------------------------------------------------------------------------
@@ -177,16 +188,17 @@ impl SemanticSearchService {
             return Vec::new();
         }
 
+        let query_ctx = QueryContext::new(query, &query_terms);
         let mut all_results: Vec<SearchResult> = Vec::new();
 
         for path in paths {
             if path.is_dir() {
                 let dir_results =
-                    self.search_directory(path, &query_terms, query, context_lines);
+                    self.search_directory(path, &query_terms, &query_ctx, context_lines);
                 all_results.extend(dir_results);
             } else if path.is_file() {
                 if let Some(results) =
-                    self.search_file(path, &query_terms, query, context_lines)
+                    self.search_file(path, &query_terms, &query_ctx, context_lines)
                 {
                     all_results.extend(results);
                 }
@@ -222,7 +234,7 @@ impl SemanticSearchService {
         &self,
         dir: &Path,
         query_terms: &[String],
-        query_raw: &str,
+        query_ctx: &QueryContext,
         context_lines: usize,
     ) -> Vec<SearchResult> {
         let mut results = Vec::new();
@@ -241,10 +253,10 @@ impl SemanticSearchService {
             }
 
             if path.is_dir() {
-                results.extend(self.search_directory(&path, query_terms, query_raw, context_lines));
+                results.extend(self.search_directory(&path, query_terms, query_ctx, context_lines));
             } else if path.is_file() {
                 if let Some(file_results) =
-                    self.search_file(&path, query_terms, query_raw, context_lines)
+                    self.search_file(&path, query_terms, query_ctx, context_lines)
                 {
                     results.extend(file_results);
                 }
@@ -258,7 +270,7 @@ impl SemanticSearchService {
         &self,
         path: &Path,
         query_terms: &[String],
-        query_raw: &str,
+        query_ctx: &QueryContext,
         context_lines: usize,
     ) -> Option<Vec<SearchResult>> {
         if is_likely_binary(path) {
@@ -271,7 +283,7 @@ impl SemanticSearchService {
         let path_str = path.to_string_lossy().to_string();
 
         for (idx, line) in lines.iter().enumerate() {
-            let score = score_line(line, query_terms, query_raw);
+            let score = score_line(line, query_terms, query_ctx);
             if score > 0.0 {
                 // Gather context lines
                 let ctx_start = idx.saturating_sub(context_lines);
@@ -316,11 +328,12 @@ impl SemanticSearchService {
             return Vec::new();
         }
 
+        let query_ctx = QueryContext::new(query, &query_terms);
         let lines: Vec<&str> = content.lines().collect();
         let mut results = Vec::new();
 
         for (idx, line) in lines.iter().enumerate() {
-            let score = score_line(line, &query_terms, query);
+            let score = score_line(line, &query_terms, &query_ctx);
             if score > 0.0 {
                 let ctx_start = idx.saturating_sub(context_lines);
                 let ctx_end = (idx + context_lines + 1).min(lines.len());
@@ -416,7 +429,8 @@ mod tests {
     #[test]
     fn test_score_line_full_match() {
         let terms = vec!["hello".to_string(), "world".to_string()];
-        let score = score_line("Hello World", &terms, "hello world");
+        let ctx = QueryContext::new("hello world", &terms);
+        let score = score_line("Hello World", &terms, &ctx);
         // Full overlap + exact bonus
         assert!(score > 0.9);
     }
@@ -424,7 +438,8 @@ mod tests {
     #[test]
     fn test_score_line_partial_match() {
         let terms = vec!["hello".to_string(), "world".to_string()];
-        let score = score_line("Hello there", &terms, "hello world");
+        let ctx = QueryContext::new("hello world", &terms);
+        let score = score_line("Hello there", &terms, &ctx);
         // 1/2 terms match
         assert!(score > 0.3);
         assert!(score < 0.9);
@@ -433,13 +448,15 @@ mod tests {
     #[test]
     fn test_score_line_no_match() {
         let terms = vec!["hello".to_string()];
-        let score = score_line("goodbye cruel world", &terms, "hello");
+        let ctx = QueryContext::new("hello", &terms);
+        let score = score_line("goodbye cruel world", &terms, &ctx);
         assert_eq!(score, 0.0);
     }
 
     #[test]
     fn test_score_line_empty_query() {
-        let score = score_line("anything", &[], "");
+        let ctx = QueryContext::new("", &[]);
+        let score = score_line("anything", &[], &ctx);
         assert_eq!(score, 0.0);
     }
 

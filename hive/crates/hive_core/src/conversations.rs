@@ -43,6 +43,36 @@ pub struct Conversation {
     pub updated_at: DateTime<Utc>,
 }
 
+// ---------------------------------------------------------------------------
+// Lightweight structs for partial deserialization (perf: avoids parsing
+// full message content just to build summaries or run searches).
+// Unknown JSON fields are silently ignored via serde defaults.
+// ---------------------------------------------------------------------------
+
+/// Minimal message representation — skips `thinking`, heavy optional fields.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MessageMeta {
+    #[allow(dead_code)]
+    role: String,
+    content: String,
+}
+
+/// Lightweight conversation header for list/search — skips full StoredMessage
+/// deserialization (timestamps, model, cost, tokens, thinking per message).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationMeta {
+    id: String,
+    title: String,
+    messages: Vec<MessageMeta>,
+    model: String,
+    #[serde(default)]
+    total_cost: f64,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
 /// Lightweight summary returned by `list_summaries` / `search`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -227,6 +257,8 @@ impl ConversationStore {
     }
 
     /// Case-insensitive search across title and message content.
+    // TODO: For large conversation stores, consider a full-text search index
+    // (e.g. SQLite FTS5) instead of scanning every file.
     pub fn search(&self, query: &str) -> Result<Vec<ConversationSummary>> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
@@ -248,32 +280,33 @@ impl ConversationStore {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let conv: Conversation = match serde_json::from_str(&content) {
+            let meta: ConversationMeta = match serde_json::from_str(&content) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
 
-            let title_match = conv.title.to_lowercase().contains(&query_lower);
-            let message_match = conv
-                .messages
-                .iter()
-                .any(|m| m.content.to_lowercase().contains(&query_lower));
+            // Short-circuit: check title first, then stop at the first matching message.
+            let matched = meta.title.to_lowercase().contains(&query_lower)
+                || meta
+                    .messages
+                    .iter()
+                    .any(|m| m.content.to_lowercase().contains(&query_lower));
 
-            if title_match || message_match {
-                let last_msg = conv.messages.last();
+            if matched {
+                let last_msg = meta.messages.last();
                 let preview = last_msg
                     .map(|m| make_preview(&m.content, 100))
                     .unwrap_or_default();
 
                 results.push(ConversationSummary {
-                    id: conv.id,
-                    title: conv.title,
+                    id: meta.id,
+                    title: meta.title,
                     preview,
-                    message_count: conv.messages.len(),
-                    total_cost: conv.total_cost,
-                    model: conv.model,
-                    created_at: conv.created_at,
-                    updated_at: conv.updated_at,
+                    message_count: meta.messages.len(),
+                    total_cost: meta.total_cost,
+                    model: meta.model,
+                    created_at: meta.created_at,
+                    updated_at: meta.updated_at,
                 });
             }
         }
@@ -289,23 +322,23 @@ impl ConversationStore {
     fn load_summary_from_path(&self, path: &std::path::Path) -> Result<ConversationSummary> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let conv: Conversation = serde_json::from_str(&content)
+        let meta: ConversationMeta = serde_json::from_str(&content)
             .with_context(|| format!("Failed to parse {}", path.display()))?;
 
-        let last_msg = conv.messages.last();
+        let last_msg = meta.messages.last();
         let preview = last_msg
             .map(|m| make_preview(&m.content, 100))
             .unwrap_or_default();
 
         Ok(ConversationSummary {
-            id: conv.id,
-            title: conv.title,
+            id: meta.id,
+            title: meta.title,
             preview,
-            message_count: conv.messages.len(),
-            total_cost: conv.total_cost,
-            model: conv.model,
-            created_at: conv.created_at,
-            updated_at: conv.updated_at,
+            message_count: meta.messages.len(),
+            total_cost: meta.total_cost,
+            model: meta.model,
+            created_at: meta.created_at,
+            updated_at: meta.updated_at,
         })
     }
 }

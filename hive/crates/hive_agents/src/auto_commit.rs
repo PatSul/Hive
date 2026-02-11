@@ -183,9 +183,8 @@ impl AutoCommitService {
         // Build and execute the commit.
         let message = self.build_commit_message(task_desc, spec_id);
 
-        let commit_cmd = format!("git commit -m \"{message}\"");
         self.gateway
-            .check_command(&commit_cmd)
+            .check_command("git commit")
             .map_err(|e| format!("Security check failed for git commit: {e}"))?;
 
         let commit_output = Command::new("git")
@@ -409,6 +408,7 @@ mod tests {
         let gateway = SecurityGateway::new();
         assert!(gateway.check_command("git status --porcelain").is_ok());
         assert!(gateway.check_command("git add -A").is_ok());
+        assert!(gateway.check_command("git commit").is_ok());
         assert!(gateway.check_command("git rev-parse HEAD").is_ok());
     }
 
@@ -416,7 +416,7 @@ mod tests {
     fn get_changed_files_on_nonexistent_dir_returns_error() {
         let svc = AutoCommitService::new(
             test_config(),
-            PathBuf::from("/tmp/nonexistent-hive-test-dir-12345"),
+            std::env::temp_dir().join("nonexistent-hive-test-dir-12345"),
         );
         let result = svc.get_changed_files();
         assert!(result.is_err());
@@ -426,7 +426,7 @@ mod tests {
     fn commit_after_task_on_nonexistent_dir_returns_error() {
         let svc = AutoCommitService::new(
             test_config(),
-            PathBuf::from("/tmp/nonexistent-hive-test-dir-12345"),
+            std::env::temp_dir().join("nonexistent-hive-test-dir-12345"),
         );
         let result = svc.commit_after_task("test task", None);
         assert!(result.is_err());

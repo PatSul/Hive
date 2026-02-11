@@ -2,6 +2,15 @@ use anyhow::Result;
 use regex::Regex;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::LazyLock;
+
+static SQL_INJECTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"(?i)('\s*(OR|AND)\s+')").unwrap(),
+        Regex::new(r"(?i)(;\s*(DROP|DELETE|UPDATE|INSERT)\s+)").unwrap(),
+        Regex::new(r"(?i)(UNION\s+SELECT)").unwrap(),
+    ]
+});
 
 /// Security gateway that validates commands, URLs, file paths, and content.
 /// Ported from the Electron SecurityGateway.
@@ -27,6 +36,10 @@ impl SecurityGateway {
                 Regex::new(r"(?i)\bchown\s+-R\s+.*\s+/\s*$").unwrap(),
                 Regex::new(r"(?i)\bcurl\b.*\|\s*(ba)?sh").unwrap(),
                 Regex::new(r"(?i)\bwget\b.*\|\s*(ba)?sh").unwrap(),
+                Regex::new(r"(?i)\bdel\s+/s\s+/q\s+[a-z]:\\").unwrap(),
+                Regex::new(r"(?i)\brd\s+/s\s+/q\s+[a-z]:\\").unwrap(),
+                Regex::new(r"(?i)\bRemove-Item\s+.*-Recurse\s+-Force\s+[a-z]:\\").unwrap(),
+                Regex::new(r"(?i)\bdiskpart\b").unwrap(),
             ],
             risky_patterns: vec![
                 Regex::new(r"(?i);\s*(rm|del|format|mkfs)").unwrap(),
@@ -42,10 +55,11 @@ impl SecurityGateway {
                 "crates.io".into(),
             ],
             blocked_path_prefixes: vec![
-                "/.ssh".into(),
-                "/.aws".into(),
-                "/.gnupg".into(),
-                "/.config/gcloud".into(),
+                ".ssh".into(),
+                ".aws".into(),
+                ".gnupg".into(),
+                ".config/gcloud".into(),
+                ".config\\gcloud".into(),
                 "/etc/shadow".into(),
                 "/etc/passwd".into(),
             ],
@@ -95,8 +109,15 @@ impl SecurityGateway {
     pub fn check_path(&self, path: &Path) -> Result<(), String> {
         let path_str = path.to_string_lossy();
 
-        // Block system roots
-        if path_str == "/" || path_str == "C:\\" || path_str == "C:/" {
+        // Block system roots (Unix "/" and any Windows drive root like "C:\", "D:/", "E:")
+        let is_root = path_str == "/"
+            || (path_str.len() <= 3
+                && path_str
+                    .as_bytes()
+                    .first()
+                    .map_or(false, |b| b.is_ascii_alphabetic())
+                && path_str.as_bytes().get(1) == Some(&b':'));
+        if is_root {
             return Err("Access to system root is blocked".into());
         }
 
@@ -123,14 +144,9 @@ impl SecurityGateway {
 
     /// Check for common injection patterns in user input.
     pub fn check_injection(&self, input: &str) -> Result<(), String> {
-        // SQL injection
-        let sql_patterns = [
-            r"(?i)('\s*(OR|AND)\s+')",
-            r"(?i)(;\s*(DROP|DELETE|UPDATE|INSERT)\s+)",
-            r"(?i)(UNION\s+SELECT)",
-        ];
-        for pat in &sql_patterns {
-            if Regex::new(pat).unwrap().is_match(input) {
+        // SQL injection (patterns compiled once via LazyLock)
+        for pat in SQL_INJECTION_PATTERNS.iter() {
+            if pat.is_match(input) {
                 return Err("Potential SQL injection detected".into());
             }
         }

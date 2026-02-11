@@ -7,7 +7,6 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tracing::info;
 
 const AES_NONCE_LEN: usize = 12;
@@ -135,6 +134,15 @@ impl WalletStore {
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
         let json = serde_json::to_string_pretty(self).context("failed to serialize wallet store")?;
         std::fs::write(path, json).context("failed to write wallet store file")?;
+
+        // Restrict file permissions to owner-only on Unix (0o600 = rw-------).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .context("failed to set wallet store file permissions")?;
+        }
+
         info!(path = %path.display(), count = self.wallets.len(), "wallet store saved");
         Ok(())
     }
@@ -164,15 +172,21 @@ impl Default for WalletStore {
 // Encryption helpers
 // ---------------------------------------------------------------------------
 
-/// Derive a 256-bit AES key from a password using SHA-256.
+/// Derive a 256-bit AES key from a password using Argon2id.
 ///
-/// NOTE: This is intentionally simple. A future iteration should use Argon2id
-/// (already available as a workspace dependency) for proper key stretching.
+/// Uses a fixed salt for deterministic derivation (the same password always
+/// produces the same key). Parameters: m=19456 KiB (~19 MB), t=2, p=1.
 fn derive_key_from_password(password: &str) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(b"hive-wallet-key-v1:");
-    hasher.update(password.as_bytes());
-    hasher.finalize().into()
+    use argon2::{Algorithm, Argon2, Params, Version};
+
+    let salt = b"hive-wallet-key-v1";
+    let params = Params::new(19_456, 2, 1, Some(32)).expect("valid argon2 params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = [0u8; 32];
+    argon2
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .expect("argon2 key derivation");
+    key
 }
 
 /// Encrypt `plaintext` using AES-256-GCM with a key derived from `password`.
@@ -343,8 +357,8 @@ mod tests {
 
     #[test]
     fn wallet_store_load_missing_file_returns_empty() {
-        let path = Path::new("/tmp/nonexistent-hive-wallet-store.json");
-        let store = WalletStore::load_from_file(path).unwrap();
+        let path = std::env::temp_dir().join("nonexistent-hive-wallet-store.json");
+        let store = WalletStore::load_from_file(&path).unwrap();
         assert!(store.is_empty());
     }
 

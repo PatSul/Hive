@@ -127,7 +127,7 @@ impl SearchService {
 }
 
 /// Heuristic: read the first 512 bytes and check for null bytes.
-fn is_likely_binary(path: &Path) -> bool {
+pub fn is_likely_binary(path: &Path) -> bool {
     let Ok(file) = fs::File::open(path) else {
         return false;
     };

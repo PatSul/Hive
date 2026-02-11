@@ -5,6 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,15 +55,21 @@ static INJECTION_PATTERNS: &[&str] = &[
     r"(?i)do\s+not\s+follow\s+(any\s+)?rules",
 ];
 
+/// Pre-compiled injection patterns — built once on first access.
+static COMPILED_INJECTION_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    INJECTION_PATTERNS
+        .iter()
+        .filter_map(|p| Regex::new(p).ok().map(|re| (re, *p)))
+        .collect()
+});
+
 /// Scan skill instructions for injection patterns.
 pub fn scan_for_injection(instructions: &str) -> ScanResult {
     let mut issues = Vec::new();
 
-    for pattern_str in INJECTION_PATTERNS {
-        if let Ok(re) = Regex::new(pattern_str) {
-            if re.is_match(instructions) {
-                issues.push(format!("Matched injection pattern: {pattern_str}"));
-            }
+    for (re, pattern_str) in COMPILED_INJECTION_PATTERNS.iter() {
+        if re.is_match(instructions) {
+            issues.push(format!("Matched injection pattern: {pattern_str}"));
         }
     }
 

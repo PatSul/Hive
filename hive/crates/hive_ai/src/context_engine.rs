@@ -7,6 +7,7 @@
 
 use chrono::{DateTime, Utc};
 use hive_core::context::estimate_tokens;
+use hive_fs::is_likely_binary;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -497,20 +498,6 @@ impl Default for ContextEngine {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
-
-/// Heuristic: check first 512 bytes for null bytes.
-fn is_likely_binary(path: &Path) -> bool {
-    let Ok(file) = fs::File::open(path) else {
-        return false;
-    };
-    use std::io::Read;
-    let mut buf = [0u8; 512];
-    let mut reader = std::io::BufReader::new(file);
-    let Ok(n) = reader.read(&mut buf) else {
-        return false;
-    };
-    buf[..n].contains(&0)
-}
 
 /// Infer the `SourceType` from a file path based on common patterns.
 fn infer_source_type(path: &Path) -> SourceType {

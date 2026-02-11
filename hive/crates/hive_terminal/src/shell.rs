@@ -129,6 +129,13 @@ impl InteractiveShell {
             cmd.process_group(0);
         }
 
+        // On Windows, create a new process group for job-object-style cleanup.
+        // tokio::process::Command re-exports creation_flags from CommandExt.
+        #[cfg(windows)]
+        {
+            cmd.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
+        }
+
         let mut child = cmd.spawn().with_context(|| {
             format!("Failed to spawn shell: {program}")
         })?;
@@ -326,7 +333,8 @@ mod tests {
 
     #[tokio::test]
     async fn shell_construction_rejects_nonexistent_dir() {
-        let result = InteractiveShell::new(Some(Path::new("/tmp/no_such_hive_dir_99999")));
+        let bad_dir = std::env::temp_dir().join("no_such_hive_dir_99999");
+        let result = InteractiveShell::new(Some(&bad_dir));
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(

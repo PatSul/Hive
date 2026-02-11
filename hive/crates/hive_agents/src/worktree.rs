@@ -905,7 +905,7 @@ mod tests {
         let wt = TeamWorktree {
             team_id: "team-test".into(),
             branch_name: "swarm/run-1/team-test".into(),
-            worktree_path: PathBuf::from("/tmp/test"),
+            worktree_path: std::env::temp_dir().join("test"),
         };
 
         let json = serde_json::to_string(&wt).unwrap();

@@ -98,8 +98,9 @@ pub(crate) async fn drive_sse_stream(
 
         // Process complete lines from the buffer.
         while let Some(newline_pos) = buffer.find('\n') {
-            let line: String = buffer.drain(..=newline_pos).collect();
-            let line = line.trim();
+            let line = buffer[..newline_pos].trim().to_owned();
+            buffer.drain(..=newline_pos);
+            let line = line.as_str();
 
             if line.is_empty() {
                 continue;
