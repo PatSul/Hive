@@ -89,6 +89,9 @@ rust-embed = "8"
 # Image decoding (tray icon)
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# OS notifications (Linux & macOS)
+notify-rust = "4"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

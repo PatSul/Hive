@@ -81,15 +81,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     cx.set_global(AppNotifications(hive_core::notifications::NotificationStore::new()));
 
-    // TODO(perf): Database::open, LearningService::open, and AssistantService::open are
-    // independent and could be parallelized with std::thread::scope. However, the interleaved
-    // cx.set_global / cx.global_mut calls between them (e.g. wiring LearnerTierAdjuster into
-    // AppAiService) prevent a straightforward refactor since &mut App is not Send.
-    let db = Database::open().inspect_err(|e| error!("Database open failed: {e}"))?;
-    cx.set_global(AppDatabase(db));
-    info!("Database opened");
-
-    // Build AI service from config
+    // Build AI service from config (needed before wiring LearnerTierAdjuster).
     let config = cx.global::<AppConfig>().0.get().clone();
     let ai_config = AiServiceConfig {
         anthropic_api_key: config.anthropic_api_key.clone(),
@@ -110,12 +102,46 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppAiService(hive_ai::AiService::new(ai_config)));
     info!("AiService initialized");
 
-    // Learning service — persistent SQLite DB in config directory.
-    let learning_db = HiveConfig::base_dir()
+    // Compute DB paths before the parallel section (HiveConfig::base_dir is cheap).
+    let learning_db_str = HiveConfig::base_dir()
         .map(|d| d.join("learning.db"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("learning.db"));
-    let learning_db_str = learning_db.to_string_lossy().to_string();
-    match hive_learn::LearningService::open(&learning_db_str) {
+        .unwrap_or_else(|_| std::path::PathBuf::from("learning.db"))
+        .to_string_lossy()
+        .to_string();
+    let assistant_db_str = HiveConfig::base_dir()
+        .map(|d| d.join("assistant.db"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("assistant.db"))
+        .to_string_lossy()
+        .to_string();
+
+    // Open all three databases in parallel — they are independent and each opens
+    // its own SQLite connection.  `std::thread::scope` ensures the borrows of the
+    // path strings are valid for the lifetime of the spawned threads.
+    let (db_result, learning_result, assistant_result) = std::thread::scope(|s| {
+        let db_handle = s.spawn(|| Database::open());
+        let learn_handle = s.spawn(|| hive_learn::LearningService::open(&learning_db_str));
+        let assist_handle =
+            s.spawn(|| hive_assistant::AssistantService::open(&assistant_db_str));
+
+        (
+            db_handle.join().expect("Database::open thread panicked"),
+            learn_handle
+                .join()
+                .expect("LearningService::open thread panicked"),
+            assist_handle
+                .join()
+                .expect("AssistantService::open thread panicked"),
+        )
+    });
+
+    // --- Register results with cx sequentially (cx is !Send) ---
+
+    let db = db_result.inspect_err(|e| error!("Database open failed: {e}"))?;
+    cx.set_global(AppDatabase(db));
+    info!("Database opened");
+
+    // Learning service
+    match learning_result {
         Ok(learning) => {
             let learning = std::sync::Arc::new(learning);
             info!("LearningService initialized at {}", learning_db_str);
@@ -191,11 +217,8 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppCli(hive_terminal::CliService::new()));
     info!("CliService initialized");
 
-    // Assistant service — email, calendar, reminders, approvals.
-    let assistant_db = HiveConfig::base_dir()
-        .map(|d| d.join("assistant.db"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("assistant.db"));
-    match hive_assistant::AssistantService::open(&assistant_db.to_string_lossy()) {
+    // Assistant service
+    match assistant_result {
         Ok(assistant) => {
             cx.set_global(AppAssistant(assistant));
             info!("AssistantService initialized");

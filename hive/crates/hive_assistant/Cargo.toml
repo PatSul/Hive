@@ -22,5 +22,8 @@ thiserror.workspace = true
 [target.'cfg(windows)'.dependencies]
 winrt-notification = "0.5"
 
+[target.'cfg(not(windows))'.dependencies]
+notify-rust.workspace = true
+
 [dev-dependencies]
 tempfile = "3"
