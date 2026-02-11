@@ -322,7 +322,8 @@ sudo pacman -S vulkan-icd-loader vulkan-tools
    # Ubuntu/Debian
    sudo apt install build-essential libssl-dev pkg-config \
      libvulkan-dev libwayland-dev libxkbcommon-dev \
-     libxcb-shape0-dev libxcb-xfixes0-dev
+     libxcb-shape0-dev libxcb-xfixes0-dev \
+     libglib2.0-dev libgtk-3-dev libxdo-dev
 
    # Fedora
    sudo dnf install gcc openssl-devel pkg-config \
