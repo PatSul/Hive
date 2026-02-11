@@ -51,6 +51,7 @@ jobs:
             libvulkan-dev \
             libwayland-dev \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             libxcb-shape0-dev \
             libxcb-xfixes0-dev \
             libglib2.0-dev \
