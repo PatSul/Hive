@@ -15,8 +15,10 @@ Thumbs.db
 nul
 
 # Local tool configs (not for GitHub)
+CLAUDE.md
 .claude/
 .serena/
+hive/.serena/
 
 # Legacy Electron artifacts
 images/
@@ -25,6 +27,13 @@ fresh-electron-test/
 node_modules/
 package-lock.json
 *.js.map
+
+# Test artifacts & screenshots
+hive/test_screenshots/
+hive/test_*.ps1
+hive/take_screen*.ps1
+hive/screenshot_*.png
+hive_app_screenshot.png
 
 # Temp files
 *.log

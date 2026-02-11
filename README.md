@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/PatSul/HiveCode/releases"><img src="https://img.shields.io/github/v/release/PatSul/HiveCode?label=download&color=brightgreen" alt="Download" /></a>
+  <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen" alt="Download" /></a>
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-2%2C171-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-13-blue" alt="Crates" />
@@ -265,7 +265,7 @@ hive/crates/
 
 ### Option 1: Download Pre-Built Binary (Recommended)
 
-Grab the latest release for your platform from [**GitHub Releases**](https://github.com/PatSul/HiveCode/releases).
+Grab the latest release for your platform from [**GitHub Releases**](https://github.com/PatSul/Hive/releases).
 
 | Platform | Download | Runtime Requirements |
 |---|---|---|
@@ -337,8 +337,8 @@ sudo pacman -S vulkan-icd-loader vulkan-tools
 #### Build & Run
 
 ```bash
-git clone https://github.com/PatSul/HiveCode.git
-cd HiveCode/hive
+git clone https://github.com/PatSul/Hive.git
+cd Hive/hive
 cargo build --release
 cargo run --release
 ```
