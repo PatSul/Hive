@@ -2,6 +2,7 @@
 name = "hive_learn"
 version = "0.1.0"
 edition = "2024"
+license = "BSL-1.1"
 
 [dependencies]
 hive_core = { path = "../hive_core" }

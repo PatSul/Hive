@@ -16,6 +16,9 @@ members = [
     "crates/hive_assistant",
 ]
 
+[workspace.package]
+license = "BSL-1.1"
+
 [workspace.dependencies]
 # GPUI framework
 gpui = "0.2.2"

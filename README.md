@@ -370,7 +370,13 @@ cargo test
 
 ## License
 
-*License TBD — see repository for updates.*
+This project is licensed under the **Business Source License 1.1**. It is free for personal and small-business use. For large-scale commercial use, please contact the author. The license will convert to Apache 2.0 on January 1, 2029. See [LICENSE](LICENSE) for details.
+
+For organizations requiring commercial use or priority support, see our [Enterprise Documentation](docs/ENTERPRISE.md).
+
+## Security
+
+Hive is built on a local-first, zero-trust architecture with a 4-layer outbound firewall (HiveShield), command-level SecurityGateway, and AES-256-GCM encrypted storage. For the full technical deep-dive, see [SECURITY.md](SECURITY.md).
 
 ---
 
