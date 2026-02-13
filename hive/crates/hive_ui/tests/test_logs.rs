@@ -73,7 +73,11 @@ fn filtered_entries_respects_warning_filter() {
 
     let filtered = data.filtered_entries();
     assert_eq!(filtered.len(), 2);
-    assert!(filtered.iter().all(|e| e.level == LogLevel::Error || e.level == LogLevel::Warning));
+    assert!(
+        filtered
+            .iter()
+            .all(|e| e.level == LogLevel::Error || e.level == LogLevel::Warning)
+    );
 }
 
 #[test]

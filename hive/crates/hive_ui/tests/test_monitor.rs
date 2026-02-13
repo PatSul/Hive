@@ -50,7 +50,13 @@ fn agent_status_labels_are_correct() {
 #[test]
 fn active_agent_new_sets_all_fields() {
     let now = Utc::now();
-    let agent = ActiveAgent::new("Coder", AgentStatus::Working, "Writing code", "claude-sonnet-4-5", now);
+    let agent = ActiveAgent::new(
+        "Coder",
+        AgentStatus::Working,
+        "Writing code",
+        "claude-sonnet-4-5",
+        now,
+    );
     assert_eq!(agent.role, "Coder");
     assert_eq!(agent.status, AgentStatus::Working);
     assert_eq!(agent.phase, "Writing code");
@@ -84,7 +90,13 @@ fn fmt_duration_formats_correctly() {
 #[test]
 fn run_history_entry_construction() {
     let entry = RunHistoryEntry::new(
-        "run-001", "Test task", 3, AgentSystemStatus::Idle, 1.50, "10:00", 120,
+        "run-001",
+        "Test task",
+        3,
+        AgentSystemStatus::Idle,
+        1.50,
+        "10:00",
+        120,
     );
     assert_eq!(entry.id, "run-001");
     assert_eq!(entry.task_summary, "Test task");

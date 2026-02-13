@@ -1,5 +1,5 @@
-use hive_ui::panels::review::*;
 use hive_fs::git::FileStatusType;
+use hive_ui::panels::review::*;
 
 #[test]
 fn empty_data_is_not_repo() {
@@ -138,9 +138,27 @@ fn add_comment_and_query() {
 #[test]
 fn comments_for_file_filters_correctly() {
     let mut data = ReviewData::empty();
-    data.add_comment(ReviewComment::new("c1", "a.rs", Some(1), "alice", "Comment on a"));
-    data.add_comment(ReviewComment::new("c2", "b.rs", Some(2), "bob", "Comment on b"));
-    data.add_comment(ReviewComment::new("c3", "a.rs", None, "alice", "Another on a"));
+    data.add_comment(ReviewComment::new(
+        "c1",
+        "a.rs",
+        Some(1),
+        "alice",
+        "Comment on a",
+    ));
+    data.add_comment(ReviewComment::new(
+        "c2",
+        "b.rs",
+        Some(2),
+        "bob",
+        "Comment on b",
+    ));
+    data.add_comment(ReviewComment::new(
+        "c3",
+        "a.rs",
+        None,
+        "alice",
+        "Another on a",
+    ));
 
     let a_comments = data.comments_for_file("a.rs");
     assert_eq!(a_comments.len(), 2);
@@ -155,7 +173,13 @@ fn comments_for_file_filters_correctly() {
 #[test]
 fn resolve_comment_works() {
     let mut data = ReviewData::empty();
-    data.add_comment(ReviewComment::new("c1", "a.rs", Some(1), "alice", "Fix this"));
+    data.add_comment(ReviewComment::new(
+        "c1",
+        "a.rs",
+        Some(1),
+        "alice",
+        "Fix this",
+    ));
     data.add_comment(ReviewComment::new("c2", "a.rs", Some(5), "bob", "And this"));
 
     assert_eq!(data.unresolved_comments().len(), 2);

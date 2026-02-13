@@ -148,7 +148,11 @@ fn filtered_directory_by_category() {
     data.selected_category = Some(SkillCategory::Testing);
     let filtered = data.filtered_directory();
     assert_eq!(filtered.len(), 2);
-    assert!(filtered.iter().all(|s| s.category == SkillCategory::Testing));
+    assert!(
+        filtered
+            .iter()
+            .all(|s| s.category == SkillCategory::Testing)
+    );
 }
 
 #[test]

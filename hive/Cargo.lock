@@ -3315,6 +3315,52 @@ dependencies = [
  "hive_learn",
  "hive_shield",
  "hive_terminal",
+ "hive_ui_core",
+ "hive_ui_panels",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "hive_ui_core"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "gpui-component",
+ "hive_agents",
+ "hive_ai",
+ "hive_assistant",
+ "hive_blockchain",
+ "hive_core",
+ "hive_integrations",
+ "hive_learn",
+ "hive_shield",
+ "hive_terminal",
+]
+
+[[package]]
+name = "hive_ui_panels"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "gpui",
+ "gpui-component",
+ "hive_agents",
+ "hive_ai",
+ "hive_assistant",
+ "hive_blockchain",
+ "hive_core",
+ "hive_fs",
+ "hive_integrations",
+ "hive_learn",
+ "hive_shield",
+ "hive_ui_core",
  "pulldown-cmark",
  "serde",
  "serde_json",

@@ -7,157 +7,58 @@ use tracing::{error, info, warn};
 
 use hive_ai::providers::AiProvider;
 use hive_ai::types::{ChatRequest, ToolDefinition as AiToolDefinition};
+use hive_core::config::HiveConfig;
+use hive_core::notifications::{AppNotification, NotificationType};
 use hive_core::session::SessionState;
 
 use crate::chat_input::{ChatInputView, SubmitMessage};
 use crate::chat_service::{ChatService, StreamCompleted};
-use crate::globals::{
-    AppAiService, AppAssistant, AppConfig, AppLearning, AppMarketplace, AppPersonas, AppShield,
-    AppSpecs,
+use hive_ui_core::{
+    // Globals
+    AppAiService, AppAssistant, AppConfig, AppLearning, AppMarketplace, AppNotifications,
+    AppPersonas, AppSecurity, AppShield, AppSpecs,
+    // Types
+    HiveTheme, Panel, Sidebar,
 };
-use crate::panels::{
-    agents::{AgentsPanelData, AgentsPanel},
-    assistant::{AssistantPanelData, AssistantPanel},
+// Re-export actions so hive_app can import from hive_ui::workspace::*
+pub use hive_ui_core::{
+    ClearChat, NewConversation,
+    SwitchToChat, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
+    SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
+    SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning, SwitchToShield,
+    SwitchToAssistant, SwitchToSettings, SwitchToHelp,
+    FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
+    FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
+    HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
+    KanbanAddTask, LogsClear, LogsToggleAutoScroll, LogsSetFilter,
+    CostsExportCsv, CostsResetToday, CostsClearHistory,
+    ReviewStageAll, ReviewUnstageAll, ReviewCommit, ReviewDiscardAll,
+    SkillsRefresh, RoutingAddRule, TokenLaunchDeploy, TokenLaunchSetStep, TokenLaunchSelectChain,
+    SettingsSave, MonitorRefresh,
+};
+use hive_ui_panels::panels::chat::{DisplayMessage, ToolCallDisplay};
+use hive_ui_panels::panels::{
+    agents::{AgentsPanel, AgentsPanelData},
+    assistant::{AssistantPanel, AssistantPanelData},
     chat::{CachedChatData, ChatPanel},
     costs::{CostData, CostsPanel},
     files::{FilesData, FilesPanel},
     help::HelpPanel,
     history::{HistoryData, HistoryPanel},
     kanban::{KanbanData, KanbanPanel},
-    learning::{LearningPanelData, LearningPanel},
+    learning::{LearningPanel, LearningPanelData},
     logs::{LogsData, LogsPanel},
     monitor::{MonitorData, MonitorPanel},
     review::{ReviewData, ReviewPanel},
     routing::{RoutingData, RoutingPanel},
     settings::{SettingsSaved, SettingsView},
-    shield::{ShieldPanelData, ShieldPanel},
+    shield::{ShieldPanel, ShieldPanelData},
     skills::{SkillsData, SkillsPanel},
     specs::{SpecPanelData, SpecsPanel},
     token_launch::{TokenLaunchData, TokenLaunchPanel},
 };
-use crate::sidebar::{Panel, Sidebar};
 use crate::statusbar::{ConnectivityDisplay, StatusBar};
-use crate::theme::HiveTheme;
 use crate::titlebar::Titlebar;
-
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
-
-actions!(
-    hive_workspace,
-    [
-        ClearChat,
-        NewConversation,
-        // Panel switch actions
-        SwitchToChat,
-        SwitchToHistory,
-        SwitchToFiles,
-        SwitchToKanban,
-        SwitchToMonitor,
-        SwitchToLogs,
-        SwitchToCosts,
-        SwitchToReview,
-        SwitchToSkills,
-        SwitchToRouting,
-        SwitchToTokenLaunch,
-        SwitchToSpecs,
-        SwitchToAgents,
-        SwitchToLearning,
-        SwitchToShield,
-        SwitchToAssistant,
-        SwitchToSettings,
-        SwitchToHelp,
-        // Files panel
-        FilesNavigateBack,
-        FilesRefresh,
-        FilesNewFile,
-        FilesNewFolder,
-        // History panel
-        HistoryRefresh,
-        // Kanban panel
-        KanbanAddTask,
-        // Logs panel
-        LogsClear,
-        LogsToggleAutoScroll,
-        // Costs panel
-        CostsExportCsv,
-        CostsResetToday,
-        CostsClearHistory,
-        // Review panel
-        ReviewStageAll,
-        ReviewUnstageAll,
-        ReviewCommit,
-        ReviewDiscardAll,
-        // Skills panel
-        SkillsRefresh,
-        // Routing panel
-        RoutingAddRule,
-        // Token Launch panel
-        TokenLaunchDeploy,
-        // Settings panel
-        SettingsSave,
-        // Monitor panel
-        MonitorRefresh,
-    ]
-);
-
-/// Navigate to a specific directory in the Files panel.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct FilesNavigateTo {
-    pub path: String,
-}
-
-/// Open a file by path.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct FilesOpenEntry {
-    pub name: String,
-    pub is_directory: bool,
-}
-
-/// Delete a file entry.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct FilesDeleteEntry {
-    pub name: String,
-}
-
-/// Load a conversation by ID in the History panel.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct HistoryLoadConversation {
-    pub conversation_id: String,
-}
-
-/// Delete a conversation by ID.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct HistoryDeleteConversation {
-    pub conversation_id: String,
-}
-
-/// Set log filter level.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct LogsSetFilter {
-    pub level: String,
-}
-
-/// Token Launch wizard: advance or go back a step.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct TokenLaunchSetStep {
-    pub step: usize,
-}
-
-/// Token Launch: select a chain.
-#[derive(Clone, PartialEq, gpui::Action)]
-#[action(namespace = hive_workspace, no_json)]
-pub struct TokenLaunchSelectChain {
-    pub chain: String,
-}
 
 // ---------------------------------------------------------------------------
 // Workspace
@@ -282,8 +183,7 @@ impl HiveWorkspace {
         let mut restored_panel = Panel::Chat;
 
         if let Some(ref conv_id) = session.active_conversation_id {
-            let load_result =
-                chat_service.update(cx, |svc, _cx| svc.load_conversation(conv_id));
+            let load_result = chat_service.update(cx, |svc, _cx| svc.load_conversation(conv_id));
             match load_result {
                 Ok(()) => {
                     info!("Session recovery: loaded conversation {conv_id}");
@@ -307,18 +207,26 @@ impl HiveWorkspace {
         let chat_input = cx.new(|cx| ChatInputView::new(window, cx));
 
         // When the user submits a message, feed it into the send flow.
-        cx.subscribe_in(&chat_input, window, |this, _view, event: &SubmitMessage, window, cx| {
-            this.handle_send_text(event.0.clone(), window, cx);
-        })
+        cx.subscribe_in(
+            &chat_input,
+            window,
+            |this, _view, event: &SubmitMessage, window, cx| {
+                this.handle_send_text(event.0.clone(), window, cx);
+            },
+        )
         .detach();
 
         // Create the interactive settings view entity.
         let settings_view = cx.new(|cx| SettingsView::new(window, cx));
 
         // When settings are saved, persist to AppConfig.
-        cx.subscribe_in(&settings_view, window, |this, _view, _event: &SettingsSaved, _window, cx| {
-            this.handle_settings_save_from_view(cx);
-        })
+        cx.subscribe_in(
+            &settings_view,
+            window,
+            |this, _view, _event: &SettingsSaved, _window, cx| {
+                this.handle_settings_save_from_view(cx);
+            },
+        )
         .detach();
 
         // Focus handle for the workspace root — ensures dispatch_action works
@@ -393,7 +301,7 @@ impl HiveWorkspace {
     }
 
     fn refresh_learning_data(&mut self, cx: &App) {
-        use crate::panels::learning::*;
+        use hive_ui_panels::panels::learning::*;
 
         if !cx.has_global::<AppLearning>() {
             return;
@@ -439,9 +347,9 @@ impl HiveWorkspace {
         self.learning_data = LearningPanelData {
             metrics: QualityMetrics {
                 overall_quality: eval.as_ref().map_or(0.0, |e| e.overall_quality),
-                trend: eval.as_ref().map_or("Stable".into(), |e| {
-                    format!("{:?}", e.trend)
-                }),
+                trend: eval
+                    .as_ref()
+                    .map_or("Stable".into(), |e| format!("{:?}", e.trend)),
                 total_interactions: learning.interaction_count(),
                 correction_rate: eval.as_ref().map_or(0.0, |e| e.correction_rate),
                 regeneration_rate: eval.as_ref().map_or(0.0, |e| e.regeneration_rate),
@@ -451,9 +359,7 @@ impl HiveWorkspace {
             preferences,
             prompt_suggestions: Vec::new(),
             routing_insights,
-            weak_areas: eval
-                .as_ref()
-                .map_or(Vec::new(), |e| e.weak_areas.clone()),
+            weak_areas: eval.as_ref().map_or(Vec::new(), |e| e.weak_areas.clone()),
             best_model: eval.as_ref().and_then(|e| e.best_model.clone()),
             worst_model: eval.as_ref().and_then(|e| e.worst_model.clone()),
         };
@@ -471,19 +377,18 @@ impl HiveWorkspace {
 
     fn refresh_routing_data(&mut self, cx: &App) {
         if cx.has_global::<AppAiService>() {
-            self.routing_data =
-                RoutingData::from_router(cx.global::<AppAiService>().0.router());
+            self.routing_data = RoutingData::from_router(cx.global::<AppAiService>().0.router());
         }
     }
 
     fn refresh_skills_data(&mut self, cx: &App) {
-        use crate::panels::skills::InstalledSkill as UiSkill;
+        use hive_ui_panels::panels::skills::InstalledSkill as UiSkill;
 
         let mut installed = Vec::new();
 
         // Built-in skills from the registry.
-        if cx.has_global::<crate::globals::AppSkills>() {
-            for skill in cx.global::<crate::globals::AppSkills>().0.list() {
+        if cx.has_global::<hive_ui_core::AppSkills>() {
+            for skill in cx.global::<hive_ui_core::AppSkills>().0.list() {
                 installed.push(UiSkill {
                     id: format!("builtin:{}", skill.name),
                     name: skill.name.clone(),
@@ -513,7 +418,7 @@ impl HiveWorkspace {
     }
 
     fn refresh_agents_data(&mut self, cx: &App) {
-        use crate::panels::agents::PersonaDisplay;
+        use hive_ui_panels::panels::agents::PersonaDisplay;
 
         if cx.has_global::<AppPersonas>() {
             let registry = &cx.global::<AppPersonas>().0;
@@ -532,7 +437,7 @@ impl HiveWorkspace {
     }
 
     fn refresh_specs_data(&mut self, cx: &App) {
-        use crate::panels::specs::SpecSummary;
+        use hive_ui_panels::panels::specs::SpecSummary;
 
         if cx.has_global::<AppSpecs>() {
             let manager = &cx.global::<AppSpecs>().0;
@@ -552,7 +457,7 @@ impl HiveWorkspace {
     }
 
     fn refresh_assistant_data(&mut self, cx: &App) {
-        use crate::panels::assistant::{ActiveReminder, BriefingSummary};
+        use hive_ui_panels::panels::assistant::{ActiveReminder, BriefingSummary};
 
         if cx.has_global::<AppAssistant>() {
             let svc = &cx.global::<AppAssistant>().0;
@@ -634,12 +539,7 @@ impl HiveWorkspace {
     /// 2. Extracts the provider + request from the `AppAiService` global.
     /// 3. Spawns an async task that calls `provider.stream_chat()` and feeds
     ///    the resulting receiver back into `ChatService::attach_stream`.
-    fn handle_send_text(
-        &mut self,
-        text: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn handle_send_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         if text.trim().is_empty() {
             return;
         }
@@ -692,14 +592,15 @@ impl HiveWorkspace {
             .collect();
 
         // 4. Extract provider + request from the global (sync — no await).
-        let stream_setup: Option<(Arc<dyn AiProvider>, ChatRequest)> =
-            if cx.has_global::<AppAiService>() {
-                cx.global::<AppAiService>()
-                    .0
-                    .prepare_stream(ai_messages, &model, None, Some(tool_defs))
-            } else {
-                None
-            };
+        let stream_setup: Option<(Arc<dyn AiProvider>, ChatRequest)> = if cx
+            .has_global::<AppAiService>()
+        {
+            cx.global::<AppAiService>()
+                .0
+                .prepare_stream(ai_messages, &model, None, Some(tool_defs))
+        } else {
+            None
+        };
 
         let Some((provider, request)) = stream_setup else {
             self.chat_service.update(cx, |svc, cx| {
@@ -889,12 +790,16 @@ impl HiveWorkspace {
             Panel::Review => ReviewPanel::render(&self.review_data, theme).into_any_element(),
             Panel::Skills => SkillsPanel::render(&self.skills_data, theme).into_any_element(),
             Panel::Routing => RoutingPanel::render(&self.routing_data, theme).into_any_element(),
-            Panel::TokenLaunch => TokenLaunchPanel::render(&self.token_launch_data, theme).into_any_element(),
+            Panel::TokenLaunch => {
+                TokenLaunchPanel::render(&self.token_launch_data, theme).into_any_element()
+            }
             Panel::Specs => SpecsPanel::render(&self.specs_data, theme).into_any_element(),
             Panel::Agents => AgentsPanel::render(&self.agents_data, theme).into_any_element(),
             Panel::Shield => ShieldPanel::render(&self.shield_data, theme).into_any_element(),
             Panel::Learning => LearningPanel::render(&self.learning_data, theme).into_any_element(),
-            Panel::Assistant => AssistantPanel::render(&self.assistant_data, theme).into_any_element(),
+            Panel::Assistant => {
+                AssistantPanel::render(&self.assistant_data, theme).into_any_element()
+            }
             Panel::Settings => self.settings_view.clone().into_any_element(),
             Panel::Help => HelpPanel::render(theme).into_any_element(),
         }
@@ -909,7 +814,7 @@ impl HiveWorkspace {
         let svc = self.chat_service.read(cx);
 
         // Rebuild display messages only when the service has mutated.
-        self.cached_chat_data.sync_from_service(svc);
+        sync_chat_cache(&mut self.cached_chat_data, svc);
 
         let streaming_content = svc.streaming_content().to_string();
         let is_streaming = svc.is_streaming();
@@ -1231,13 +1136,37 @@ impl HiveWorkspace {
             }
             info!("Files: open file {}", file_path.display());
             self.files_data.selected_file = Some(action.name.clone());
-            // Open in default system editor
+            // Open in default system editor, validating the launch command.
+            let command_string = if cfg!(target_os = "windows") {
+                format!("cmd /C start \"\" \"{}\"", file_path.to_string_lossy())
+            } else if cfg!(target_os = "macos") {
+                format!("open \"{}\"", file_path.to_string_lossy())
+            } else {
+                format!("xdg-open \"{}\"", file_path.to_string_lossy())
+            };
+            if cx.has_global::<AppSecurity>() {
+                if let Err(e) = cx.global::<AppSecurity>().0.check_command(&command_string) {
+                    error!("Files: blocked open command: {e}");
+                    self.push_notification(
+                        cx,
+                        NotificationType::Error,
+                        "Files",
+                        format!("Blocked file open command: {e}"),
+                    );
+                    return;
+                }
+            }
+
             #[cfg(target_os = "windows")]
-            let _ = std::process::Command::new("cmd").args(["/C", "start", "", &file_path.to_string_lossy()]).spawn();
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", &file_path.to_string_lossy()])
+                .spawn();
             #[cfg(target_os = "macos")]
             let _ = std::process::Command::new("open").arg(&file_path).spawn();
             #[cfg(target_os = "linux")]
-            let _ = std::process::Command::new("xdg-open").arg(&file_path).spawn();
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&file_path)
+                .spawn();
         }
         cx.notify();
     }
@@ -1381,10 +1310,16 @@ impl HiveWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::panels::kanban::{KanbanTask, Priority};
+        use hive_ui_panels::panels::kanban::{KanbanTask, Priority};
         info!("Kanban: add task");
         let task = KanbanTask {
-            id: self.kanban_data.columns.iter().map(|c| c.tasks.len() as u64).sum::<u64>() + 1,
+            id: self
+                .kanban_data
+                .columns
+                .iter()
+                .map(|c| c.tasks.len() as u64)
+                .sum::<u64>()
+                + 1,
             title: "New Task".to_string(),
             description: String::new(),
             priority: Priority::Medium,
@@ -1396,6 +1331,36 @@ impl HiveWorkspace {
     }
 
     // -- Logs panel handlers -------------------------------------------------
+
+    fn push_notification(
+        &self,
+        cx: &mut Context<Self>,
+        kind: NotificationType,
+        title: &str,
+        message: impl Into<String>,
+    ) {
+        if cx.has_global::<AppNotifications>() {
+            cx.global_mut::<AppNotifications>()
+                .0
+                .push(AppNotification::new(kind, message).with_title(title));
+        }
+    }
+
+    fn run_checked_git_command(
+        &self,
+        cx: &Context<Self>,
+        args: &[&str],
+        security_check: &str,
+    ) -> Result<std::process::Output, String> {
+        if cx.has_global::<AppSecurity>() {
+            cx.global::<AppSecurity>().0.check_command(security_check)?;
+        }
+
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to run git {}: {e}", args.join(" ")))
+    }
 
     fn handle_logs_clear(
         &mut self,
@@ -1414,7 +1379,7 @@ impl HiveWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::panels::logs::LogLevel;
+        use hive_ui_panels::panels::logs::LogLevel;
         info!("Logs: set filter to {}", action.level);
         self.logs_data.filter = match action.level.as_str() {
             "error" => LogLevel::Error,
@@ -1441,10 +1406,53 @@ impl HiveWorkspace {
         &mut self,
         _action: &CostsExportCsv,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         info!("Costs: export CSV");
-        // TODO: implement CSV export
+        let Some(csv) = cx
+            .has_global::<AppAiService>()
+            .then(|| cx.global::<AppAiService>().0.cost_tracker().export_csv())
+        else {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Cost Export",
+                "No cost tracker available.",
+            );
+            return;
+        };
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let export_dir = HiveConfig::base_dir()
+            .map(|d| d.join("exports"))
+            .unwrap_or_else(|_| PathBuf::from(".hive/exports"));
+        let export_path = export_dir.join(format!("costs-{timestamp}.csv"));
+
+        let result = (|| -> anyhow::Result<()> {
+            std::fs::create_dir_all(&export_dir)?;
+            std::fs::write(&export_path, csv)?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.push_notification(
+                    cx,
+                    NotificationType::Success,
+                    "Cost Export",
+                    format!("Exported CSV to {}", export_path.display()),
+                );
+            }
+            Err(e) => {
+                error!("Costs: failed to export CSV: {e}");
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Cost Export",
+                    format!("Failed to export CSV: {e}"),
+                );
+            }
+        }
     }
 
     fn handle_costs_reset_today(
@@ -1455,7 +1463,10 @@ impl HiveWorkspace {
     ) {
         info!("Costs: reset today");
         if cx.has_global::<AppAiService>() {
-            cx.global_mut::<AppAiService>().0.cost_tracker_mut().reset_today();
+            cx.global_mut::<AppAiService>()
+                .0
+                .cost_tracker_mut()
+                .reset_today();
         }
         cx.notify();
     }
@@ -1482,9 +1493,23 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Review: stage all");
-        // Security: bypasses SecurityGateway — args are hardcoded literals, no user input.
-        let _ = std::process::Command::new("git").args(["add", "-A"]).output();
-        self.review_data = ReviewData::from_cwd();
+        match self.run_checked_git_command(cx, &["add", "-A"], "git add -A") {
+            Ok(output) if output.status.success() => {
+                self.review_data = ReviewData::from_cwd();
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Review",
+                    format!("git add -A failed: {}", stderr.trim()),
+                );
+            }
+            Err(e) => {
+                self.push_notification(cx, NotificationType::Error, "Review", e);
+            }
+        }
         cx.notify();
     }
 
@@ -1495,9 +1520,23 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Review: unstage all");
-        // Security: bypasses SecurityGateway — args are hardcoded literals, no user input.
-        let _ = std::process::Command::new("git").args(["reset", "HEAD"]).output();
-        self.review_data = ReviewData::from_cwd();
+        match self.run_checked_git_command(cx, &["reset", "HEAD"], "git reset HEAD") {
+            Ok(output) if output.status.success() => {
+                self.review_data = ReviewData::from_cwd();
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Review",
+                    format!("git reset HEAD failed: {}", stderr.trim()),
+                );
+            }
+            Err(e) => {
+                self.push_notification(cx, NotificationType::Error, "Review", e);
+            }
+        }
         cx.notify();
     }
 
@@ -1505,10 +1544,61 @@ impl HiveWorkspace {
         &mut self,
         _action: &ReviewCommit,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         info!("Review: commit");
-        // TODO: prompt for commit message
+        let staged = self.review_data.staged_count;
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC");
+        let message = if staged > 0 {
+            format!("chore(review): apply {staged} staged change(s) ({timestamp})")
+        } else {
+            format!("chore(review): snapshot commit ({timestamp})")
+        };
+
+        match self.run_checked_git_command(cx, &["commit", "-m", &message], "git commit -m") {
+            Ok(output) if output.status.success() => {
+                let commit_hash = self
+                    .run_checked_git_command(
+                        cx,
+                        &["rev-parse", "--short", "HEAD"],
+                        "git rev-parse HEAD",
+                    )
+                    .ok()
+                    .and_then(|o| {
+                        if o.status.success() {
+                            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                self.review_data = ReviewData::from_cwd();
+                self.push_notification(
+                    cx,
+                    NotificationType::Success,
+                    "Review",
+                    format!("Created commit {commit_hash}"),
+                );
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let msg = if !stderr.trim().is_empty() {
+                    stderr.trim().to_string()
+                } else if !stdout.trim().is_empty() {
+                    stdout.trim().to_string()
+                } else {
+                    "git commit failed".to_string()
+                };
+                self.push_notification(cx, NotificationType::Warning, "Review", msg);
+            }
+            Err(e) => {
+                self.push_notification(cx, NotificationType::Error, "Review", e);
+            }
+        }
+        cx.notify();
     }
 
     fn handle_review_discard_all(
@@ -1518,9 +1608,23 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Review: discard all");
-        // Security: bypasses SecurityGateway — args are hardcoded literals, no user input.
-        let _ = std::process::Command::new("git").args(["checkout", "--", "."]).output();
-        self.review_data = ReviewData::from_cwd();
+        match self.run_checked_git_command(cx, &["checkout", "--", "."], "git checkout -- .") {
+            Ok(output) if output.status.success() => {
+                self.review_data = ReviewData::from_cwd();
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Review",
+                    format!("git checkout -- . failed: {}", stderr.trim()),
+                );
+            }
+            Err(e) => {
+                self.push_notification(cx, NotificationType::Error, "Review", e);
+            }
+        }
         cx.notify();
     }
 
@@ -1545,7 +1649,7 @@ impl HiveWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::panels::routing::RoutingRule;
+        use hive_ui_panels::panels::routing::RoutingRule;
         info!("Routing: add rule");
         self.routing_data.custom_rules.push(RoutingRule {
             name: "New Rule".to_string(),
@@ -1564,7 +1668,7 @@ impl HiveWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::panels::token_launch::WizardStep;
+        use hive_ui_panels::panels::token_launch::WizardStep;
         info!("TokenLaunch: set step {}", action.step);
         self.token_launch_data.current_step = match action.step {
             0 => WizardStep::SelectChain,
@@ -1581,7 +1685,7 @@ impl HiveWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use crate::panels::token_launch::ChainOption;
+        use hive_ui_panels::panels::token_launch::ChainOption;
         info!("TokenLaunch: select chain {}", action.chain);
         self.token_launch_data.selected_chain = match action.chain.as_str() {
             "solana" => Some(ChainOption::Solana),
@@ -1589,6 +1693,18 @@ impl HiveWorkspace {
             "base" => Some(ChainOption::Base),
             _ => None,
         };
+
+        if let Some(chain) = self.token_launch_data.selected_chain {
+            self.token_launch_data.decimals = chain.default_decimals();
+            self.token_launch_data.estimated_cost = Some(match chain {
+                ChainOption::Solana => 0.05,
+                ChainOption::Ethereum => 0.015,
+                ChainOption::Base => 0.0001,
+            });
+        } else {
+            self.token_launch_data.estimated_cost = None;
+        }
+
         cx.notify();
     }
 
@@ -1599,7 +1715,38 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("TokenLaunch: deploy");
-        // TODO: wire to actual blockchain deployment
+        use hive_ui_panels::panels::token_launch::DeployStatus;
+
+        if self.token_launch_data.selected_chain.is_none() {
+            self.token_launch_data.deploy_status =
+                DeployStatus::Failed("Select a target chain before deploying.".to_string());
+            cx.notify();
+            return;
+        }
+
+        if self.token_launch_data.token_name.trim().is_empty()
+            || self.token_launch_data.token_symbol.trim().is_empty()
+            || self.token_launch_data.total_supply.trim().is_empty()
+        {
+            self.token_launch_data.deploy_status = DeployStatus::Failed(
+                "Token name, symbol, and total supply are required.".to_string(),
+            );
+            cx.notify();
+            return;
+        }
+
+        if self.token_launch_data.wallet_address.is_none() {
+            self.token_launch_data.deploy_status =
+                DeployStatus::Failed("Connect a wallet before deploying.".to_string());
+            cx.notify();
+            return;
+        }
+
+        self.token_launch_data.deploy_status = DeployStatus::Deploying;
+        self.token_launch_data.deploy_status = DeployStatus::Failed(
+            "On-chain deployment is not enabled in this build yet. Use the wizard to validate configuration, then deploy via backend blockchain APIs once enabled."
+                .to_string(),
+        );
         cx.notify();
     }
 
@@ -1801,9 +1948,7 @@ impl Render for HiveWorkspace {
                             .overflow_hidden()
                             .child(active_panel_el)
                             // Chat input (only shown on Chat panel)
-                            .when(active_panel == Panel::Chat, |el: Div| {
-                                el.child(chat_input)
-                            }),
+                            .when(active_panel == Panel::Chat, |el: Div| el.child(chat_input)),
                     ),
             )
             // Status bar
@@ -1864,11 +2009,7 @@ impl HiveWorkspace {
                             cx.notify();
                         }),
                     )
-                    .child(
-                        Icon::new(panel.icon())
-                            .size_4()
-                            .text_color(text_color),
-                    )
+                    .child(Icon::new(panel.icon()).size_4().text_color(text_color))
                     .child(
                         div()
                             .text_size(theme.font_size_xs)
@@ -1888,3 +2029,66 @@ impl HiveWorkspace {
 pub struct SwitchPanel(pub Panel);
 
 impl EventEmitter<SwitchPanel> for HiveWorkspace {}
+
+// ---------------------------------------------------------------------------
+// Chat cache sync (bridges ChatService → CachedChatData across crate boundary)
+// ---------------------------------------------------------------------------
+
+fn sync_chat_cache(cache: &mut CachedChatData, svc: &ChatService) {
+    let svc_gen = svc.generation();
+    if svc_gen == cache.generation {
+        return;
+    }
+
+    cache.display_messages.clear();
+    cache.total_cost = 0.0;
+    cache.total_tokens = 0;
+
+    for msg in svc.messages() {
+        if msg.role == crate::chat_service::MessageRole::Assistant && msg.content.is_empty() {
+            continue;
+        }
+        let role = match msg.role {
+            crate::chat_service::MessageRole::User => hive_ai::MessageRole::User,
+            crate::chat_service::MessageRole::Assistant => hive_ai::MessageRole::Assistant,
+            crate::chat_service::MessageRole::System => hive_ai::MessageRole::System,
+            crate::chat_service::MessageRole::Error => hive_ai::MessageRole::Error,
+            crate::chat_service::MessageRole::Tool => hive_ai::MessageRole::Tool,
+        };
+        let tool_calls = msg
+            .tool_calls
+            .as_ref()
+            .map(|tcs| {
+                tcs.iter()
+                    .map(|tc| ToolCallDisplay {
+                        name: tc.name.clone(),
+                        args: serde_json::to_string_pretty(&tc.input)
+                            .unwrap_or_else(|_| tc.input.to_string()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let display_msg = DisplayMessage {
+            role,
+            content: msg.content.clone(),
+            thinking: None,
+            model: msg.model.clone(),
+            cost: msg.cost,
+            tokens: msg.tokens.map(|(i, o)| (i + o) as u32),
+            timestamp: msg.timestamp,
+            show_thinking: false,
+            tool_calls,
+            tool_call_id: msg.tool_call_id.clone(),
+        };
+        if let Some(c) = display_msg.cost {
+            cache.total_cost += c;
+        }
+        if let Some(t) = display_msg.tokens {
+            cache.total_tokens += t;
+        }
+        cache.display_messages.push(display_msg);
+    }
+
+    cache.generation = svc_gen;
+}

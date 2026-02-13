@@ -16,7 +16,7 @@ use uuid::Uuid;
 use hive_ai::providers::AiProvider;
 use hive_ai::types::{
     ChatMessage as AiChatMessage, ChatRequest, MessageRole as AiMessageRole, StopReason,
-    StreamChunk, ToolCall as AiToolCall, TokenUsage,
+    StreamChunk, TokenUsage, ToolCall as AiToolCall,
 };
 use hive_core::conversations::{
     Conversation, ConversationStore, ConversationSummary, StoredMessage, generate_title,
@@ -290,15 +290,9 @@ impl ChatService {
 
         let title = generate_title(&stored_messages);
 
-        let total_cost: f64 = stored_messages
-            .iter()
-            .filter_map(|m| m.cost)
-            .sum();
+        let total_cost: f64 = stored_messages.iter().filter_map(|m| m.cost).sum();
 
-        let total_tokens: u32 = stored_messages
-            .iter()
-            .filter_map(|m| m.tokens)
-            .sum();
+        let total_tokens: u32 = stored_messages.iter().filter_map(|m| m.tokens).sum();
 
         let now = Utc::now();
 
@@ -440,30 +434,30 @@ impl ChatService {
         let assistant_idx = self.messages.len().saturating_sub(1);
         let model_clone = model.clone();
 
-        let task = cx.spawn(async move |this: WeakEntity<ChatService>, app: &mut AsyncApp| {
-            let mut accumulated = String::new();
-            let mut final_usage: Option<TokenUsage> = None;
+        let task = cx.spawn(
+            async move |this: WeakEntity<ChatService>, app: &mut AsyncApp| {
+                let mut accumulated = String::new();
+                let mut final_usage: Option<TokenUsage> = None;
 
-            loop {
-                // Receive the next chunk. We poll via a small async block
-                // because `rx.recv()` is cancel-safe.
-                let chunk = rx.recv().await;
+                loop {
+                    // Receive the next chunk. We poll via a small async block
+                    // because `rx.recv()` is cancel-safe.
+                    let chunk = rx.recv().await;
 
-                match chunk {
-                    Some(chunk) => {
-                        accumulated.push_str(&chunk.content);
+                    match chunk {
+                        Some(chunk) => {
+                            accumulated.push_str(&chunk.content);
 
-                        if let Some(usage) = &chunk.usage {
-                            final_usage = Some(usage.clone());
-                        }
+                            if let Some(usage) = &chunk.usage {
+                                final_usage = Some(usage.clone());
+                            }
 
-                        let is_done = chunk.done;
+                            let is_done = chunk.done;
 
-                        // Throttle UI updates to ~15 fps (67ms) during streaming.
-                        // Always notify on the final chunk.
-                        let content_snapshot = accumulated.clone();
-                        let update_result =
-                            this.update(app, |this: &mut ChatService, cx| {
+                            // Throttle UI updates to ~15 fps (67ms) during streaming.
+                            // Always notify on the final chunk.
+                            let content_snapshot = accumulated.clone();
+                            let update_result = this.update(app, |this: &mut ChatService, cx| {
                                 this.streaming_content = content_snapshot;
                                 let elapsed = this.last_stream_notify.elapsed();
                                 if is_done || elapsed.as_millis() >= 67 {
@@ -472,30 +466,31 @@ impl ChatService {
                                 }
                             });
 
-                        if update_result.is_err() {
-                            // Entity was dropped.
-                            break;
-                        }
+                            if update_result.is_err() {
+                                // Entity was dropped.
+                                break;
+                            }
 
-                        if is_done {
+                            if is_done {
+                                break;
+                            }
+                        }
+                        None => {
+                            // Channel closed (stream ended without a done flag).
                             break;
                         }
-                    }
-                    None => {
-                        // Channel closed (stream ended without a done flag).
-                        break;
                     }
                 }
-            }
 
-            // Finalize: move accumulated content into the placeholder message.
-            let usage = final_usage;
-            let _ = this.update(app, |this: &mut ChatService, cx| {
-                this.finalize_stream(assistant_idx, &accumulated, &model_clone, usage.as_ref());
-                this.emit_stream_completed(&model_clone, cx);
-                cx.notify();
-            });
-        });
+                // Finalize: move accumulated content into the placeholder message.
+                let usage = final_usage;
+                let _ = this.update(app, |this: &mut ChatService, cx| {
+                    this.finalize_stream(assistant_idx, &accumulated, &model_clone, usage.as_ref());
+                    this.emit_stream_completed(&model_clone, cx);
+                    cx.notify();
+                });
+            },
+        );
 
         self._stream_task = Some(task);
     }
@@ -517,94 +512,94 @@ impl ChatService {
         let assistant_idx = self.messages.len().saturating_sub(1);
         let model_clone = model.clone();
 
-        let task = cx.spawn(async move |this: WeakEntity<ChatService>, app: &mut AsyncApp| {
-            let mut current_rx = rx;
-            let mut current_request = initial_request;
-            let mut current_assistant_idx = assistant_idx;
-            let mut iteration = 0usize;
-            const MAX_TOOL_ITERATIONS: usize = 10;
+        let task = cx.spawn(
+            async move |this: WeakEntity<ChatService>, app: &mut AsyncApp| {
+                let mut current_rx = rx;
+                let mut current_request = initial_request;
+                let mut current_assistant_idx = assistant_idx;
+                let mut iteration = 0usize;
+                const MAX_TOOL_ITERATIONS: usize = 10;
 
-            loop {
-                // --- Consume the current stream ---
-                let mut accumulated = String::new();
-                let mut final_tool_calls: Vec<AiToolCall> = Vec::new();
-                let mut final_usage: Option<TokenUsage> = None;
-                let mut final_stop_reason: Option<StopReason> = None;
+                loop {
+                    // --- Consume the current stream ---
+                    let mut accumulated = String::new();
+                    let mut final_tool_calls: Vec<AiToolCall> = Vec::new();
+                    let mut final_usage: Option<TokenUsage> = None;
+                    let mut final_stop_reason: Option<StopReason> = None;
 
-                while let Some(chunk) = current_rx.recv().await {
-                    accumulated.push_str(&chunk.content);
+                    while let Some(chunk) = current_rx.recv().await {
+                        accumulated.push_str(&chunk.content);
 
-                    if let Some(ref u) = chunk.usage {
-                        final_usage = Some(u.clone());
-                    }
-                    if let Some(ref tc) = chunk.tool_calls {
-                        final_tool_calls = tc.clone();
-                    }
-                    if let Some(sr) = chunk.stop_reason {
-                        final_stop_reason = Some(sr);
-                    }
-
-                    let is_done = chunk.done;
-                    let snap = accumulated.clone();
-
-                    let upd = this.update(app, |svc: &mut ChatService, cx| {
-                        svc.streaming_content = snap;
-                        let elapsed = svc.last_stream_notify.elapsed();
-                        if is_done || elapsed.as_millis() >= 67 {
-                            svc.last_stream_notify = std::time::Instant::now();
-                            cx.notify();
+                        if let Some(ref u) = chunk.usage {
+                            final_usage = Some(u.clone());
                         }
-                    });
+                        if let Some(ref tc) = chunk.tool_calls {
+                            final_tool_calls = tc.clone();
+                        }
+                        if let Some(sr) = chunk.stop_reason {
+                            final_stop_reason = Some(sr);
+                        }
 
-                    if upd.is_err() || is_done {
+                        let is_done = chunk.done;
+                        let snap = accumulated.clone();
+
+                        let upd = this.update(app, |svc: &mut ChatService, cx| {
+                            svc.streaming_content = snap;
+                            let elapsed = svc.last_stream_notify.elapsed();
+                            if is_done || elapsed.as_millis() >= 67 {
+                                svc.last_stream_notify = std::time::Instant::now();
+                                cx.notify();
+                            }
+                        });
+
+                        if upd.is_err() || is_done {
+                            break;
+                        }
+                    }
+
+                    // --- Decide: tool loop or finalize ---
+                    let is_tool_use = matches!(final_stop_reason, Some(StopReason::ToolUse))
+                        && !final_tool_calls.is_empty()
+                        && iteration < MAX_TOOL_ITERATIONS;
+
+                    if !is_tool_use {
+                        // Normal end — finalize the assistant message.
+                        let m = model_clone.clone();
+                        let _ = this.update(app, |svc: &mut ChatService, cx| {
+                            svc.finalize_stream(
+                                current_assistant_idx,
+                                &accumulated,
+                                &m,
+                                final_usage.as_ref(),
+                            );
+                            svc.emit_stream_completed(&m, cx);
+                            cx.notify();
+                        });
                         break;
                     }
-                }
 
-                // --- Decide: tool loop or finalize ---
-                let is_tool_use = matches!(final_stop_reason, Some(StopReason::ToolUse))
-                    && !final_tool_calls.is_empty()
-                    && iteration < MAX_TOOL_ITERATIONS;
+                    // --- Execute tools ---
+                    info!(
+                        "Tool loop iteration {}: executing {} tool call(s)",
+                        iteration + 1,
+                        final_tool_calls.len()
+                    );
 
-                if !is_tool_use {
-                    // Normal end — finalize the assistant message.
+                    let registry = hive_agents::tool_use::builtin_registry();
+                    let agent_calls: Vec<hive_agents::tool_use::ToolCall> = final_tool_calls
+                        .iter()
+                        .map(|tc| hive_agents::tool_use::ToolCall {
+                            id: tc.id.clone(),
+                            name: tc.name.clone(),
+                            input: tc.input.clone(),
+                        })
+                        .collect();
+                    let results = registry.execute_all(&agent_calls);
+
+                    // --- Update conversation ---
                     let m = model_clone.clone();
-                    let _ = this.update(app, |svc: &mut ChatService, cx| {
-                        svc.finalize_stream(
-                            current_assistant_idx,
-                            &accumulated,
-                            &m,
-                            final_usage.as_ref(),
-                        );
-                        svc.emit_stream_completed(&m, cx);
-                        cx.notify();
-                    });
-                    break;
-                }
-
-                // --- Execute tools ---
-                info!(
-                    "Tool loop iteration {}: executing {} tool call(s)",
-                    iteration + 1,
-                    final_tool_calls.len()
-                );
-
-                let registry = hive_agents::tool_use::builtin_registry();
-                let agent_calls: Vec<hive_agents::tool_use::ToolCall> = final_tool_calls
-                    .iter()
-                    .map(|tc| hive_agents::tool_use::ToolCall {
-                        id: tc.id.clone(),
-                        name: tc.name.clone(),
-                        input: tc.input.clone(),
-                    })
-                    .collect();
-                let results = registry.execute_all(&agent_calls);
-
-                // --- Update conversation ---
-                let m = model_clone.clone();
-                let tc_for_msg = final_tool_calls.clone();
-                let update_result =
-                    this.update(app, |svc: &mut ChatService, cx| {
+                    let tc_for_msg = final_tool_calls.clone();
+                    let update_result = this.update(app, |svc: &mut ChatService, cx| {
                         // Finalize assistant message with tool_calls metadata.
                         if let Some(msg) = svc.messages.get_mut(current_assistant_idx) {
                             msg.content = accumulated.clone();
@@ -617,17 +612,14 @@ impl ChatService {
                                     u.completion_tokens as usize,
                                 );
                                 msg.cost = Some(cost.total_cost);
-                                msg.tokens = Some((
-                                    u.prompt_tokens as usize,
-                                    u.completion_tokens as usize,
-                                ));
+                                msg.tokens =
+                                    Some((u.prompt_tokens as usize, u.completion_tokens as usize));
                             }
                         }
 
                         // Append tool result messages.
                         for result in &results {
-                            let mut tool_msg =
-                                ChatMessage::new(MessageRole::Tool, &result.content);
+                            let mut tool_msg = ChatMessage::new(MessageRole::Tool, &result.content);
                             tool_msg.tool_call_id = Some(result.tool_use_id.clone());
                             svc.messages.push(tool_msg);
                         }
@@ -643,45 +635,46 @@ impl ChatService {
                         svc.messages.len() - 1
                     });
 
-                let Ok(new_idx) = update_result else {
-                    break; // entity dropped
-                };
-                current_assistant_idx = new_idx;
+                    let Ok(new_idx) = update_result else {
+                        break; // entity dropped
+                    };
+                    current_assistant_idx = new_idx;
 
-                // --- Rebuild request with updated conversation ---
-                let msgs_result =
-                    this.update(app, |svc: &mut ChatService, _cx| svc.build_ai_messages());
+                    // --- Rebuild request with updated conversation ---
+                    let msgs_result =
+                        this.update(app, |svc: &mut ChatService, _cx| svc.build_ai_messages());
 
-                let Ok(ai_messages) = msgs_result else {
-                    break; // entity dropped
-                };
+                    let Ok(ai_messages) = msgs_result else {
+                        break; // entity dropped
+                    };
 
-                current_request = ChatRequest {
-                    messages: ai_messages,
-                    model: current_request.model.clone(),
-                    max_tokens: current_request.max_tokens,
-                    temperature: current_request.temperature,
-                    system_prompt: current_request.system_prompt.clone(),
-                    tools: current_request.tools.clone(),
-                };
+                    current_request = ChatRequest {
+                        messages: ai_messages,
+                        model: current_request.model.clone(),
+                        max_tokens: current_request.max_tokens,
+                        temperature: current_request.temperature,
+                        system_prompt: current_request.system_prompt.clone(),
+                        tools: current_request.tools.clone(),
+                    };
 
-                // --- Get new stream from provider ---
-                match provider.stream_chat(&current_request).await {
-                    Ok(rx) => {
-                        current_rx = rx;
+                    // --- Get new stream from provider ---
+                    match provider.stream_chat(&current_request).await {
+                        Ok(rx) => {
+                            current_rx = rx;
+                        }
+                        Err(e) => {
+                            error!("Tool re-send failed: {e}");
+                            let _ = this.update(app, |svc: &mut ChatService, cx| {
+                                svc.set_error(format!("Tool re-send failed: {e}"), cx);
+                            });
+                            break;
+                        }
                     }
-                    Err(e) => {
-                        error!("Tool re-send failed: {e}");
-                        let _ = this.update(app, |svc: &mut ChatService, cx| {
-                            svc.set_error(format!("Tool re-send failed: {e}"), cx);
-                        });
-                        break;
-                    }
+
+                    iteration += 1;
                 }
-
-                iteration += 1;
-            }
-        });
+            },
+        );
 
         self._stream_task = Some(task);
     }

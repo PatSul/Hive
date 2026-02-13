@@ -24,10 +24,7 @@ fn version_badge_format_matches_convention() {
     // The version badge should produce a "v0.1.0" style string.
     let formatted = format!("v{VERSION}");
     assert!(formatted.starts_with('v'), "Badge must start with 'v'");
-    assert!(
-        formatted.len() > 1,
-        "Badge must contain more than just 'v'"
-    );
+    assert!(formatted.len() > 1, "Badge must contain more than just 'v'");
     assert!(
         formatted.contains('.'),
         "Badge must contain a dot separator for semver"

@@ -1,6 +1,6 @@
-use hive_ui::panels::routing::*;
-use hive_ai::routing::{ModelRouter, ProviderType};
 use hive_ai::ModelTier;
+use hive_ai::routing::{ModelRouter, ProviderType};
+use hive_ui::panels::routing::*;
 
 #[test]
 fn empty_data_has_no_content() {

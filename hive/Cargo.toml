@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/hive_app",
     "crates/hive_ui",
+    "crates/hive_ui_core",
+    "crates/hive_ui_panels",
     "crates/hive_ai",
     "crates/hive_core",
     "crates/hive_fs",

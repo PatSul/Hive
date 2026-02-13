@@ -1,13 +1,9 @@
 use chrono::Utc;
 use uuid::Uuid;
 
+use hive_ai::types::{MessageRole as AiMessageRole, TokenUsage};
+use hive_core::conversations::{ConversationStore, StoredMessage};
 use hive_ui::chat_service::*;
-use hive_ai::types::{
-    MessageRole as AiMessageRole, TokenUsage,
-};
-use hive_core::conversations::{
-    ConversationStore, StoredMessage,
-};
 
 // -- Unit tests (no GPUI runtime required) ------------------------------
 
@@ -46,7 +42,10 @@ fn test_chat_message_error() {
 #[test]
 fn test_message_role_to_ai_role() {
     assert_eq!(MessageRole::User.to_ai_role(), AiMessageRole::User);
-    assert_eq!(MessageRole::Assistant.to_ai_role(), AiMessageRole::Assistant);
+    assert_eq!(
+        MessageRole::Assistant.to_ai_role(),
+        AiMessageRole::Assistant
+    );
     assert_eq!(MessageRole::System.to_ai_role(), AiMessageRole::System);
     assert_eq!(MessageRole::Error.to_ai_role(), AiMessageRole::Error);
 }
@@ -88,7 +87,8 @@ fn test_chat_service_clear() {
 fn test_build_ai_messages_skips_errors_and_placeholders() {
     let mut svc = ChatService::new("model-a".into());
     svc.messages.push(ChatMessage::user("hello"));
-    svc.messages.push(ChatMessage::new(MessageRole::Assistant, "world"));
+    svc.messages
+        .push(ChatMessage::new(MessageRole::Assistant, "world"));
     svc.messages.push(ChatMessage::error("bad"));
     svc.messages.push(ChatMessage::assistant_placeholder()); // empty assistant
 
@@ -156,8 +156,8 @@ fn test_finalize_stream_out_of_bounds_is_safe() {
 /// Helper: create a temp-dir-backed ConversationStore.
 fn temp_store() -> (ConversationStore, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("Failed to create tempdir");
-    let store = ConversationStore::new_at(tmp.path().to_path_buf())
-        .expect("Failed to create store");
+    let store =
+        ConversationStore::new_at(tmp.path().to_path_buf()).expect("Failed to create store");
     (store, tmp)
 }
 
@@ -239,7 +239,8 @@ fn test_save_skips_error_and_placeholder_messages() {
     svc.conversation_id = Some("skip-test".to_string());
 
     svc.messages.push(ChatMessage::user("hi"));
-    svc.messages.push(ChatMessage::new(MessageRole::Assistant, "hello"));
+    svc.messages
+        .push(ChatMessage::new(MessageRole::Assistant, "hello"));
     svc.messages.push(ChatMessage::error("bad thing"));
     svc.messages.push(ChatMessage::assistant_placeholder()); // empty
 
@@ -358,10 +359,8 @@ fn test_save_preserves_created_at_on_update() {
     let original_created = first_load.created_at;
 
     // Add another message and save again.
-    svc.messages.push(ChatMessage::new(
-        MessageRole::Assistant,
-        "second",
-    ));
+    svc.messages
+        .push(ChatMessage::new(MessageRole::Assistant, "second"));
     svc.save_to_store(&store, "preserve-ts").unwrap();
 
     let second_load = store.load("preserve-ts").unwrap();
@@ -435,7 +434,10 @@ fn test_chat_message_from_stored_conversion() {
 #[test]
 fn test_message_role_from_stored() {
     assert_eq!(MessageRole::from_stored("user"), MessageRole::User);
-    assert_eq!(MessageRole::from_stored("assistant"), MessageRole::Assistant);
+    assert_eq!(
+        MessageRole::from_stored("assistant"),
+        MessageRole::Assistant
+    );
     assert_eq!(MessageRole::from_stored("system"), MessageRole::System);
     assert_eq!(MessageRole::from_stored("error"), MessageRole::Error);
     // Unknown roles map to Error.

@@ -1,8 +1,7 @@
 use gpui::*;
 use gpui_component::{Icon, IconName};
 
-use crate::theme::HiveTheme;
-use crate::workspace::SwitchToSettings;
+use hive_ui_core::{HiveTheme, SwitchToSettings};
 
 /// Status bar at the bottom of the window.
 /// Shows connectivity, model, privacy mode, cost, and version.
@@ -55,11 +54,7 @@ impl StatusBar {
         let conn_label = self.connectivity.label();
         let model = self.current_model.clone();
         let cost_str = format!("${:.4}", self.total_cost);
-        let privacy = if self.privacy_mode {
-            "Private"
-        } else {
-            "Open"
-        };
+        let privacy = if self.privacy_mode { "Private" } else { "Open" };
         let privacy_icon = if self.privacy_mode {
             IconName::EyeOff
         } else {
@@ -108,15 +103,9 @@ impl StatusBar {
                             .bg(theme.bg_tertiary)
                             .text_color(theme.accent_cyan)
                             .cursor_pointer()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                |_event, window, cx| {
-                                    window.dispatch_action(
-                                        Box::new(SwitchToSettings),
-                                        cx,
-                                    );
-                                },
-                            )
+                            .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                                window.dispatch_action(Box::new(SwitchToSettings), cx);
+                            })
                             .child(model),
                     ),
             )
@@ -134,11 +123,7 @@ impl StatusBar {
                             .child(Icon::new(privacy_icon).size_3p5())
                             .child(privacy),
                     )
-                    .child(
-                        div()
-                            .text_color(theme.accent_green)
-                            .child(cost_str),
-                    )
+                    .child(div().text_color(theme.accent_green).child(cost_str))
                     .child(div().child(version)),
             )
     }

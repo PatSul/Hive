@@ -4,7 +4,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{Icon, IconName};
 use std::path::PathBuf;
 
-use crate::theme::HiveTheme;
+use hive_ui_core::HiveTheme;
 
 // ---------------------------------------------------------------------------
 // Events

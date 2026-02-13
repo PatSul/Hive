@@ -70,7 +70,12 @@ fn test_add_task_out_of_range_returns_none() {
 #[test]
 fn test_add_task_stores_priority_and_description() {
     let mut data = KanbanData::default();
-    data.add_task(0, "Important", "Very detailed description", Priority::Critical);
+    data.add_task(
+        0,
+        "Important",
+        "Very detailed description",
+        Priority::Critical,
+    );
 
     let task = &data.columns[0].tasks[0];
     assert_eq!(task.title, "Important");
@@ -85,7 +90,9 @@ fn test_add_task_stores_priority_and_description() {
 #[test]
 fn test_move_task_between_columns() {
     let mut data = KanbanData::default();
-    let id = data.add_task(0, "Movable", "Desc", Priority::Medium).unwrap();
+    let id = data
+        .add_task(0, "Movable", "Desc", Priority::Medium)
+        .unwrap();
 
     assert_eq!(data.column_count(0), 1);
     assert_eq!(data.column_count(1), 0);
@@ -138,7 +145,9 @@ fn test_move_task_nonexistent_id_returns_false() {
 #[test]
 fn test_delete_task_removes_from_column() {
     let mut data = KanbanData::default();
-    let id = data.add_task(0, "Delete me", "Desc", Priority::High).unwrap();
+    let id = data
+        .add_task(0, "Delete me", "Desc", Priority::High)
+        .unwrap();
     data.add_task(0, "Keep me", "Desc", Priority::Low);
 
     assert_eq!(data.task_count(), 2);
@@ -161,7 +170,9 @@ fn test_delete_task_nonexistent_returns_false() {
 fn test_delete_task_finds_across_columns() {
     let mut data = KanbanData::default();
     data.add_task(0, "In Todo", "Desc", Priority::Low);
-    let id = data.add_task(2, "In Review", "Desc", Priority::High).unwrap();
+    let id = data
+        .add_task(2, "In Review", "Desc", Priority::High)
+        .unwrap();
     data.add_task(3, "In Done", "Desc", Priority::Medium);
 
     assert_eq!(data.task_count(), 3);

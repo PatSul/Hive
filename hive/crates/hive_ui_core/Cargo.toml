@@ -1,0 +1,19 @@
+[package]
+name = "hive_ui_core"
+version = "0.1.0"
+edition = "2024"
+license = "BSL-1.1"
+
+[dependencies]
+hive_core = { path = "../hive_core" }
+hive_ai = { path = "../hive_ai" }
+hive_agents = { path = "../hive_agents" }
+hive_terminal = { path = "../hive_terminal" }
+hive_assistant = { path = "../hive_assistant" }
+hive_blockchain = { path = "../hive_blockchain" }
+hive_integrations = { path = "../hive_integrations" }
+hive_learn = { path = "../hive_learn" }
+hive_shield = { path = "../hive_shield" }
+
+gpui.workspace = true
+gpui-component.workspace = true

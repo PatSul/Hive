@@ -203,7 +203,10 @@ fn full_wizard_flow_forward_and_back() {
 
     // Data still intact
     assert_eq!(data.token_name, "HiveToken");
-    assert_eq!(data.wallet_address.as_deref(), Some("7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"));
+    assert_eq!(
+        data.wallet_address.as_deref(),
+        Some("7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV")
+    );
 }
 
 #[test]

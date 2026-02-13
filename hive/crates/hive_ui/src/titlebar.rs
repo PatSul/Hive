@@ -1,7 +1,7 @@
 use gpui::*;
 use gpui_component::{Icon, IconName, Sizable as _};
 
-use crate::theme::HiveTheme;
+use hive_ui_core::HiveTheme;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

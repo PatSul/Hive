@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use chrono::Utc;
 use hive_ui::panels::files::*;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn test_format_size_bytes() {
