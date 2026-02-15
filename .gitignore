@@ -49,3 +49,7 @@ worktree-*/
 # Agent metadata
 AGENT_BOARD.md.lock
 .agent-*/
+
+# Local runtime/workflow artifacts
+.hive/
+hive/target_nolock/
