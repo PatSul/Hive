@@ -599,6 +599,11 @@ mod tests {
         (tmp, config_path, keys_path)
     }
 
+    fn test_secure_storage(keys_path: &PathBuf) -> SecureStorage {
+        let salt_path = keys_path.with_file_name("storage.salt");
+        SecureStorage::with_salt_path(&salt_path).unwrap()
+    }
+
     // -----------------------------------------------------------------------
     // 1. API key round-trip through SecureStorage
     // -----------------------------------------------------------------------
@@ -606,7 +611,7 @@ mod tests {
     #[test]
     fn api_key_roundtrip_via_secure_storage() {
         let (_tmp, _config_path, keys_path) = make_temp_config_dir();
-        let ss = SecureStorage::new().unwrap();
+        let ss = test_secure_storage(&keys_path);
 
         // Store keys
         let mut map = HashMap::new();
@@ -643,7 +648,7 @@ mod tests {
     #[test]
     fn migrate_plaintext_keys_from_config() {
         let (_tmp, config_path, keys_path) = make_temp_config_dir();
-        let ss = SecureStorage::new().unwrap();
+        let ss = test_secure_storage(&keys_path);
         let secure_storage = Some(ss);
 
         // Write a legacy config.json with plaintext API keys
@@ -759,7 +764,7 @@ mod tests {
     #[test]
     fn populate_keys_with_missing_keys_file() {
         let (_tmp, _config_path, keys_path) = make_temp_config_dir();
-        let ss = SecureStorage::new().unwrap();
+        let ss = test_secure_storage(&keys_path);
         let mut config = HiveConfig::default();
 
         // keys.enc doesn't exist -- should gracefully return empty
@@ -771,7 +776,7 @@ mod tests {
     #[test]
     fn populate_keys_with_corrupted_keys_file() {
         let (_tmp, _config_path, keys_path) = make_temp_config_dir();
-        let ss = SecureStorage::new().unwrap();
+        let ss = test_secure_storage(&keys_path);
         let mut config = HiveConfig::default();
 
         // Write garbage to keys.enc
@@ -788,7 +793,8 @@ mod tests {
 
     #[test]
     fn set_none_removes_key() {
-        let ss = SecureStorage::new().unwrap();
+        let (_tmp, _config_path, keys_path) = make_temp_config_dir();
+        let ss = test_secure_storage(&keys_path);
         let mut map = HashMap::new();
 
         // Set a key
@@ -802,7 +808,8 @@ mod tests {
 
     #[test]
     fn set_empty_string_removes_key() {
-        let ss = SecureStorage::new().unwrap();
+        let (_tmp, _config_path, keys_path) = make_temp_config_dir();
+        let ss = test_secure_storage(&keys_path);
         let mut map = HashMap::new();
 
         set_secure_key(&ss, &mut map, KEY_OPENAI, &Some("secret".into())).unwrap();
@@ -814,7 +821,8 @@ mod tests {
 
     #[test]
     fn get_missing_key_returns_none() {
-        let ss = SecureStorage::new().unwrap();
+        let (_tmp, _config_path, keys_path) = make_temp_config_dir();
+        let ss = test_secure_storage(&keys_path);
         let map = HashMap::new();
         assert!(get_secure_key(&ss, &map, KEY_ANTHROPIC).is_none());
     }
@@ -856,7 +864,7 @@ mod tests {
     #[test]
     fn full_load_with_no_legacy_keys() {
         let (_tmp, config_path, keys_path) = make_temp_config_dir();
-        let ss = SecureStorage::new().unwrap();
+        let ss = test_secure_storage(&keys_path);
 
         // Write clean config (no API keys)
         let config = HiveConfig::default();
@@ -873,7 +881,7 @@ mod tests {
         .unwrap();
         save_key_map(&keys_path, &map).unwrap();
 
-        let secure_storage = Some(SecureStorage::new().unwrap());
+        let secure_storage = Some(test_secure_storage(&keys_path));
         let loaded =
             ConfigManager::load_with_migration(&config_path, &keys_path, &secure_storage).unwrap();
 
@@ -885,7 +893,7 @@ mod tests {
     #[test]
     fn save_api_keys_persists_correctly() {
         let (_tmp, _config_path, keys_path) = make_temp_config_dir();
-        let ss = SecureStorage::new().unwrap();
+        let ss = test_secure_storage(&keys_path);
 
         let mut config = HiveConfig::default();
         config.anthropic_api_key = Some("sk-save-test".into());
@@ -906,7 +914,7 @@ mod tests {
         save_key_map(&keys_path, &key_map).unwrap();
 
         // Re-read and verify
-        let ss2 = SecureStorage::new().unwrap();
+        let ss2 = test_secure_storage(&keys_path);
         let loaded_map = load_key_map(&keys_path);
         assert_eq!(
             get_secure_key(&ss2, &loaded_map, KEY_ANTHROPIC).unwrap(),

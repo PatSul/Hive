@@ -237,10 +237,19 @@ impl ModelSelectorView {
         self.or_fetch_status = FetchStatus::Loading;
         cx.notify();
 
-        cx.spawn(async move |this, app: &mut AsyncApp| {
-            let result =
-                hive_ai::providers::openrouter_catalog::fetch_openrouter_models(&api_key).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(
+                    hive_ai::providers::openrouter_catalog::fetch_openrouter_models(&api_key),
+                ),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
 
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
             let _ = this.update(app, |this, cx| match result {
                 Ok(models) => {
                     this.fetched_or_models = models;
@@ -275,9 +284,19 @@ impl ModelSelectorView {
         self.openai_fetch_status = FetchStatus::Loading;
         cx.notify();
 
-        cx.spawn(async move |this, app: &mut AsyncApp| {
-            let result = hive_ai::providers::openai_catalog::fetch_openai_models(&api_key).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(
+                    hive_ai::providers::openai_catalog::fetch_openai_models(&api_key),
+                ),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
 
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
             let _ = this.update(app, |this, cx| match result {
                 Ok(models) => {
                     this.fetched_openai_models = models;
@@ -312,10 +331,19 @@ impl ModelSelectorView {
         self.anthropic_fetch_status = FetchStatus::Loading;
         cx.notify();
 
-        cx.spawn(async move |this, app: &mut AsyncApp| {
-            let result =
-                hive_ai::providers::anthropic_catalog::fetch_anthropic_models(&api_key).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(
+                    hive_ai::providers::anthropic_catalog::fetch_anthropic_models(&api_key),
+                ),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
 
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
             let _ = this.update(app, |this, cx| match result {
                 Ok(models) => {
                     this.fetched_anthropic_models = models;
@@ -350,9 +378,19 @@ impl ModelSelectorView {
         self.google_fetch_status = FetchStatus::Loading;
         cx.notify();
 
-        cx.spawn(async move |this, app: &mut AsyncApp| {
-            let result = hive_ai::providers::google_catalog::fetch_google_models(&api_key).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(
+                    hive_ai::providers::google_catalog::fetch_google_models(&api_key),
+                ),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
 
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
             let _ = this.update(app, |this, cx| match result {
                 Ok(models) => {
                     this.fetched_google_models = models;

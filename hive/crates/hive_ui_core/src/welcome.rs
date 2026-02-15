@@ -15,10 +15,12 @@ impl WelcomeScreen {
             .justify_center()
             .flex_1()
             .gap(theme.space_6)
+            .pt(px(48.0))
             .child(
-                // Logo icon
-                Icon::new(IconName::Bot)
-                    .size_6()
+                // Logo icon — Hive bee
+                svg()
+                    .path("icons/hive-bee.svg")
+                    .size(px(48.0))
                     .text_color(theme.accent_aqua),
             )
             .child(

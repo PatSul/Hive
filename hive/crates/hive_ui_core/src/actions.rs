@@ -28,6 +28,7 @@ actions!(
         SwitchToAssistant,
         SwitchToSettings,
         SwitchToHelp,
+        OpenWorkspaceDirectory,
         // Files panel
         FilesNavigateBack,
         FilesRefresh,

@@ -15,6 +15,7 @@ pub struct SessionState {
     pub active_panel: String,
     pub window_size: Option<[u32; 2]>,
     pub working_directory: Option<String>,
+    pub recent_workspaces: Vec<String>,
     pub open_files: Vec<String>,
     pub chat_draft: Option<String>,
 }
@@ -117,6 +118,7 @@ mod tests {
             active_panel: "Files".into(),
             window_size: Some([1920, 1080]),
             working_directory: Some("/home/user/project".into()),
+            recent_workspaces: vec!["/home/user/project".into(), "/tmp".into()],
             open_files: vec!["main.rs".into(), "lib.rs".into()],
             chat_draft: Some("half-typed message".into()),
         };
@@ -130,6 +132,13 @@ mod tests {
         assert_eq!(
             loaded.working_directory.as_deref(),
             Some("/home/user/project")
+        );
+        assert_eq!(
+            loaded.recent_workspaces,
+            vec![
+                "/home/user/project".to_string(),
+                "/tmp".to_string()
+            ]
         );
         assert_eq!(loaded.open_files, vec!["main.rs", "lib.rs"]);
         assert_eq!(loaded.chat_draft.as_deref(), Some("half-typed message"));

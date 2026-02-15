@@ -360,51 +360,6 @@ fn set_tray_window_visible(cx: &App, visible: bool) {
     }
 }
 
-/// Platform-specific wording for where the background icon lives.
-#[cfg(target_os = "windows")]
-fn close_to_tray_target() -> &'static str {
-    "system tray"
-}
-
-/// Platform-specific wording for where the background icon lives.
-#[cfg(target_os = "macos")]
-fn close_to_tray_target() -> &'static str {
-    "menu bar"
-}
-
-/// Platform-specific wording for where the background icon lives.
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn close_to_tray_target() -> &'static str {
-    "tray area / app indicator"
-}
-
-/// Prompt body shown when the user closes the app for the first time.
-fn close_to_tray_prompt_detail() -> String {
-    format!(
-        "Closing Hive hides the window and keeps it running in the {}. \
-Use that icon to reopen Hive or quit it.",
-        close_to_tray_target()
-    )
-}
-
-fn should_show_close_to_tray_notice(cx: &App) -> bool {
-    cx.has_global::<AppConfig>() && !cx.global::<AppConfig>().0.get().close_to_tray_notice_seen
-}
-
-fn mark_close_to_tray_notice_seen(cx: &mut App) {
-    if !cx.has_global::<AppConfig>() {
-        return;
-    }
-
-    if let Err(e) = cx
-        .global_mut::<AppConfig>()
-        .0
-        .update(|config| config.close_to_tray_notice_seen = true)
-    {
-        error!("Failed to persist close-to-tray notice state: {e}");
-    }
-}
-
 /// Close all open windows while keeping the app/tray process alive.
 fn hide_all_windows(cx: &mut App) {
     let windows = cx.windows();
@@ -416,40 +371,53 @@ fn hide_all_windows(cx: &mut App) {
     set_tray_window_visible(cx, false);
 }
 
-fn prompt_close_to_tray_notice(window: &mut Window, cx: &mut App) {
-    let detail = close_to_tray_prompt_detail();
+/// Platform-specific wording for where the background icon lives.
+#[cfg(target_os = "macos")]
+fn close_to_tray_target() -> &'static str {
+    "menu bar"
+}
+
+#[cfg(target_os = "windows")]
+fn close_to_tray_target() -> &'static str {
+    "system tray"
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn close_to_tray_target() -> &'static str {
+    "tray area"
+}
+
+fn handle_main_window_close(window: &mut Window, cx: &mut App) -> bool {
+    // If there is no tray icon, just quit directly.
+    if cx.global::<AppTray>().0.is_none() {
+        return true;
+    }
+
+    // Always prompt the user: Quit, Minimize to tray, or Cancel.
+    let detail = format!(
+        "Would you like to quit Hive or minimize it to the {}?",
+        close_to_tray_target()
+    );
     let response = window.prompt(
         PromptLevel::Info,
-        "Hive keeps running in the background",
+        "Close Hive",
         Some(&detail),
-        &["Close to Tray", "Quit Hive", "Cancel"],
+        &["Quit Hive", "Minimize to Tray", "Cancel"],
         cx,
     );
 
     cx.spawn(async move |app: &mut AsyncApp| {
         if let Ok(choice) = response.await {
             let _ = app.update(|cx| match choice {
-                0 => hide_all_windows(cx),
-                1 => cx.quit(),
-                _ => {}
+                0 => cx.quit(),
+                1 => hide_all_windows(cx),
+                _ => {} // Cancel — do nothing
             });
         }
     })
     .detach();
-}
 
-fn handle_main_window_close(window: &mut Window, cx: &mut App) -> bool {
-    if cx.global::<AppTray>().0.is_none() {
-        return true;
-    }
-
-    if should_show_close_to_tray_notice(cx) {
-        mark_close_to_tray_notice_seen(cx);
-        prompt_close_to_tray_notice(window, cx);
-        return false;
-    }
-
-    hide_all_windows(cx);
+    // Return false to veto the platform close; the prompt handles the outcome.
     false
 }
 

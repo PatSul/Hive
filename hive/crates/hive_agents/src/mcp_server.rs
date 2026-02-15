@@ -444,32 +444,27 @@ fn execute_command_blocking(
     executor: &CommandExecutor,
     command: &str,
 ) -> Result<hive_terminal::CommandOutput, String> {
-    // Try to get a handle to the current tokio runtime.
-    match Handle::try_current() {
-        Ok(handle) => {
-            // We're inside a tokio runtime but in a sync context.
-            // Use block_in_place to avoid blocking the executor thread.
-            let cmd = command.to_string();
-            std::thread::scope(|s| {
-                s.spawn(|| {
-                    handle.block_on(async {
-                        executor
-                            .execute(&cmd)
-                            .await
-                            .map_err(|e| format!("Command execution failed: {e}"))
-                    })
-                })
-                .join()
-                .map_err(|_| "Command execution thread panicked".to_string())?
-            })
-        }
-        Err(_) => {
-            // No tokio runtime — create a temporary one for the call.
+    if Handle::try_current().is_ok() {
+        let cmd = command.to_string();
+        let root = executor.working_dir().to_path_buf();
+
+        let output = std::thread::spawn(move || {
+            let threaded_executor =
+                CommandExecutor::new(root).map_err(|e| format!("Invalid working directory: {e}"))?;
             let rt = tokio::runtime::Runtime::new()
                 .map_err(|e| format!("Failed to create runtime: {e}"))?;
-            rt.block_on(executor.execute(command))
+            rt.block_on(threaded_executor.execute(&cmd))
                 .map_err(|e| format!("Command execution failed: {e}"))
-        }
+        })
+        .join()
+        .map_err(|_| "Command execution thread panicked".to_string())?;
+
+        output
+    } else {
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create runtime: {e}"))?;
+        rt.block_on(executor.execute(command))
+            .map_err(|e| format!("Command execution failed: {e}"))
     }
 }
 

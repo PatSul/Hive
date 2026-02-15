@@ -129,7 +129,6 @@ impl InteractiveShell {
         // tokio::process::Command implements std::os::unix::process::CommandExt.
         #[cfg(unix)]
         {
-            use std::os::unix::process::CommandExt as _;
             cmd.process_group(0);
         }
 

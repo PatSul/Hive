@@ -31,6 +31,7 @@ pub use hive_ui_core::{
     SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning, SwitchToShield,
     SwitchToAssistant, SwitchToSettings, SwitchToHelp,
+    OpenWorkspaceDirectory,
     FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
     FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
     HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
@@ -119,7 +120,11 @@ pub struct HiveWorkspace {
     discovery_scan_pending: bool,
     /// Set to `true` by the background scan thread when done.
     discovery_done_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Recently used workspace roots, persisted to session and shown in the titlebar.
+    recent_workspace_roots: Vec<PathBuf>,
 }
+
+const MAX_RECENT_WORKSPACES: usize = 8;
 
 impl HiveWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -210,6 +215,7 @@ impl HiveWorkspace {
         sidebar.active_panel = restored_panel;
 
         let project_root = Self::resolve_project_root_from_session(&session);
+        let recent_workspace_roots = Self::load_recent_workspace_roots(&session, &project_root);
         let project_name = Self::project_name_from_path(&project_root);
         let files_data = FilesData::from_path(&project_root);
         status_bar.active_project = format!(
@@ -267,6 +273,7 @@ impl HiveWorkspace {
             theme: HiveTheme::dark(),
             sidebar,
             status_bar,
+            recent_workspace_roots,
             current_project_root: project_root,
             current_project_name: project_name,
             chat_input,
@@ -308,6 +315,67 @@ impl HiveWorkspace {
 
         let requested = if requested.exists() { requested } else { fallback };
         Self::discover_project_root(&requested)
+    }
+
+    fn load_recent_workspace_roots(
+        session: &SessionState,
+        current_project_root: &Path,
+    ) -> Vec<PathBuf> {
+        let mut recents = Vec::new();
+        let current_root = Self::discover_project_root(current_project_root);
+        recents.push(current_root);
+
+        for path in &session.recent_workspaces {
+            let path = PathBuf::from(path);
+            if !path.exists() {
+                continue;
+            }
+
+            let root = Self::discover_project_root(&path);
+            if !recents.contains(&root) {
+                recents.push(root);
+            }
+        }
+
+        recents.truncate(MAX_RECENT_WORKSPACES);
+        recents
+    }
+
+    fn record_recent_workspace(&mut self, workspace_root: &Path, cx: &mut Context<Self>) {
+        if !workspace_root.exists() {
+            return;
+        }
+
+        let project_root = Self::discover_project_root(workspace_root);
+        let mut changed = false;
+
+        if let Some(existing) = self
+            .recent_workspace_roots
+            .iter()
+            .position(|path| path == &project_root)
+        {
+            if existing == 0 {
+                return;
+            }
+            self.recent_workspace_roots.remove(existing);
+            changed = true;
+        }
+
+        if !self.recent_workspace_roots.contains(&project_root) {
+            changed = true;
+        }
+
+        if !changed {
+            return;
+        }
+
+        self.recent_workspace_roots.insert(0, project_root);
+        self.recent_workspace_roots
+            .truncate(MAX_RECENT_WORKSPACES);
+
+        self.session_dirty = true;
+        self.save_session(cx);
+        cx.notify();
     }
 
     fn discover_project_root(path: &Path) -> PathBuf {
@@ -353,6 +421,18 @@ impl HiveWorkspace {
             self.status_bar.active_project = self.project_label();
             cx.notify();
         }
+
+        let project_root = self.current_project_root.clone();
+        self.record_recent_workspace(&project_root, cx);
+    }
+
+    fn switch_to_workspace(&mut self, workspace_path: PathBuf, cx: &mut Context<Self>) {
+        if !workspace_path.exists() {
+            return;
+        }
+        self.apply_project_context(&workspace_path, cx);
+        self.files_data = FilesData::from_path(&self.current_project_root);
+        self.switch_to_panel(Panel::Files, cx);
     }
 
     pub fn set_active_panel(&mut self, panel: Panel) {
@@ -718,6 +798,11 @@ impl HiveWorkspace {
             active_panel: self.sidebar.active_panel.to_stored().to_string(),
             window_size: None, // TODO: read from window when GPUI exposes it
             working_directory: Some(self.current_project_root.to_string_lossy().to_string()),
+            recent_workspaces: self
+                .recent_workspace_roots
+                .iter()
+                .map(|path| path.to_string_lossy().to_string())
+                .collect(),
             open_files: Vec::new(),
             chat_draft: None,
         };
@@ -1141,6 +1226,32 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Files, cx);
+    }
+
+    fn handle_open_workspace_directory(
+        &mut self,
+        _action: &OpenWorkspaceDirectory,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                if let Some(path) = paths.first() {
+                    let workspace_path = path.to_path_buf();
+                    let _ = this.update(app, move |this, cx| {
+                        this.switch_to_workspace(workspace_path, cx);
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     fn handle_switch_to_kanban(
@@ -2618,6 +2729,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_assistant))
             .on_action(cx.listener(Self::handle_switch_to_settings))
             .on_action(cx.listener(Self::handle_switch_to_help))
+            .on_action(cx.listener(Self::handle_open_workspace_directory))
             // -- Panel action handlers -----------------------------------
             // Files
             .on_action(cx.listener(Self::handle_files_navigate_back))
@@ -2662,7 +2774,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_agents_reload_workflows))
             .on_action(cx.listener(Self::handle_agents_run_workflow))
             // Titlebar
-            .child(Titlebar::render(theme, window))
+                .child(Titlebar::render(theme, window, &self.current_project_root))
             // Main content area: sidebar + panel
             .child(
                 div()
@@ -2752,6 +2864,7 @@ impl HiveWorkspace {
                     .flex()
                     .flex_col()
                     .flex_1()
+                    .min_h(px(0.0))
                     .overflow_y_scrollbar()
                     .px(theme.space_2)
                     .py(theme.space_2)
