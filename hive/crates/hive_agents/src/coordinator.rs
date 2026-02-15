@@ -12,7 +12,7 @@ use std::time::Instant;
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
 use crate::hivemind::{AiExecutor, default_model_for_tier};
-use crate::personas::{PersonaKind, PersonaRegistry, execute_with_persona};
+use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona};
 use crate::specs::Spec;
 
 // ---------------------------------------------------------------------------
@@ -286,8 +286,20 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                 let persona = self
                     .registry
                     .get(&task.persona)
+                    .or_else(|| self.registry.get(&PersonaKind::Implement))
                     .cloned()
-                    .unwrap_or_else(|| self.registry.get(&PersonaKind::Implement).unwrap().clone());
+                    .unwrap_or_else(|| {
+                        // Last resort: synthesize a minimal persona so we never panic.
+                        Persona {
+                            name: "fallback".into(),
+                            kind: PersonaKind::Implement,
+                            description: "Fallback persona".into(),
+                            system_prompt: String::new(),
+                            model_tier: ModelTier::Mid,
+                            tools: Vec::new(),
+                            max_tokens: 4096,
+                        }
+                    });
 
                 let output =
                     execute_with_persona(&persona, &task.description, self.executor.as_ref(), None)

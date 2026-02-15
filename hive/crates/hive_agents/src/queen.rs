@@ -922,6 +922,9 @@ impl<E: AiExecutor + 'static> Queen<E> {
 
     /// Atomically add to the accumulated cost.
     fn add_cost(&self, cost: f64) {
+        if !cost.is_finite() || cost == 0.0 {
+            return;
+        }
         loop {
             let old_bits = self.accumulated_cost.load(Ordering::Relaxed);
             let old_val = f64::from_bits(old_bits);

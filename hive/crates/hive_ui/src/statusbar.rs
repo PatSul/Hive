@@ -43,7 +43,7 @@ impl StatusBar {
     pub fn new() -> Self {
         Self {
             connectivity: ConnectivityDisplay::Offline,
-            current_model: "(no model)".into(),
+            current_model: "Select Model".into(),
             privacy_mode: false,
             active_project: "No project".into(),
             total_cost: 0.0,
@@ -54,7 +54,14 @@ impl StatusBar {
     pub fn render(&self, theme: &HiveTheme) -> impl IntoElement {
         let conn_color = self.connectivity.color(theme);
         let conn_label = self.connectivity.label();
-        let model = self.current_model.clone();
+        let model = if self.current_model.trim().is_empty()
+            || self.current_model == "(no model)"
+            || self.current_model == "Select Model"
+        {
+            "Select Model".to_string()
+        } else {
+            self.current_model.clone()
+        };
         let cost_str = format!("${:.2}", self.total_cost);
         let privacy = if self.privacy_mode {
             "Private Mode"

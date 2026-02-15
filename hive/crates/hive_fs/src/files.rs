@@ -78,10 +78,16 @@ impl FileService {
             }
         }
 
-        // If the path already exists, validate its canonical form too
+        // If the path already exists, validate its canonical form to catch symlinks.
+        // For new files, canonicalize the parent to detect symlink-based traversal.
         if path.exists() {
             let canonical = path.canonicalize()?;
             validate_canonical(&canonical)?;
+        } else if let Some(parent) = path.parent() {
+            if parent.exists() {
+                let canonical_parent = parent.canonicalize()?;
+                validate_canonical(&canonical_parent)?;
+            }
         }
 
         debug!("Writing file: {}", path.display());
@@ -138,6 +144,14 @@ impl FileService {
             .canonicalize()
             .with_context(|| format!("Cannot resolve source: {}", from.display()))?;
         validate_canonical(&canonical_from)?;
+
+        // Validate destination: canonicalize parent of `to` (file may not exist yet).
+        if let Some(to_parent) = to.parent() {
+            if to_parent.exists() {
+                let canonical_to_parent = to_parent.canonicalize()?;
+                validate_canonical(&canonical_to_parent)?;
+            }
+        }
 
         debug!("Renaming {} -> {}", from.display(), to.display());
         std::fs::rename(&canonical_from, to)

@@ -166,7 +166,10 @@ impl CollectiveMemory {
         let last_accessed: String = row.get(8)?;
         let access_count: i64 = row.get(9)?;
 
-        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+            tracing::warn!("CollectiveMemory: corrupt tags JSON for entry {id}: {e}");
+            Vec::new()
+        });
 
         Ok(MemoryEntry {
             id,

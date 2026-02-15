@@ -169,7 +169,7 @@ impl HiveWorkspace {
         if cx.has_global::<AppConfig>() {
             let config = cx.global::<AppConfig>().0.get();
             status_bar.current_model = if config.default_model.is_empty() {
-                "(no model)".to_string()
+                "Select Model".to_string()
             } else {
                 config.default_model.clone()
             };
@@ -867,7 +867,7 @@ impl HiveWorkspace {
         self.status_bar.active_project = self.project_label();
 
         self.status_bar.current_model = if model.is_empty() {
-            "(no model)".to_string()
+            "Select Model".to_string()
         } else {
             model
         };
@@ -2543,7 +2543,7 @@ impl HiveWorkspace {
 
             // Sync status bar with potentially changed model/privacy
             self.status_bar.current_model = if snapshot.default_model.is_empty() {
-                "(no model)".to_string()
+                "Select Model".to_string()
             } else {
                 snapshot.default_model
             };

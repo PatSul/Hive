@@ -81,11 +81,16 @@ impl SupabaseClient {
     /// Query a table with optional PostgREST query parameters.
     ///
     /// `params` is appended directly to the URL, e.g. `"select=id,name&limit=10"`.
+    /// Fragment (`#`) and path separators are stripped to prevent URL manipulation.
     pub async fn query_table(&self, table: &str, params: &str) -> Result<Value> {
-        let url = if params.is_empty() {
+        if table.contains('/') || table.contains('\\') {
+            anyhow::bail!("Invalid table name: must not contain path separators");
+        }
+        let sanitized_params = params.replace('#', "").replace('/', "");
+        let url = if sanitized_params.is_empty() {
             format!("{}/rest/v1/{table}", self.url)
         } else {
-            format!("{}/rest/v1/{table}?{params}", self.url)
+            format!("{}/rest/v1/{table}?{sanitized_params}", self.url)
         };
         debug!(url = %url, "querying Supabase table");
         self.get(&url).await
@@ -119,7 +124,17 @@ impl SupabaseClient {
 
     /// Delete a row from a table by its `id` column.
     pub async fn delete_row(&self, table: &str, id: &str) -> Result<Value> {
-        let url = format!("{}/rest/v1/{table}?id=eq.{id}", self.url);
+        let encoded_id: String = id
+            .bytes()
+            .flat_map(|b| {
+                if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' {
+                    vec![b as char]
+                } else {
+                    format!("%{:02X}", b).chars().collect()
+                }
+            })
+            .collect();
+        let url = format!("{}/rest/v1/{table}?id=eq.{encoded_id}", self.url);
         debug!(url = %url, "deleting from Supabase table");
 
         let response = self
