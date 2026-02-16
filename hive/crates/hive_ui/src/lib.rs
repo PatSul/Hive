@@ -2,6 +2,7 @@
 
 pub mod chat_input;
 pub mod chat_service;
+pub mod learning_bridge_impl;
 pub mod statusbar;
 pub mod titlebar;
 

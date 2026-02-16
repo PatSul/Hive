@@ -648,6 +648,20 @@ impl LearningStorage {
         Ok(results)
     }
 
+    /// Increment the use_count for a pattern by ID.
+    pub fn increment_pattern_use_count(&self, pattern_id: i64) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        conn.execute(
+            "UPDATE code_patterns SET use_count = use_count + 1 WHERE id = ?1",
+            params![pattern_id],
+        )
+        .map_err(|e| format!("Failed to increment pattern use_count: {e}"))?;
+        Ok(())
+    }
+
     /// Get distinct (task_type, tier) combos with their count and average quality.
     pub fn task_tier_stats(&self) -> Result<Vec<(String, String, u32, f64)>, String> {
         let conn = self

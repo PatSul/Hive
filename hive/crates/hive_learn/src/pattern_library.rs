@@ -94,6 +94,51 @@ impl PatternLibrary {
     pub fn popular_patterns(&self, limit: usize) -> Result<Vec<CodePattern>, String> {
         self.storage.popular_patterns(limit)
     }
+
+    /// Retrieve the most relevant patterns for a given task.
+    ///
+    /// Searches by language, then scores by `quality_score * (1 + use_count)`.
+    /// Returns up to `limit` patterns sorted by composite relevance score.
+    pub fn relevant_for_task(
+        &self,
+        query: &str,
+        language: &str,
+        limit: usize,
+    ) -> Result<Vec<CodePattern>, String> {
+        // First try language-specific patterns matching the query
+        let mut candidates = self.storage.search_patterns(query, limit * 3)?;
+
+        // Also include language-specific popular patterns
+        let popular = self.storage.popular_patterns(limit * 3)?;
+        for p in popular {
+            if p.language == language && !candidates.iter().any(|c| c.id == p.id) {
+                candidates.push(p);
+            }
+        }
+
+        // Filter to matching language and score by relevance
+        let mut scored: Vec<(f64, CodePattern)> = candidates
+            .into_iter()
+            .filter(|p| p.language == language || language.is_empty())
+            .map(|p| {
+                let score = p.quality_score * (1.0 + p.use_count as f64);
+                (score, p)
+            })
+            .collect();
+
+        scored.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        scored.truncate(limit);
+
+        Ok(scored.into_iter().map(|(_, p)| p).collect())
+    }
+
+    /// Increment the use_count for a pattern (called when a pattern is used in context).
+    pub fn record_usage(&self, pattern_id: i64) -> Result<(), String> {
+        self.storage.increment_pattern_use_count(pattern_id)
+    }
 }
 
 /// Classify a line of code and return (category, description) if it matches

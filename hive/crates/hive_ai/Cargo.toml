@@ -11,6 +11,7 @@ hive_fs = { path = "../hive_fs" }
 async-trait = "0.1"
 once_cell = "1"
 
+rusqlite.workspace = true
 reqwest = { workspace = true, features = ["multipart"] }
 tokio.workspace = true
 futures.workspace = true

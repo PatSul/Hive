@@ -92,6 +92,11 @@ impl OutcomeTracker {
         Ok(())
     }
 
+    /// Return the most recent outcome records (up to `limit`), looking back 7 days.
+    pub fn recent_outcomes(&self, limit: usize) -> Result<Vec<OutcomeRecord>, String> {
+        self.storage.get_outcomes(None, 7, limit)
+    }
+
     /// Rolling average quality for a model over N days.
     pub fn model_quality(&self, model_id: &str, days: u32) -> Result<f64, String> {
         self.storage.model_quality(model_id, days)

@@ -6,8 +6,10 @@
 //! the best-performing models and workflows.
 
 use chrono::{DateTime, Utc};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Mutex;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -95,23 +97,322 @@ pub struct FleetSummary {
 // ---------------------------------------------------------------------------
 
 /// Service that coordinates fleet-wide learning by tracking patterns,
-/// model performance, insights, and instance metrics in memory.
+/// model performance, insights, and instance metrics.
+///
+/// When constructed with `with_db()`, state is persisted to SQLite.
+/// Otherwise operates purely in-memory.
 pub struct FleetLearningService {
     patterns: Vec<LearningPattern>,
     model_performance: HashMap<String, ModelPerformance>,
     insights: Vec<FleetInsight>,
     instances: HashMap<String, InstanceMetrics>,
+    db: Option<Mutex<Connection>>,
 }
 
 impl FleetLearningService {
-    /// Create a new, empty fleet learning service.
+    /// Create a new, in-memory-only fleet learning service.
     pub fn new() -> Self {
         Self {
             patterns: Vec::new(),
             model_performance: HashMap::new(),
             insights: Vec::new(),
             instances: HashMap::new(),
+            db: None,
         }
+    }
+
+    /// Create a fleet learning service backed by a SQLite database at `path`.
+    ///
+    /// Existing data is loaded from the database on construction. Call
+    /// `persist()` to flush in-memory changes back to disk.
+    pub fn with_db(path: &str) -> Result<Self, String> {
+        let conn =
+            Connection::open(path).map_err(|e| format!("Failed to open fleet DB: {e}"))?;
+        Self::init_fleet_tables(&conn)?;
+        let mut service = Self {
+            patterns: Vec::new(),
+            model_performance: HashMap::new(),
+            insights: Vec::new(),
+            instances: HashMap::new(),
+            db: Some(Mutex::new(conn)),
+        };
+        service.load_from_db()?;
+        Ok(service)
+    }
+
+    /// Create a fleet learning service backed by an in-memory SQLite database (for tests).
+    pub fn with_in_memory_db() -> Result<Self, String> {
+        let conn = Connection::open_in_memory()
+            .map_err(|e| format!("Failed to open in-memory fleet DB: {e}"))?;
+        Self::init_fleet_tables(&conn)?;
+        Ok(Self {
+            patterns: Vec::new(),
+            model_performance: HashMap::new(),
+            insights: Vec::new(),
+            instances: HashMap::new(),
+            db: Some(Mutex::new(conn)),
+        })
+    }
+
+    fn init_fleet_tables(conn: &Connection) -> Result<(), String> {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS fleet_patterns (
+                id TEXT PRIMARY KEY,
+                pattern_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                frequency INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0
+            );
+            CREATE TABLE IF NOT EXISTS fleet_model_performance (
+                model_id TEXT PRIMARY KEY,
+                total_requests INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                avg_latency_ms REAL NOT NULL DEFAULT 0.0,
+                avg_cost REAL NOT NULL DEFAULT 0.0,
+                avg_quality_score REAL NOT NULL DEFAULT 0.0,
+                last_updated TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS fleet_insights (
+                id TEXT PRIMARY KEY,
+                insight_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS fleet_instances (
+                instance_id TEXT PRIMARY KEY,
+                total_requests INTEGER NOT NULL DEFAULT 0,
+                total_cost REAL NOT NULL DEFAULT 0.0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                active_since TEXT NOT NULL,
+                last_active TEXT NOT NULL,
+                patterns_discovered INTEGER NOT NULL DEFAULT 0
+            );
+            ",
+        )
+        .map_err(|e| format!("Failed to create fleet tables: {e}"))?;
+        Ok(())
+    }
+
+    fn load_from_db(&mut self) -> Result<(), String> {
+        let conn_guard = self
+            .db
+            .as_ref()
+            .ok_or("No database")?
+            .lock()
+            .map_err(|e| format!("Lock: {e}"))?;
+
+        // Load patterns
+        {
+            let mut stmt = conn_guard
+                .prepare("SELECT id, pattern_type, description, frequency, first_seen, last_seen, confidence FROM fleet_patterns")
+                .map_err(|e| format!("Prepare: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(LearningPattern {
+                        id: row.get(0)?,
+                        pattern_type: parse_pattern_type(&row.get::<_, String>(1)?),
+                        description: row.get(2)?,
+                        frequency: row.get(3)?,
+                        first_seen: row
+                            .get::<_, String>(4)?
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now()),
+                        last_seen: row
+                            .get::<_, String>(5)?
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now()),
+                        confidence: row.get(6)?,
+                    })
+                })
+                .map_err(|e| format!("Query: {e}"))?;
+            for row in rows {
+                if let Ok(p) = row {
+                    self.patterns.push(p);
+                }
+            }
+        }
+
+        // Load model performance
+        {
+            let mut stmt = conn_guard
+                .prepare("SELECT model_id, total_requests, success_count, avg_latency_ms, avg_cost, avg_quality_score, last_updated FROM fleet_model_performance")
+                .map_err(|e| format!("Prepare: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(ModelPerformance {
+                        model_id: row.get(0)?,
+                        total_requests: row.get(1)?,
+                        success_count: row.get(2)?,
+                        avg_latency_ms: row.get(3)?,
+                        avg_cost: row.get(4)?,
+                        avg_quality_score: row.get(5)?,
+                        last_updated: row
+                            .get::<_, String>(6)?
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now()),
+                    })
+                })
+                .map_err(|e| format!("Query: {e}"))?;
+            for row in rows {
+                if let Ok(p) = row {
+                    self.model_performance.insert(p.model_id.clone(), p);
+                }
+            }
+        }
+
+        // Load insights
+        {
+            let mut stmt = conn_guard
+                .prepare("SELECT id, insight_type, title, description, data, created_at FROM fleet_insights")
+                .map_err(|e| format!("Prepare: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let data_str: String = row.get(4)?;
+                    Ok(FleetInsight {
+                        id: row.get(0)?,
+                        insight_type: row.get(1)?,
+                        title: row.get(2)?,
+                        description: row.get(3)?,
+                        data: serde_json::from_str(&data_str).unwrap_or(serde_json::Value::Null),
+                        created_at: row
+                            .get::<_, String>(5)?
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now()),
+                    })
+                })
+                .map_err(|e| format!("Query: {e}"))?;
+            for row in rows {
+                if let Ok(i) = row {
+                    self.insights.push(i);
+                }
+            }
+        }
+
+        // Load instance metrics
+        {
+            let mut stmt = conn_guard
+                .prepare("SELECT instance_id, total_requests, total_cost, total_tokens, active_since, last_active, patterns_discovered FROM fleet_instances")
+                .map_err(|e| format!("Prepare: {e}"))?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(InstanceMetrics {
+                        instance_id: row.get(0)?,
+                        total_requests: row.get(1)?,
+                        total_cost: row.get(2)?,
+                        total_tokens: row.get(3)?,
+                        active_since: row
+                            .get::<_, String>(4)?
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now()),
+                        last_active: row
+                            .get::<_, String>(5)?
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now()),
+                        patterns_discovered: row.get(6)?,
+                    })
+                })
+                .map_err(|e| format!("Query: {e}"))?;
+            for row in rows {
+                if let Ok(m) = row {
+                    self.instances.insert(m.instance_id.clone(), m);
+                }
+            }
+        }
+
+        debug!(
+            "Loaded fleet data: {} patterns, {} models, {} insights, {} instances",
+            self.patterns.len(),
+            self.model_performance.len(),
+            self.insights.len(),
+            self.instances.len()
+        );
+        Ok(())
+    }
+
+    /// Flush all in-memory state to the SQLite database.
+    ///
+    /// This is a no-op if the service was created without a database.
+    pub fn persist(&self) -> Result<(), String> {
+        let db = match &self.db {
+            Some(db) => db,
+            None => return Ok(()),
+        };
+        let conn = db.lock().map_err(|e| format!("Lock: {e}"))?;
+
+        // Persist patterns (upsert)
+        for p in &self.patterns {
+            conn.execute(
+                "INSERT OR REPLACE INTO fleet_patterns (id, pattern_type, description, frequency, first_seen, last_seen, confidence) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    p.id,
+                    format!("{:?}", p.pattern_type),
+                    p.description,
+                    p.frequency,
+                    p.first_seen.to_rfc3339(),
+                    p.last_seen.to_rfc3339(),
+                    p.confidence,
+                ],
+            )
+            .map_err(|e| format!("Persist pattern: {e}"))?;
+        }
+
+        // Persist model performance
+        for perf in self.model_performance.values() {
+            conn.execute(
+                "INSERT OR REPLACE INTO fleet_model_performance (model_id, total_requests, success_count, avg_latency_ms, avg_cost, avg_quality_score, last_updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    perf.model_id,
+                    perf.total_requests,
+                    perf.success_count,
+                    perf.avg_latency_ms,
+                    perf.avg_cost,
+                    perf.avg_quality_score,
+                    perf.last_updated.to_rfc3339(),
+                ],
+            )
+            .map_err(|e| format!("Persist model_performance: {e}"))?;
+        }
+
+        // Persist insights
+        for insight in &self.insights {
+            conn.execute(
+                "INSERT OR REPLACE INTO fleet_insights (id, insight_type, title, description, data, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    insight.id,
+                    insight.insight_type,
+                    insight.title,
+                    insight.description,
+                    serde_json::to_string(&insight.data).unwrap_or_default(),
+                    insight.created_at.to_rfc3339(),
+                ],
+            )
+            .map_err(|e| format!("Persist insight: {e}"))?;
+        }
+
+        // Persist instance metrics
+        for inst in self.instances.values() {
+            conn.execute(
+                "INSERT OR REPLACE INTO fleet_instances (instance_id, total_requests, total_cost, total_tokens, active_since, last_active, patterns_discovered) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    inst.instance_id,
+                    inst.total_requests,
+                    inst.total_cost,
+                    inst.total_tokens,
+                    inst.active_since.to_rfc3339(),
+                    inst.last_active.to_rfc3339(),
+                    inst.patterns_discovered,
+                ],
+            )
+            .map_err(|e| format!("Persist instance: {e}"))?;
+        }
+
+        debug!("Persisted fleet learning data to database");
+        Ok(())
     }
 
     // -- Patterns --
@@ -360,6 +661,18 @@ impl FleetLearningService {
             total_patterns: self.patterns.len(),
             total_insights: self.insights.len(),
         }
+    }
+}
+
+fn parse_pattern_type(s: &str) -> PatternType {
+    match s {
+        "CodeStyle" => PatternType::CodeStyle,
+        "ErrorRecovery" => PatternType::ErrorRecovery,
+        "ToolPreference" => PatternType::ToolPreference,
+        "WorkflowSequence" => PatternType::WorkflowSequence,
+        "ModelPreference" => PatternType::ModelPreference,
+        "PromptPattern" => PatternType::PromptPattern,
+        _ => PatternType::CodeStyle,
     }
 }
 
@@ -755,6 +1068,35 @@ mod tests {
         assert!(service.all_patterns().is_empty());
         assert!(service.all_insights().is_empty());
         assert_eq!(service.fleet_summary().total_instances, 0);
+    }
+
+    // -- Persistence --
+
+    #[test]
+    fn test_persist_and_reload() {
+        let mut service = FleetLearningService::with_in_memory_db().unwrap();
+
+        service.record_pattern(PatternType::CodeStyle, "snake_case", 0.85);
+        service.record_model_performance("gpt-4", true, 250.0, 0.03, 0.9);
+        service.add_insight("opt", "Use Haiku", "cheaper", serde_json::json!({"s": 1}));
+        service.register_instance("inst-1");
+        service.update_instance_metrics("inst-1", 10, 0.5, 5000);
+
+        service.persist().unwrap();
+
+        // Verify data survived by reloading from same connection
+        assert_eq!(service.all_patterns().len(), 1);
+        assert_eq!(service.all_patterns()[0].description, "snake_case");
+        assert!(service.get_model_performance("gpt-4").is_some());
+        assert_eq!(service.all_insights().len(), 1);
+        assert!(service.get_instance_metrics("inst-1").is_some());
+    }
+
+    #[test]
+    fn test_persist_noop_without_db() {
+        let service = FleetLearningService::new();
+        // Should be a no-op, not an error.
+        service.persist().unwrap();
     }
 
     // -- Pattern type enum coverage --

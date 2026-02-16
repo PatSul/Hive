@@ -1,5 +1,6 @@
 use crate::storage::LearningStorage;
 use crate::types::*;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Gradual, user-approved prompt refinement system.
@@ -150,6 +151,84 @@ impl PromptEvolver {
 
         Ok(())
     }
+
+    /// Build an `AiRefinementRequest` that can be sent to an AI provider for
+    /// intelligent prompt rewriting.
+    ///
+    /// Returns `None` if the persona has no active prompt or already has
+    /// acceptable quality (>= 0.6 with 20+ samples).
+    pub fn build_ai_refinement_request(
+        &self,
+        persona: &str,
+    ) -> Result<Option<AiRefinementRequest>, String> {
+        let pv = match self.storage.get_active_prompt(persona)? {
+            Some(pv) => pv,
+            None => return Ok(None),
+        };
+
+        if pv.sample_count < 20 || pv.avg_quality >= 0.6 {
+            return Ok(None);
+        }
+
+        Ok(Some(AiRefinementRequest {
+            persona: persona.to_string(),
+            current_prompt: pv.prompt_text,
+            avg_quality: pv.avg_quality,
+            sample_count: pv.sample_count,
+            system_message: format!(
+                "You are a prompt engineering expert. The following system prompt for the '{}' persona \
+                 has an average quality score of {:.2} over {} interactions, which is below the 0.6 \
+                 threshold. Rewrite the prompt to improve response quality. Keep the same intent but \
+                 make it clearer, more specific, and more effective. Return ONLY the improved prompt \
+                 text, no explanations.",
+                persona, pv.avg_quality, pv.sample_count,
+            ),
+        }))
+    }
+
+    /// Apply an AI-generated refinement response.
+    ///
+    /// Call this after sending the `AiRefinementRequest` to an AI and receiving
+    /// the improved prompt text back.
+    pub fn apply_ai_refinement(
+        &self,
+        persona: &str,
+        ai_response: &str,
+    ) -> Result<u32, String> {
+        let trimmed = ai_response.trim();
+        if trimmed.is_empty() {
+            return Err("AI returned empty refinement".into());
+        }
+
+        let version = self.apply_refinement(persona, trimmed)?;
+
+        self.storage.log_learning(&LearningLogEntry {
+            id: 0,
+            event_type: "ai_refinement_applied".into(),
+            description: format!(
+                "AI-driven prompt refinement for persona '{persona}': version {version}"
+            ),
+            details: format!(
+                "{{\"persona\":\"{persona}\",\"version\":{version},\"prompt_length\":{}}}",
+                trimmed.len()
+            ),
+            reversible: true,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        })?;
+
+        Ok(version)
+    }
+}
+
+/// A request to send to an AI provider for intelligent prompt refinement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiRefinementRequest {
+    pub persona: String,
+    pub current_prompt: String,
+    pub avg_quality: f64,
+    pub sample_count: u32,
+    /// The system message to send to the AI model to get the refinement.
+    pub system_message: String,
 }
 
 /// Generate a refinement suggestion based on current prompt and quality.
@@ -448,6 +527,102 @@ mod tests {
     fn test_refinement_suggestion_moderate() {
         let result = generate_refinement_suggestion("Base prompt.", 0.55);
         assert!(result.contains("room for improvement"));
+    }
+
+    // ── AI refinement tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_build_ai_refinement_request_none_when_quality_ok() {
+        let (evolver, storage) = make_evolver_with_storage();
+        evolver
+            .apply_refinement("coder", "You are a coder.")
+            .unwrap();
+        storage.update_prompt_quality("coder", 0.8, 25).unwrap();
+
+        let req = evolver.build_ai_refinement_request("coder").unwrap();
+        assert!(req.is_none());
+    }
+
+    #[test]
+    fn test_build_ai_refinement_request_none_when_insufficient_samples() {
+        let (evolver, storage) = make_evolver_with_storage();
+        evolver
+            .apply_refinement("coder", "You are a coder.")
+            .unwrap();
+        storage.update_prompt_quality("coder", 0.3, 10).unwrap();
+
+        let req = evolver.build_ai_refinement_request("coder").unwrap();
+        assert!(req.is_none());
+    }
+
+    #[test]
+    fn test_build_ai_refinement_request_triggers_on_low_quality() {
+        let (evolver, storage) = make_evolver_with_storage();
+        evolver
+            .apply_refinement("coder", "You are a coder.")
+            .unwrap();
+        storage.update_prompt_quality("coder", 0.4, 25).unwrap();
+
+        let req = evolver.build_ai_refinement_request("coder").unwrap();
+        assert!(req.is_some());
+        let r = req.unwrap();
+        assert_eq!(r.persona, "coder");
+        assert_eq!(r.current_prompt, "You are a coder.");
+        assert!(r.system_message.contains("prompt engineering"));
+    }
+
+    #[test]
+    fn test_build_ai_refinement_request_none_when_no_prompt() {
+        let evolver = make_evolver();
+        let req = evolver.build_ai_refinement_request("ghost").unwrap();
+        assert!(req.is_none());
+    }
+
+    #[test]
+    fn test_apply_ai_refinement() {
+        let (evolver, _) = make_evolver_with_storage();
+        evolver
+            .apply_refinement("coder", "You are a coder.")
+            .unwrap();
+
+        let version = evolver
+            .apply_ai_refinement("coder", "You are an expert coding assistant.")
+            .unwrap();
+        assert_eq!(version, 2);
+
+        let prompt = evolver.get_prompt("coder").unwrap();
+        assert_eq!(
+            prompt,
+            Some("You are an expert coding assistant.".to_string())
+        );
+    }
+
+    #[test]
+    fn test_apply_ai_refinement_empty_errors() {
+        let evolver = make_evolver();
+        evolver
+            .apply_refinement("coder", "You are a coder.")
+            .unwrap();
+
+        let result = evolver.apply_ai_refinement("coder", "  ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_apply_ai_refinement_logs() {
+        let (evolver, storage) = make_evolver_with_storage();
+        evolver
+            .apply_refinement("coder", "You are a coder.")
+            .unwrap();
+        evolver
+            .apply_ai_refinement("coder", "Improved prompt.")
+            .unwrap();
+
+        let log = storage.get_learning_log(20).unwrap();
+        assert!(
+            log.iter()
+                .any(|e| e.event_type == "ai_refinement_applied")
+        );
     }
 
     // ── multi-persona isolation ──────────────────────────────────────

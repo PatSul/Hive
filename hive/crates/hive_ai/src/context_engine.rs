@@ -42,6 +42,10 @@ pub enum SourceType {
     Dependency,
     Config,
     Test,
+    /// A learned code pattern from the pattern library.
+    Pattern,
+    /// Learned user preferences injected as context.
+    LearnedPreference,
 }
 
 /// A single context source with its content and metadata.
@@ -162,6 +166,29 @@ impl ContextEngine {
             path: name.to_string(),
             content: body.to_string(),
             source_type: SourceType::Symbol,
+            last_modified: Utc::now(),
+        });
+    }
+
+    /// Add a learned code pattern as a context source.
+    pub fn add_pattern(&mut self, description: &str, pattern_code: &str, language: &str) {
+        self.add_source(ContextSource {
+            path: format!("pattern::{}::{}", language, description),
+            content: pattern_code.to_string(),
+            source_type: SourceType::Pattern,
+            last_modified: Utc::now(),
+        });
+    }
+
+    /// Add learned user preferences as a context source.
+    pub fn add_learned_preferences(&mut self, preferences_text: &str) {
+        if preferences_text.is_empty() {
+            return;
+        }
+        self.add_source(ContextSource {
+            path: "learned::preferences".to_string(),
+            content: preferences_text.to_string(),
+            source_type: SourceType::LearnedPreference,
             last_modified: Utc::now(),
         });
     }

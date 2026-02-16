@@ -1,3 +1,4 @@
+pub mod learning_bridge;
 pub mod outcome_tracker;
 pub mod pattern_library;
 pub mod preference_model;

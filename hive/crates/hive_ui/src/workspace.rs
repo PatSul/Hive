@@ -1308,13 +1308,27 @@ impl HiveWorkspace {
             })
             .collect();
 
-        // 4. Extract provider + request from the global (sync — no await).
+        // 4a. Build system prompt from learned preferences (if any).
+        let system_prompt = if cx.has_global::<AppLearning>() {
+            let learning = &cx.global::<AppLearning>().0;
+            match learning.preference_model.prompt_addendum() {
+                Ok(addendum) if !addendum.is_empty() => {
+                    info!("Injecting learned preferences into system prompt");
+                    Some(addendum)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        // 4b. Extract provider + request from the global (sync — no await).
         let stream_setup: Option<(Arc<dyn AiProvider>, ChatRequest)> = if cx
             .has_global::<AppAiService>()
         {
             cx.global::<AppAiService>()
                 .0
-                .prepare_stream(ai_messages, &model, None, Some(tool_defs))
+                .prepare_stream(ai_messages, &model, system_prompt, Some(tool_defs))
         } else {
             None
         };
