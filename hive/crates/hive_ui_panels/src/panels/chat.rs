@@ -1209,7 +1209,7 @@ fn render_markdown(source: &str, theme: &HiveTheme) -> AnyElement {
     let mut code_block_lang = String::new();
     let mut bold_active = false;
     let mut emphasis_active = false;
-    let mut in_heading = false;
+    let mut _in_heading = false;
     let mut heading_level: u8 = 0;
     let mut inline_segments: Vec<AnyElement> = Vec::new();
     let mut _in_list = false;
@@ -1244,11 +1244,11 @@ fn render_markdown(source: &str, theme: &HiveTheme) -> AnyElement {
             // -- Headings --
             Event::Start(Tag::Heading { level, .. }) => {
                 flush_inline_segments(&mut inline_segments, &mut container_children, theme);
-                in_heading = true;
+                _in_heading = true;
                 heading_level = level as u8;
             }
             Event::End(TagEnd::Heading(_)) => {
-                in_heading = false;
+                _in_heading = false;
                 let size = match heading_level {
                     1 => theme.font_size_xl,
                     2 => theme.font_size_lg,
@@ -1360,8 +1360,6 @@ fn render_markdown(source: &str, theme: &HiveTheme) -> AnyElement {
                     let el = el.child(text.to_string()).into_any_element();
                     if in_list_item {
                         list_item_segments.push(el);
-                    } else if in_heading {
-                        inline_segments.push(el);
                     } else {
                         inline_segments.push(el);
                     }

@@ -100,8 +100,6 @@ impl FallbackReason {
             && (lower.contains("not found") || lower.contains("unavailable"))
         {
             Self::ModelUnavailable
-        } else if lower.contains("500") || lower.contains("502") || lower.contains("503") {
-            Self::ServerError
         } else {
             Self::ServerError
         }

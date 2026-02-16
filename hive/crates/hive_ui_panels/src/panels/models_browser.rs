@@ -781,7 +781,7 @@ impl Render for ModelsBrowserView {
                                     }
                                 }),
                             )
-                            .child(if is_loading { "\u{21BB}" } else { "\u{21BB}" }),
+                            .child("\u{21BB}"),
                     ),
             )
             .child(
@@ -836,11 +836,7 @@ impl Render for ModelsBrowserView {
                                 } else {
                                     theme.accent_green
                                 })
-                                .child(if is_loading {
-                                    "\u{25CF}"
-                                } else {
-                                    "\u{25CF}"
-                                }),
+                                .child("\u{25CF}"),
                         )
                         .child(
                             div()

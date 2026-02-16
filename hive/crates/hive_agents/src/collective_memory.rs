@@ -32,7 +32,7 @@ impl MemoryCategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_str(s: &str) -> Self {
         match s {
             "SuccessPattern" => Self::SuccessPattern,
             "FailurePattern" => Self::FailurePattern,
@@ -173,7 +173,7 @@ impl CollectiveMemory {
 
         Ok(MemoryEntry {
             id,
-            category: MemoryCategory::from_str(&cat_str),
+            category: MemoryCategory::parse_str(&cat_str),
             content,
             tags,
             source_run_id,
@@ -378,7 +378,7 @@ impl CollectiveMemory {
 
             for row in rows {
                 let (cat_str, count) = row.map_err(|e| format!("Row error: {e}"))?;
-                by_category.insert(MemoryCategory::from_str(&cat_str), count);
+                by_category.insert(MemoryCategory::parse_str(&cat_str), count);
             }
         }
 
@@ -625,10 +625,10 @@ mod tests {
         ];
         for cat in &cats {
             let s = cat.to_string();
-            let back = MemoryCategory::from_str(&s);
+            let back = MemoryCategory::parse_str(&s);
             assert_eq!(*cat, back);
         }
         // Unknown string falls back to General.
-        assert_eq!(MemoryCategory::from_str("bogus"), MemoryCategory::General);
+        assert_eq!(MemoryCategory::parse_str("bogus"), MemoryCategory::General);
     }
 }

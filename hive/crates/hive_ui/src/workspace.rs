@@ -562,7 +562,7 @@ impl HiveWorkspace {
 
     fn project_name_from_path(path: &Path) -> String {
         path.file_name()
-            .unwrap_or_else(|| path.as_os_str())
+            .unwrap_or(path.as_os_str())
             .to_string_lossy()
             .to_string()
     }
@@ -735,10 +735,8 @@ impl HiveWorkspace {
             let has_lmstudio = !config.lmstudio_url.is_empty();
             providers.push(ProviderStatus::new("LM Studio", has_lmstudio, if has_lmstudio { Some(0) } else { None }));
 
-            if let Some(ref url) = config.local_provider_url {
-                if !url.is_empty() {
-                    providers.push(ProviderStatus::new("Custom Local", true, Some(0)));
-                }
+            if config.local_provider_url.as_ref().is_some_and(|url| !url.is_empty()) {
+                providers.push(ProviderStatus::new("Custom Local", true, Some(0)));
             }
 
             self.monitor_data.providers = providers;
@@ -748,11 +746,10 @@ impl HiveWorkspace {
         if let Ok(output) = std::process::Command::new("ps")
             .args(["-o", "etime=", "-p", &std::process::id().to_string()])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                self.monitor_data.uptime_secs = parse_etime(&raw);
-            }
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            self.monitor_data.uptime_secs = parse_etime(&raw);
         }
     }
 
@@ -1226,18 +1223,18 @@ impl HiveWorkspace {
                             Ok(c) => c,
                             Err(_) => continue,
                         };
-                        if let Ok(repos) = rt.block_on(client.list_repos()) {
-                            if let Some(arr) = repos.as_array() {
-                                let descriptions: Vec<String> = arr
-                                    .iter()
-                                    .take(5)
-                                    .filter_map(|r| {
-                                        let name = r.get("full_name")?.as_str()?;
-                                        Some(format!("Activity on {name}"))
-                                    })
-                                    .collect();
-                                let _ = tx.send(AssistantFetchResult::RecentActions(descriptions));
-                            }
+                        if let Ok(repos) = rt.block_on(client.list_repos())
+                            && let Some(arr) = repos.as_array()
+                        {
+                            let descriptions: Vec<String> = arr
+                                .iter()
+                                .take(5)
+                                .filter_map(|r| {
+                                    let name = r.get("full_name")?.as_str()?;
+                                    Some(format!("Activity on {name}"))
+                                })
+                                .collect();
+                            let _ = tx.send(AssistantFetchResult::RecentActions(descriptions));
                         }
                     }
                     _ => {}
@@ -1601,24 +1598,24 @@ impl HiveWorkspace {
     fn maybe_trigger_discovery_scan(&mut self, cx: &mut Context<Self>) {
         // Check if a previous scan just finished.
         if self.discovery_scan_pending {
-            if let Some(flag) = &self.discovery_done_flag {
-                if flag.load(std::sync::atomic::Ordering::Acquire) {
-                    self.discovery_scan_pending = false;
-                    self.discovery_done_flag = None;
-                    // Refresh UI with discovered models.
-                    if cx.has_global::<AppAiService>() {
-                        if let Some(d) = cx.global::<AppAiService>().0.discovery() {
-                            let models = d.snapshot().all_models();
-                            self.settings_view.update(cx, |settings, cx| {
-                                settings.refresh_local_models(models.clone(), cx);
-                            });
-                            self.models_browser_view.update(cx, |browser, cx| {
-                                browser.set_local_models(models, cx);
-                            });
-                        }
-                    }
-                    cx.notify();
+            if let Some(flag) = &self.discovery_done_flag
+                && flag.load(std::sync::atomic::Ordering::Acquire)
+            {
+                self.discovery_scan_pending = false;
+                self.discovery_done_flag = None;
+                // Refresh UI with discovered models.
+                if cx.has_global::<AppAiService>()
+                    && let Some(d) = cx.global::<AppAiService>().0.discovery()
+                {
+                    let models = d.snapshot().all_models();
+                    self.settings_view.update(cx, |settings, cx| {
+                        settings.refresh_local_models(models.clone(), cx);
+                    });
+                    self.models_browser_view.update(cx, |browser, cx| {
+                        browser.set_local_models(models, cx);
+                    });
                 }
+                cx.notify();
             }
             return;
         }
@@ -1886,13 +1883,13 @@ impl HiveWorkspace {
         });
 
         cx.spawn(async move |this, app: &mut AsyncApp| {
-            if let Ok(Ok(Some(paths))) = receiver.await {
-                if let Some(path) = paths.first() {
-                    let workspace_path = path.to_path_buf();
-                    let _ = this.update(app, move |this, cx| {
-                        this.switch_to_workspace(workspace_path, cx);
-                    });
-                }
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.first()
+            {
+                let workspace_path = path.to_path_buf();
+                let _ = this.update(app, move |this, cx| {
+                    this.switch_to_workspace(workspace_path, cx);
+                });
             }
         })
         .detach();
@@ -2421,13 +2418,13 @@ impl HiveWorkspace {
         let source = source.to_lowercase();
         let mut commands = Vec::new();
 
-        if source == "spec" && !source_id.is_empty() && cx.has_global::<AppSpecs>() {
-            if let Some(spec) = cx.global::<AppSpecs>().0.specs.get(source_id) {
-                if spec.entry_count() == 0 || spec.checked_count() < spec.entry_count() {
-                    commands.push("cargo check --quiet".to_string());
-                }
-                commands.push("cargo test --quiet -p hive_app".to_string());
+        if source == "spec" && !source_id.is_empty() && cx.has_global::<AppSpecs>()
+            && let Some(spec) = cx.global::<AppSpecs>().0.specs.get(source_id)
+        {
+            if spec.entry_count() == 0 || spec.checked_count() < spec.entry_count() {
+                commands.push("cargo check --quiet".to_string());
             }
+            commands.push("cargo test --quiet -p hive_app".to_string());
         }
 
         if source == "kanban-task" && !source_id.is_empty() {
@@ -2655,17 +2652,17 @@ impl HiveWorkspace {
             } else {
                 format!("xdg-open \"{}\"", file_path.to_string_lossy())
             };
-            if cx.has_global::<AppSecurity>() {
-                if let Err(e) = cx.global::<AppSecurity>().0.check_command(&command_string) {
-                    error!("Files: blocked open command: {e}");
-                    self.push_notification(
-                        cx,
-                        NotificationType::Error,
-                        "Files",
-                        format!("Blocked file open command: {e}"),
-                    );
-                    return;
-                }
+            if cx.has_global::<AppSecurity>()
+                && let Err(e) = cx.global::<AppSecurity>().0.check_command(&command_string)
+            {
+                error!("Files: blocked open command: {e}");
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Files",
+                    format!("Blocked file open command: {e}"),
+                );
+                return;
             }
 
             #[cfg(target_os = "windows")]
@@ -2794,10 +2791,10 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("History: delete conversation {}", action.conversation_id);
-        if let Ok(store) = hive_core::ConversationStore::new() {
-            if let Err(e) = store.delete(&action.conversation_id) {
-                warn!("History: failed to delete conversation: {e}");
-            }
+        if let Ok(store) = hive_core::ConversationStore::new()
+            && let Err(e) = store.delete(&action.conversation_id)
+        {
+            warn!("History: failed to delete conversation: {e}");
         }
         self.refresh_history();
         cx.notify();
@@ -3149,7 +3146,7 @@ impl HiveWorkspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab = GitOpsTab::from_str(&action.tab);
+        let tab = GitOpsTab::parse_tab(&action.tab);
         self.review_data.active_tab = tab;
         match tab {
             GitOpsTab::Push => self.refresh_push_data(cx),
@@ -4027,10 +4024,10 @@ impl HiveWorkspace {
 
     fn refresh_push_data(&mut self, cx: &Context<Self>) {
         // Remote URL
-        if let Ok(output) = self.run_checked_git_command(cx, &["remote", "get-url", "origin"], "git remote get-url") {
-            if output.status.success() {
-                self.review_data.push_data.remote_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            }
+        if let Ok(output) = self.run_checked_git_command(cx, &["remote", "get-url", "origin"], "git remote get-url")
+            && output.status.success()
+        {
+            self.review_data.push_data.remote_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
         }
 
         // Tracking branch
@@ -4044,15 +4041,15 @@ impl HiveWorkspace {
 
         // Ahead/behind
         if self.review_data.push_data.tracking_branch.is_some() {
-            if let Ok(output) = self.run_checked_git_command(cx, &["rev-list", "--count", "@{u}..HEAD"], "git rev-list") {
-                if output.status.success() {
-                    self.review_data.push_data.ahead_count = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
-                }
+            if let Ok(output) = self.run_checked_git_command(cx, &["rev-list", "--count", "@{u}..HEAD"], "git rev-list")
+                && output.status.success()
+            {
+                self.review_data.push_data.ahead_count = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
             }
-            if let Ok(output) = self.run_checked_git_command(cx, &["rev-list", "--count", "HEAD..@{u}"], "git rev-list") {
-                if output.status.success() {
-                    self.review_data.push_data.behind_count = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
-                }
+            if let Ok(output) = self.run_checked_git_command(cx, &["rev-list", "--count", "HEAD..@{u}"], "git rev-list")
+                && output.status.success()
+            {
+                self.review_data.push_data.behind_count = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
             }
         }
     }
@@ -4068,25 +4065,25 @@ impl HiveWorkspace {
         self.review_data.branches_data.current_branch = current.clone();
 
         // List all branches
-        if let Ok(output) = self.run_checked_git_command(cx, &["branch", "-a", "--format=%(refname:short)\t%(objectname:short)\t%(subject)"], "git branch -a") {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    let parts: Vec<&str> = line.splitn(3, '\t').collect();
-                    if parts.is_empty() { continue; }
-                    let name = parts[0].to_string();
-                    let is_remote = name.starts_with("origin/");
-                    // Skip HEAD pointers
-                    if name.contains("HEAD") { continue; }
-                    let commit_msg = parts.get(2).unwrap_or(&"").to_string();
-                    branches.push(BranchEntry {
-                        is_current: name == current,
-                        is_remote,
-                        last_commit_msg: commit_msg,
-                        last_commit_time: String::new(),
-                        name,
-                    });
-                }
+        if let Ok(output) = self.run_checked_git_command(cx, &["branch", "-a", "--format=%(refname:short)\t%(objectname:short)\t%(subject)"], "git branch -a")
+            && output.status.success()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let parts: Vec<&str> = line.splitn(3, '\t').collect();
+                if parts.is_empty() { continue; }
+                let name = parts[0].to_string();
+                let is_remote = name.starts_with("origin/");
+                // Skip HEAD pointers
+                if name.contains("HEAD") { continue; }
+                let commit_msg = parts.get(2).unwrap_or(&"").to_string();
+                branches.push(BranchEntry {
+                    is_current: name == current,
+                    is_remote,
+                    last_commit_msg: commit_msg,
+                    last_commit_time: String::new(),
+                    name,
+                });
             }
         }
 
@@ -4107,10 +4104,10 @@ impl HiveWorkspace {
         let mut patterns = Vec::new();
         if let Ok(content) = std::fs::read_to_string(&gitattributes_path) {
             for line in content.lines() {
-                if line.contains("filter=lfs") {
-                    if let Some(pattern) = line.split_whitespace().next() {
-                        patterns.push(pattern.to_string());
-                    }
+                if line.contains("filter=lfs")
+                    && let Some(pattern) = line.split_whitespace().next()
+                {
+                    patterns.push(pattern.to_string());
                 }
             }
         }
@@ -4118,20 +4115,20 @@ impl HiveWorkspace {
 
         // List LFS files
         let mut lfs_files = Vec::new();
-        if let Ok(output) = self.run_checked_git_command(cx, &["lfs", "ls-files", "--long"], "git lfs ls-files") {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    // Format: <oid> <*|-> <path>
-                    let parts: Vec<&str> = line.splitn(3, ' ').collect();
-                    if parts.len() >= 3 {
-                        lfs_files.push(LfsFileEntry {
-                            oid: parts[0].to_string(),
-                            is_pointer: parts[1] == "-",
-                            path: parts[2].to_string(),
-                            size: String::new(),
-                        });
-                    }
+        if let Ok(output) = self.run_checked_git_command(cx, &["lfs", "ls-files", "--long"], "git lfs ls-files")
+            && output.status.success()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                // Format: <oid> <*|-> <path>
+                let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                if parts.len() >= 3 {
+                    lfs_files.push(LfsFileEntry {
+                        oid: parts[0].to_string(),
+                        is_pointer: parts[1] == "-",
+                        path: parts[2].to_string(),
+                        size: String::new(),
+                    });
                 }
             }
         }
@@ -4171,14 +4168,14 @@ impl HiveWorkspace {
         // List active feature/release/hotfix branches
         let list_active = |this: &Self, cx: &Context<Self>, prefix: &str| -> Vec<String> {
             let mut active = Vec::new();
-            if let Ok(output) = this.run_checked_git_command(cx, &["branch", "--list", &format!("{prefix}*")], "git branch --list") {
-                if output.status.success() {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    for line in text.lines() {
-                        let name = line.trim().trim_start_matches("* ").trim_start_matches(prefix);
-                        if !name.is_empty() {
-                            active.push(name.to_string());
-                        }
+            if let Ok(output) = this.run_checked_git_command(cx, &["branch", "--list", &format!("{prefix}*")], "git branch --list")
+                && output.status.success()
+            {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    let name = line.trim().trim_start_matches("* ").trim_start_matches(prefix);
+                    if !name.is_empty() {
+                        active.push(name.to_string());
                     }
                 }
             }
@@ -4472,12 +4469,10 @@ impl HiveWorkspace {
             if cx.has_global::<hive_ui_core::AppSkills>() {
                 cx.global_mut::<hive_ui_core::AppSkills>().0.toggle(name);
             }
-        } else {
-            if cx.has_global::<AppMarketplace>() {
-                let mp = &mut cx.global_mut::<AppMarketplace>().0;
-                if let Err(e) = mp.toggle_skill(&action.skill_id) {
-                    warn!("Failed to toggle skill {}: {e}", action.skill_id);
-                }
+        } else if cx.has_global::<AppMarketplace>() {
+            let mp = &mut cx.global_mut::<AppMarketplace>().0;
+            if let Err(e) = mp.toggle_skill(&action.skill_id) {
+                warn!("Failed to toggle skill {}: {e}", action.skill_id);
             }
         }
 
@@ -4521,12 +4516,10 @@ impl HiveWorkspace {
     ) {
         info!("ClawdHub: add source '{}'", action.url);
 
-        if !action.url.is_empty() {
-            if cx.has_global::<AppMarketplace>() {
-                let mp = &mut cx.global_mut::<AppMarketplace>().0;
-                if let Err(e) = mp.add_source(&action.url, &action.name) {
-                    warn!("Failed to add source '{}': {e}", action.url);
-                }
+        if !action.url.is_empty() && cx.has_global::<AppMarketplace>() {
+            let mp = &mut cx.global_mut::<AppMarketplace>().0;
+            if let Err(e) = mp.add_source(&action.url, &action.name) {
+                warn!("Failed to add source '{}': {e}", action.url);
             }
         }
 
@@ -4787,12 +4780,12 @@ impl HiveWorkspace {
     /// Handle changes to the project model list from the models browser.
     fn handle_project_models_changed(&mut self, models: &[String], cx: &mut Context<Self>) {
         // Persist to config.
-        if cx.has_global::<AppConfig>() {
-            if let Err(e) = cx.global::<AppConfig>().0.update(|cfg| {
+        if cx.has_global::<AppConfig>()
+            && let Err(e) = cx.global::<AppConfig>().0.update(|cfg| {
                 cfg.project_models = models.to_vec();
-            }) {
-                warn!("Models: failed to persist project_models: {e}");
-            }
+            })
+        {
+            warn!("Models: failed to persist project_models: {e}");
         }
 
         // Push to settings model selector.
@@ -4886,10 +4879,10 @@ impl HiveWorkspace {
                 ("telnyx", &snapshot.telnyx_key),
             ];
             for (provider, key) in key_pairs {
-                if let Some(k) = key {
-                    if let Err(e) = config_mgr.set_api_key(provider, Some(k.clone())) {
-                        warn!("Settings: failed to save {provider} API key: {e}");
-                    }
+                if let Some(k) = key
+                    && let Err(e) = config_mgr.set_api_key(provider, Some(k.clone()))
+                {
+                    warn!("Settings: failed to save {provider} API key: {e}");
                 }
             }
 
@@ -4941,53 +4934,49 @@ impl HiveWorkspace {
         if let Ok(output) = std::process::Command::new("sysctl")
             .args(["-n", "hw.memsize"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                res.memory_total = s.parse::<u64>().unwrap_or(0);
-            }
+            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            res.memory_total = s.parse::<u64>().unwrap_or(0);
         }
 
         // Process memory (resident set size in KB) via ps.
         if let Ok(output) = std::process::Command::new("ps")
             .args(["-o", "rss=", "-p", &std::process::id().to_string()])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                // ps reports RSS in kilobytes.
-                res.memory_used = s.parse::<u64>().unwrap_or(0) * 1024;
-            }
+            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // ps reports RSS in kilobytes.
+            res.memory_used = s.parse::<u64>().unwrap_or(0) * 1024;
         }
 
         // CPU usage: use `ps -o %cpu=` for this process as a quick estimate.
         if let Ok(output) = std::process::Command::new("ps")
             .args(["-o", "%cpu=", "-p", &std::process::id().to_string()])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                res.cpu_percent = s.parse::<f64>().unwrap_or(0.0);
-            }
+            let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            res.cpu_percent = s.parse::<f64>().unwrap_or(0.0);
         }
 
         // Disk usage for the project directory via df.
         if let Ok(output) = std::process::Command::new("df")
             .args(["-k", &self.current_project_root.to_string_lossy()])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                // Second line of df output contains the numbers.
-                if let Some(data_line) = text.lines().nth(1) {
-                    let cols: Vec<&str> = data_line.split_whitespace().collect();
-                    // df -k columns: Filesystem 1K-blocks Used Available Capacity ...
-                    if cols.len() >= 4 {
-                        let total_kb = cols[1].parse::<u64>().unwrap_or(0);
-                        let used_kb = cols[2].parse::<u64>().unwrap_or(0);
-                        res.disk_total = total_kb * 1024;
-                        res.disk_used = used_kb * 1024;
-                    }
+            let text = String::from_utf8_lossy(&output.stdout);
+            // Second line of df output contains the numbers.
+            if let Some(data_line) = text.lines().nth(1) {
+                let cols: Vec<&str> = data_line.split_whitespace().collect();
+                // df -k columns: Filesystem 1K-blocks Used Available Capacity ...
+                if cols.len() >= 4 {
+                    let total_kb = cols[1].parse::<u64>().unwrap_or(0);
+                    let used_kb = cols[2].parse::<u64>().unwrap_or(0);
+                    res.disk_total = total_kb * 1024;
+                    res.disk_used = used_kb * 1024;
                 }
             }
         }

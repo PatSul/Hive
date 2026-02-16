@@ -88,6 +88,7 @@ impl ComposeAgent {
     }
 
     /// Use the AI service to generate a draft email.
+    #[allow(clippy::await_holding_lock)] // block_on context: thread is already blocked
     fn draft_with_ai(
         &self,
         instruction: &str,

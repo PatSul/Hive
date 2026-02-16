@@ -39,8 +39,8 @@ impl ConnectivityDisplay {
     }
 }
 
-impl StatusBar {
-    pub fn new() -> Self {
+impl Default for StatusBar {
+    fn default() -> Self {
         Self {
             connectivity: ConnectivityDisplay::Offline,
             current_model: "Select Model".into(),
@@ -49,6 +49,12 @@ impl StatusBar {
             total_cost: 0.0,
             version: env!("CARGO_PKG_VERSION").into(),
         }
+    }
+}
+
+impl StatusBar {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn render(&self, theme: &HiveTheme) -> impl IntoElement {

@@ -141,7 +141,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     // its own SQLite connection.  `std::thread::scope` ensures the borrows of the
     // path strings are valid for the lifetime of the spawned threads.
     let (db_result, learning_result, assistant_result) = std::thread::scope(|s| {
-        let db_handle = s.spawn(|| Database::open());
+        let db_handle = s.spawn(Database::open);
         let learn_handle = s.spawn(|| hive_learn::LearningService::open(&learning_db_str));
         let assist_handle = s.spawn(|| hive_assistant::AssistantService::open(&assistant_db_str));
 

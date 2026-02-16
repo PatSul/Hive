@@ -260,13 +260,13 @@ impl CliService {
 
     /// Run all built-in doctor health checks and return the results.
     pub fn run_doctor(&self) -> Vec<DoctorCheck> {
-        let mut checks = Vec::new();
-
-        checks.push(self.check_config_file());
-        checks.push(self.check_data_directory());
-        checks.push(self.check_git_available());
-        checks.push(self.check_disk_space());
-        checks.push(self.check_network());
+        let checks = vec![
+            self.check_config_file(),
+            self.check_data_directory(),
+            self.check_git_available(),
+            self.check_disk_space(),
+            self.check_network(),
+        ];
 
         debug!(count = checks.len(), "doctor checks completed");
         checks

@@ -151,7 +151,7 @@ impl GitOpsTab {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_tab(s: &str) -> Self {
         match s {
             "changes" => Self::Changes,
             "push" => Self::Push,

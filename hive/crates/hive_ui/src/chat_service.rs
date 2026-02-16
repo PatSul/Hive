@@ -790,10 +790,8 @@ impl ChatService {
         self._stream_task = None;
 
         // Remove the placeholder assistant message (last entry) if it is empty.
-        if let Some(last) = self.messages.last() {
-            if last.role == MessageRole::Assistant && last.content.is_empty() {
-                self.messages.pop();
-            }
+        if self.messages.last().is_some_and(|last| last.role == MessageRole::Assistant && last.content.is_empty()) {
+            self.messages.pop();
         }
 
         // Push an error message so the user sees what happened.

@@ -481,6 +481,7 @@ fn render_chain_selection(data: &TokenLaunchData, theme: &HiveTheme) -> AnyEleme
         .into_any_element()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_chain_card(
     element_id: &str,
     chain_key: &str,

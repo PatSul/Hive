@@ -205,6 +205,7 @@ fn extract_code_blocks(html: &str) -> Vec<CodeBlock> {
         r#"(?is)<(?:pre\s*>\s*<code|code)\s*(?:class\s*=\s*["']([^"']*)["'])?\s*>(.*?)</code>"#,
     )
     .expect("valid regex");
+    let tag_re = Regex::new(r"<[^>]*>").expect("valid regex");
 
     for cap in re.captures_iter(html) {
         let class_attr = cap.get(1).map(|m| m.as_str().to_string());
@@ -225,7 +226,6 @@ fn extract_code_blocks(html: &str) -> Vec<CodeBlock> {
         });
 
         // Strip inner tags from code content
-        let tag_re = Regex::new(r"<[^>]*>").expect("valid regex");
         let content = tag_re.replace_all(raw_content, "").to_string();
         let content = decode_entities(&content);
 

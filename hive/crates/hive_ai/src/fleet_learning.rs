@@ -453,7 +453,7 @@ impl FleetLearningService {
                 description, pattern_type
             );
             self.patterns.push(pattern);
-            self.patterns.last().unwrap()
+            &self.patterns[self.patterns.len() - 1]
         }
     }
 
@@ -571,7 +571,7 @@ impl FleetLearningService {
         };
         debug!("Added insight: '{}' (type={})", title, insight_type);
         self.insights.push(insight);
-        self.insights.last().unwrap()
+        &self.insights[self.insights.len() - 1]
     }
 
     /// Get the most recent insights, up to `limit`.
