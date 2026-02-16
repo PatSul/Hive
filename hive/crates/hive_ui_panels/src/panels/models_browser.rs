@@ -788,7 +788,7 @@ impl Render for ModelsBrowserView {
                 div()
                     .flex()
                     .gap(theme.space_1)
-                    .child(self.render_tab("Browse All", ViewMode::Browse, view_mode, theme, cx))
+                    .child(self.render_tab("All Models", ViewMode::Browse, view_mode, theme, cx))
                     .child(self.render_tab(
                         &format!("My Models ({project_count})"),
                         ViewMode::Project,
@@ -851,6 +851,11 @@ impl Render for ModelsBrowserView {
                 )
             });
 
+        // Selected models strip — convert to AnyElement to release cx borrow.
+        let selected_strip = self
+            .render_selected_strip(&all_models, theme, cx)
+            .into_any_element();
+
         // Tier coverage guide — convert to AnyElement to release the cx borrow
         // before render_model_list needs it.
         let tier_guide = self
@@ -867,6 +872,7 @@ impl Render for ModelsBrowserView {
             .size_full()
             .child(header)
             .child(search_bar)
+            .child(selected_strip)
             .child(tier_guide)
             .child(model_list)
     }
@@ -909,6 +915,162 @@ impl ModelsBrowserView {
                 }),
             )
             .child(label.to_string())
+    }
+
+    // -- Selected models strip ------------------------------------------------
+
+    fn render_selected_strip(
+        &self,
+        all_models: &[ModelInfo],
+        theme: &HiveTheme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        if self.project_models.is_empty() {
+            return div();
+        }
+
+        // Collect selected models in a stable order: Premium → Mid → Budget → Free,
+        // then alphabetically within each tier.
+        let mut selected: Vec<&ModelInfo> = all_models
+            .iter()
+            .filter(|m| self.is_in_project(&m.id))
+            .collect();
+        selected.sort_by(|a, b| {
+            let tier_ord = |t: ModelTier| -> u8 {
+                match t {
+                    ModelTier::Premium => 0,
+                    ModelTier::Mid => 1,
+                    ModelTier::Budget => 2,
+                    ModelTier::Free => 3,
+                }
+            };
+            tier_ord(a.tier)
+                .cmp(&tier_ord(b.tier))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
+        // Also include local models (always part of project implicitly)
+        let mut locals: Vec<&ModelInfo> = all_models
+            .iter()
+            .filter(|m| {
+                Self::is_local_provider(m.provider_type) && !self.is_in_project(&m.id)
+            })
+            .collect();
+        locals.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut chips: Vec<AnyElement> = Vec::new();
+
+        for model in &selected {
+            let (tier_color, tier_label) = tier_style(model.tier, theme);
+            let model_id = model.id.clone();
+
+            chips.push(
+                div()
+                    .id(ElementId::Name(format!("sel-{}", model.id).into()))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .px(theme.space_2)
+                    .py(px(3.0))
+                    .rounded(theme.radius_full)
+                    .bg({
+                        let mut c = tier_color;
+                        c.a = 0.12;
+                        c
+                    })
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_primary)
+                            .child(model.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(9.0))
+                            .text_color(tier_color)
+                            .child(tier_label),
+                    )
+                    // ✕ remove button
+                    .child(
+                        div()
+                            .id(ElementId::Name(format!("sel-rm-{}", model.id).into()))
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .ml(px(2.0))
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(theme.accent_red))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _e, _w, cx| {
+                                    this.toggle_project_model(model_id.clone(), cx);
+                                }),
+                            )
+                            .child("\u{00D7}"),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        // Show local models as non-removable chips
+        for model in &locals {
+            chips.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .px(theme.space_2)
+                    .py(px(3.0))
+                    .rounded(theme.radius_full)
+                    .bg({
+                        let mut c = theme.accent_aqua;
+                        c.a = 0.12;
+                        c
+                    })
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_primary)
+                            .child(model.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(9.0))
+                            .text_color(theme.accent_aqua)
+                            .child("Local"),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        if chips.is_empty() {
+            return div();
+        }
+
+        div()
+            .px(theme.space_4)
+            .py(theme.space_2)
+            .border_b_1()
+            .border_color(theme.border)
+            .flex()
+            .flex_col()
+            .gap(theme.space_1)
+            .child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .font_weight(FontWeight::BOLD)
+                    .child(format!(
+                        "Selected Models ({})",
+                        selected.len() + locals.len()
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(6.0))
+                    .children(chips),
+            )
     }
 
     // -- Tier coverage guide --------------------------------------------------
@@ -1285,7 +1447,7 @@ impl ModelsBrowserView {
             .any(|s| *s == FetchStatus::Loading);
 
             let message = if self.view_mode == ViewMode::Project {
-                "No project models yet. Switch to Browse All to add models.".to_string()
+                "No project models yet. Switch to All Models to add models.".to_string()
             } else if !has_any_provider {
                 "No API keys configured. Go to Settings to add provider keys \
                  (OpenAI, Anthropic, Google, etc.) and models will appear here."
