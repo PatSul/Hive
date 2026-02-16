@@ -1,8 +1,13 @@
 use gpui::*;
+use gpui::prelude::FluentBuilder;
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::HiveTheme;
-use hive_ui_core::SkillsRefresh;
+use hive_ui_core::{
+    SkillsAddSource, SkillsClearSearch, SkillsCreate, SkillsInstall, SkillsRefresh,
+    SkillsRemove, SkillsRemoveSource, SkillsSetCategory, SkillsSetTab,
+    SkillsToggle,
+};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -319,8 +324,8 @@ impl SkillsData {
             ],
             sources: vec![
                 SkillSource {
-                    url: "https://skills.hive.dev/registry".into(),
-                    name: "Hive Official".into(),
+                    url: "https://clawdhub.hive.dev/registry".into(),
+                    name: "ClawdHub Official".into(),
                     skill_count: 42,
                 },
                 SkillSource {
@@ -404,7 +409,7 @@ fn header_title_block(enabled_count: usize, total_count: usize, theme: &HiveThem
             div()
                 .text_size(theme.font_size_sm)
                 .text_color(theme.text_muted)
-                .child("Install, manage, and discover skills"),
+                .child("Hive's skill marketplace \u{2014} install, manage, and discover skills"),
         )
 }
 
@@ -419,7 +424,7 @@ fn header_title_row(enabled_count: usize, total_count: usize, theme: &HiveTheme)
                 .text_size(theme.font_size_xl)
                 .text_color(theme.text_primary)
                 .font_weight(FontWeight::BOLD)
-                .child("Skills Marketplace"),
+                .child("ClawdHub"),
         )
         .child(installed_count_badge(enabled_count, total_count, theme))
 }
@@ -499,7 +504,11 @@ fn tab_pill(label: &str, active: bool, theme: &HiveTheme) -> AnyElement {
         (theme.bg_surface, theme.text_secondary, theme.border)
     };
 
+    let tab_name = label.to_string();
+    let id_str = format!("skills-tab-{}", label.to_lowercase().replace(' ', "-"));
+
     div()
+        .id(SharedString::from(id_str))
         .px(theme.space_3)
         .py(theme.space_1)
         .rounded(theme.radius_full)
@@ -509,6 +518,16 @@ fn tab_pill(label: &str, active: bool, theme: &HiveTheme) -> AnyElement {
         .text_size(theme.font_size_sm)
         .font_weight(FontWeight::MEDIUM)
         .text_color(text_color)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.opacity(0.85))
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(SkillsSetTab {
+                    tab: tab_name.clone(),
+                }),
+                cx,
+            );
+        })
         .child(label.to_string())
         .into_any_element()
 }
@@ -529,6 +548,8 @@ fn render_search_field(search_query: &str, theme: &HiveTheme) -> AnyElement {
     } else {
         theme.text_primary
     };
+
+    let has_query = !search_query.is_empty();
 
     div()
         .px(theme.space_4)
@@ -551,10 +572,31 @@ fn render_search_field(search_query: &str, theme: &HiveTheme) -> AnyElement {
                 )
                 .child(
                     div()
+                        .flex_1()
                         .text_size(theme.font_size_sm)
                         .text_color(text_color)
                         .child(display_text),
-                ),
+                )
+                .when(has_query, |el: Div| {
+                    el.child(
+                        div()
+                            .id("skills-clear-search")
+                            .ml(theme.space_1)
+                            .px(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .cursor_pointer()
+                            .hover(|style: StyleRefinement| style.text_color(theme.text_primary))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                |_event: &MouseDownEvent, window: &mut Window, cx: &mut App| {
+                                    window.dispatch_action(Box::new(SkillsClearSearch), cx);
+                                },
+                            )
+                            .child("\u{2715}"),
+                    )
+                }),
         )
         .into_any_element()
 }
@@ -736,7 +778,11 @@ fn category_pill(label: &str, active: bool, theme: &HiveTheme) -> AnyElement {
         (theme.bg_tertiary, theme.text_secondary)
     };
 
+    let cat_name = label.to_string();
+    let id_str = format!("skills-cat-{}", label.to_lowercase().replace(' ', "-"));
+
     div()
+        .id(SharedString::from(id_str))
         .px(theme.space_2)
         .py(px(3.0))
         .rounded(theme.radius_full)
@@ -744,6 +790,16 @@ fn category_pill(label: &str, active: bool, theme: &HiveTheme) -> AnyElement {
         .text_size(theme.font_size_xs)
         .font_weight(FontWeight::MEDIUM)
         .text_color(text_color)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.opacity(0.85))
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(SkillsSetCategory {
+                    category: cat_name.clone(),
+                }),
+                cx,
+            );
+        })
         .child(label.to_string())
         .into_any_element()
 }
@@ -994,14 +1050,20 @@ fn create_button_row(draft: &CreateSkillDraft, theme: &HiveTheme) -> Div {
         .child(create_skill_button(draft, theme))
 }
 
-fn create_skill_button(draft: &CreateSkillDraft, theme: &HiveTheme) -> Div {
-    let (bg, text_color) = if draft.is_valid() {
+fn create_skill_button(draft: &CreateSkillDraft, theme: &HiveTheme) -> AnyElement {
+    let valid = draft.is_valid();
+    let (bg, text_color) = if valid {
         (theme.accent_cyan, theme.text_on_accent)
     } else {
         (theme.bg_tertiary, theme.text_muted)
     };
 
-    div()
+    let name = draft.name.clone();
+    let description = draft.description.clone();
+    let instructions = draft.instructions.clone();
+
+    let mut btn = div()
+        .id("skills-create-btn")
         .flex()
         .items_center()
         .justify_center()
@@ -1011,8 +1073,25 @@ fn create_skill_button(draft: &CreateSkillDraft, theme: &HiveTheme) -> Div {
         .bg(bg)
         .text_size(theme.font_size_sm)
         .font_weight(FontWeight::BOLD)
-        .text_color(text_color)
-        .child("Create Skill")
+        .text_color(text_color);
+
+    if valid {
+        btn = btn.cursor_pointer().on_mouse_down(
+            MouseButton::Left,
+            move |_event: &MouseDownEvent, window: &mut Window, cx: &mut App| {
+                window.dispatch_action(
+                    Box::new(SkillsCreate {
+                        name: name.clone(),
+                        description: description.clone(),
+                        instructions: instructions.clone(),
+                    }),
+                    cx,
+                );
+            },
+        );
+    }
+
+    btn.child("Create Skill").into_any_element()
 }
 
 fn form_field_display(
@@ -1278,7 +1357,7 @@ fn render_source_row(source: &SkillSource, theme: &HiveTheme) -> AnyElement {
         .child(source_status_dot(theme))
         .child(source_info_block(source, theme))
         .child(source_count_badge(source, theme))
-        .child(source_remove_button(&source.name, theme))
+        .child(source_remove_button(source, theme))
         .into_any_element()
 }
 
@@ -1323,9 +1402,13 @@ fn source_count_badge(source: &SkillSource, theme: &HiveTheme) -> Div {
         .child(format!("{} skills", source.skill_count))
 }
 
-fn source_remove_button(source_name: &str, theme: &HiveTheme) -> Stateful<Div> {
+fn source_remove_button(source: &SkillSource, theme: &HiveTheme) -> Stateful<Div> {
+    let remove_url = source.url.clone();
     div()
-        .id(SharedString::from(format!("remove-source-{source_name}")))
+        .id(SharedString::from(format!(
+            "remove-source-{}",
+            source.name
+        )))
         .px(theme.space_2)
         .py(px(2.0))
         .rounded(theme.radius_sm)
@@ -1333,8 +1416,13 @@ fn source_remove_button(source_name: &str, theme: &HiveTheme) -> Stateful<Div> {
         .text_color(theme.accent_red)
         .cursor_pointer()
         .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
-        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-            window.dispatch_action(Box::new(SkillsRefresh), cx);
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(SkillsRemoveSource {
+                    url: remove_url.clone(),
+                }),
+                cx,
+            );
         })
         .child("Remove")
 }
@@ -1474,6 +1562,7 @@ fn toggle_switch(enabled: bool, skill_id: &str, theme: &HiveTheme) -> AnyElement
         theme.border
     };
 
+    let toggle_id = skill_id.to_string();
     div()
         .id(SharedString::from(format!("toggle-{skill_id}")))
         .flex()
@@ -1481,8 +1570,13 @@ fn toggle_switch(enabled: bool, skill_id: &str, theme: &HiveTheme) -> AnyElement
         .items_center()
         .gap(theme.space_2)
         .cursor_pointer()
-        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-            window.dispatch_action(Box::new(SkillsRefresh), cx);
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(SkillsToggle {
+                    skill_id: toggle_id.clone(),
+                }),
+                cx,
+            );
         })
         .child(toggle_track(
             track_bg,
@@ -1527,6 +1621,7 @@ fn toggle_track(
 }
 
 fn remove_button(skill_id: &str, theme: &HiveTheme) -> AnyElement {
+    let remove_id = skill_id.to_string();
     div()
         .id(SharedString::from(format!("remove-{skill_id}")))
         .px(theme.space_2)
@@ -1536,14 +1631,20 @@ fn remove_button(skill_id: &str, theme: &HiveTheme) -> AnyElement {
         .text_color(theme.accent_red)
         .cursor_pointer()
         .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
-        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-            window.dispatch_action(Box::new(SkillsRefresh), cx);
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(SkillsRemove {
+                    skill_id: remove_id.clone(),
+                }),
+                cx,
+            );
         })
         .child("Remove")
         .into_any_element()
 }
 
 fn install_button(skill_id: &str, theme: &HiveTheme) -> AnyElement {
+    let install_id = skill_id.to_string();
     div()
         .id(SharedString::from(format!("install-{skill_id}")))
         .flex()
@@ -1558,8 +1659,13 @@ fn install_button(skill_id: &str, theme: &HiveTheme) -> AnyElement {
         .text_color(theme.text_on_accent)
         .cursor_pointer()
         .hover(|style: StyleRefinement| style.bg(theme.accent_aqua))
-        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-            window.dispatch_action(Box::new(SkillsRefresh), cx);
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(SkillsInstall {
+                    skill_id: install_id.clone(),
+                }),
+                cx,
+            );
         })
         .child("Install")
         .into_any_element()
@@ -1581,7 +1687,13 @@ fn add_source_button(theme: &HiveTheme) -> AnyElement {
         .cursor_pointer()
         .hover(|style: StyleRefinement| style.bg(theme.accent_aqua))
         .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-            window.dispatch_action(Box::new(SkillsRefresh), cx);
+            window.dispatch_action(
+                Box::new(SkillsAddSource {
+                    url: String::new(),
+                    name: "Custom Source".to_string(),
+                }),
+                cx,
+            );
         })
         .child("Add Source")
         .into_any_element()

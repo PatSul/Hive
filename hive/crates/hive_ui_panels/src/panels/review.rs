@@ -10,13 +10,11 @@ use hive_fs::git::{FileStatusType, GitService};
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
-    ReviewAiCommitMessage, ReviewBranchCreate, ReviewBranchDeleteNamed, ReviewBranchRefresh,
-    ReviewBranchSetName, ReviewBranchSwitch, ReviewCommit, ReviewCommitWithMessage,
-    ReviewDiscardAll, ReviewGitflowFinishNamed, ReviewGitflowInit, ReviewGitflowSetName,
-    ReviewGitflowStart, ReviewLfsPull, ReviewLfsPush, ReviewLfsRefresh, ReviewLfsSetPattern,
-    ReviewLfsTrack, ReviewLfsUntrack, ReviewPrAiGenerate, ReviewPrCreate, ReviewPrRefresh,
-    ReviewPrSetBase, ReviewPrSetBody, ReviewPrSetTitle, ReviewPush, ReviewPushSetUpstream,
-    ReviewSetCommitMessage, ReviewStageAll, ReviewSwitchTab, ReviewUnstageAll,
+    ReviewAiCommitMessage, ReviewBranchCreate, ReviewBranchDeleteNamed, ReviewBranchSwitch,
+    ReviewCommitWithMessage, ReviewDiscardAll, ReviewGitflowFinishNamed, ReviewGitflowInit,
+    ReviewGitflowStart, ReviewLfsPull, ReviewLfsPush, ReviewLfsTrack, ReviewPrAiGenerate,
+    ReviewPrCreate, ReviewPush, ReviewPushSetUpstream, ReviewStageAll, ReviewSwitchTab,
+    ReviewUnstageAll,
 };
 
 // ---------------------------------------------------------------------------

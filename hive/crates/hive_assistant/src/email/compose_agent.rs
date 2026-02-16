@@ -1,4 +1,10 @@
+use std::sync::{Arc, Mutex};
+
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
+
+use hive_ai::service::AiService;
+use hive_ai::types::{ChatMessage, MessageRole};
 
 use crate::email::UnifiedEmail;
 
@@ -21,21 +27,36 @@ pub struct DraftedEmail {
 // ---------------------------------------------------------------------------
 
 /// Agent that drafts emails from natural-language instructions or in reply
-/// to existing emails.
-pub struct ComposeAgent;
+/// to existing emails using AI generation.
+///
+/// When an `AiService` is provided, drafts are generated via the configured
+/// LLM. Without one, the agent falls back to template-based drafting.
+pub struct ComposeAgent {
+    ai_service: Option<Arc<Mutex<AiService>>>,
+}
 
 impl ComposeAgent {
+    /// Create a compose agent without AI (template-based fallback).
     pub fn new() -> Self {
-        Self
+        Self { ai_service: None }
+    }
+
+    /// Create a compose agent backed by an AI service for real generation.
+    pub fn with_ai(ai_service: Arc<Mutex<AiService>>) -> Self {
+        Self {
+            ai_service: Some(ai_service),
+        }
     }
 
     /// Draft an email from a natural-language instruction.
     ///
     /// For example: "Send a follow-up to Alice about the Q1 report."
-    ///
-    /// TODO: implement with actual AI generation
     pub fn draft_from_instruction(&self, instruction: &str) -> Result<DraftedEmail, String> {
-        // TODO: implement with actual AI generation
+        if let Some(ref ai) = self.ai_service {
+            return self.draft_with_ai(instruction, None, ai);
+        }
+
+        // Fallback: template-based drafting.
         Ok(DraftedEmail {
             to: String::new(),
             subject: format!("Re: {instruction}"),
@@ -45,14 +66,16 @@ impl ComposeAgent {
     }
 
     /// Draft a reply to an existing email.
-    ///
-    /// TODO: implement with actual AI generation
     pub fn draft_reply(
         &self,
         original: &UnifiedEmail,
         instruction: &str,
     ) -> Result<DraftedEmail, String> {
-        // TODO: implement with actual AI generation
+        if let Some(ref ai) = self.ai_service {
+            return self.draft_with_ai(instruction, Some(original), ai);
+        }
+
+        // Fallback: template-based drafting.
         Ok(DraftedEmail {
             to: original.from.clone(),
             subject: format!("Re: {}", original.subject),
@@ -62,6 +85,86 @@ impl ComposeAgent {
             ),
             confidence: 0.0,
         })
+    }
+
+    /// Use the AI service to generate a draft email.
+    fn draft_with_ai(
+        &self,
+        instruction: &str,
+        original: Option<&UnifiedEmail>,
+        ai_service: &Arc<Mutex<AiService>>,
+    ) -> Result<DraftedEmail, String> {
+        let system_prompt = "You are an expert email composer. Given an instruction, \
+            draft a professional email. Respond in JSON format with the fields: \
+            \"to\" (email address or empty if unknown), \"subject\", and \"body\". \
+            Be concise, professional, and match the requested tone.";
+
+        let user_content = if let Some(orig) = original {
+            format!(
+                "Reply to this email:\nFrom: {}\nSubject: {}\nBody: {}\n\nInstruction: {}",
+                orig.from, orig.subject, orig.body, instruction
+            )
+        } else {
+            format!("Instruction: {instruction}")
+        };
+
+        let messages = vec![
+            ChatMessage::text(MessageRole::System, system_prompt),
+            ChatMessage::text(MessageRole::User, &user_content),
+        ];
+
+        let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
+        let model = {
+            let svc = ai_service
+                .lock()
+                .map_err(|e| format!("Lock error: {e}"))?;
+            svc.default_model().to_string()
+        };
+
+        let response = handle.block_on(async {
+            let mut svc = ai_service
+                .lock()
+                .map_err(|e| format!("Lock error: {e}"))?;
+            svc.chat(messages, &model, None)
+                .await
+                .map_err(|e| format!("AI chat error: {e}"))
+        })?;
+
+        // Try to parse the AI response as JSON.
+        let content = &response.content;
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
+            Ok(DraftedEmail {
+                to: parsed
+                    .get("to")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                subject: parsed
+                    .get("subject")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                body: parsed
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(content)
+                    .to_string(),
+                confidence: 0.85,
+            })
+        } else {
+            // If JSON parsing fails, use the raw response as the body.
+            let to = original.map(|o| o.from.clone()).unwrap_or_default();
+            let subject = original
+                .map(|o| format!("Re: {}", o.subject))
+                .unwrap_or_else(|| format!("Re: {instruction}"));
+
+            Ok(DraftedEmail {
+                to,
+                subject,
+                body: content.clone(),
+                confidence: 0.7,
+            })
+        }
     }
 }
 
@@ -149,5 +252,11 @@ mod tests {
         let agent = ComposeAgent::default();
         let draft = agent.draft_from_instruction("test").unwrap();
         assert!(draft.subject.contains("test"));
+    }
+
+    #[test]
+    fn test_new_without_ai() {
+        let agent = ComposeAgent::new();
+        assert!(agent.ai_service.is_none());
     }
 }

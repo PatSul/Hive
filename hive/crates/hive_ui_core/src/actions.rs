@@ -69,6 +69,7 @@ actions!(
         ReviewGitflowInit,
         // Skills panel
         SkillsRefresh,
+        SkillsClearSearch,
         // Routing panel
         RoutingAddRule,
         // Token Launch panel
@@ -280,4 +281,74 @@ pub struct ReviewGitflowSetName {
 #[action(namespace = hive_workspace, no_json)]
 pub struct ReviewLfsSetPattern {
     pub pattern: String,
+}
+
+// ---------------------------------------------------------------------------
+// Skills / ClawdHub actions
+// ---------------------------------------------------------------------------
+
+/// Install a skill from the directory by its ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsInstall {
+    pub skill_id: String,
+}
+
+/// Remove an installed skill by its ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsRemove {
+    pub skill_id: String,
+}
+
+/// Toggle a skill between enabled/disabled by its ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsToggle {
+    pub skill_id: String,
+}
+
+/// Create a new custom skill from the Create tab form.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsCreate {
+    pub name: String,
+    pub description: String,
+    pub instructions: String,
+}
+
+/// Add a remote skill source by URL.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsAddSource {
+    pub url: String,
+    pub name: String,
+}
+
+/// Remove a skill source by URL.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsRemoveSource {
+    pub url: String,
+}
+
+/// Switch the active tab in the Skills panel.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsSetTab {
+    pub tab: String,
+}
+
+/// Update the search query in the Skills panel.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsSetSearch {
+    pub query: String,
+}
+
+/// Set the active category filter in the Skills directory.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SkillsSetCategory {
+    pub category: String,
 }

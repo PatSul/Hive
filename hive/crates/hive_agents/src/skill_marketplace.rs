@@ -441,6 +441,110 @@ impl SkillMarketplace {
     ) -> Result<InstalledSkill> {
         self.install_skill(name, trigger, category, prompt, None)
     }
+
+    // -- directory (built-in catalog) ----------------------------------------
+
+    /// Return the built-in ClawdHub skill directory catalog.
+    ///
+    /// This provides a curated set of skills available for installation without
+    /// requiring a network connection. Skills in this catalog can be installed
+    /// via `install_skill()`.
+    pub fn default_directory() -> Vec<AvailableSkill> {
+        vec![
+            AvailableSkill {
+                name: "API Designer".into(),
+                trigger: "/api-design".into(),
+                description: "Design REST and GraphQL APIs from natural language descriptions with OpenAPI spec generation.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/api-designer".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Performance Profiler".into(),
+                trigger: "/perf-profile".into(),
+                description: "Identify performance bottlenecks, suggest optimizations, and generate flamegraph analysis.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/perf-profiler".into(),
+                category: SkillCategory::Analysis,
+            },
+            AvailableSkill {
+                name: "Changelog Generator".into(),
+                trigger: "/changelog".into(),
+                description: "Automatically generate changelogs from git history, PR descriptions, and conventional commits.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/changelog-gen".into(),
+                category: SkillCategory::Documentation,
+            },
+            AvailableSkill {
+                name: "Dependency Audit".into(),
+                trigger: "/dep-audit".into(),
+                description: "Audit project dependencies for known CVEs, license issues, and outdated packages.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/dep-audit".into(),
+                category: SkillCategory::Security,
+            },
+            AvailableSkill {
+                name: "Database Migrator".into(),
+                trigger: "/db-migrate".into(),
+                description: "Generate and validate database migration scripts from schema changes with rollback support.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/db-migrate".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "i18n Helper".into(),
+                trigger: "/i18n".into(),
+                description: "Extract translatable strings, manage localization files, and detect missing translations.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/i18n-helper".into(),
+                category: SkillCategory::Refactoring,
+            },
+            AvailableSkill {
+                name: "CI Pipeline Generator".into(),
+                trigger: "/ci-pipeline".into(),
+                description: "Generate CI/CD pipeline configs for GitHub Actions, GitLab CI, CircleCI, and more.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/ci-pipeline".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Load Tester".into(),
+                trigger: "/load-test".into(),
+                description: "Create and run load test scenarios with k6/artillery scripts and detailed performance reports.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/load-tester".into(),
+                category: SkillCategory::Testing,
+            },
+            AvailableSkill {
+                name: "Code Complexity Analyzer".into(),
+                trigger: "/complexity".into(),
+                description: "Analyze cyclomatic complexity, cognitive complexity, and suggest refactoring targets.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/complexity".into(),
+                category: SkillCategory::Analysis,
+            },
+            AvailableSkill {
+                name: "PR Reviewer".into(),
+                trigger: "/pr-review".into(),
+                description: "Review pull requests with AI-powered analysis of code quality, security, and best practices.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/pr-reviewer".into(),
+                category: SkillCategory::Security,
+            },
+            AvailableSkill {
+                name: "Email Composer".into(),
+                trigger: "/compose-email".into(),
+                description: "Draft professional emails from brief instructions with tone and audience awareness.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/email-composer".into(),
+                category: SkillCategory::Communication,
+            },
+            AvailableSkill {
+                name: "Architecture Diagrammer".into(),
+                trigger: "/arch-diagram".into(),
+                description: "Generate architecture diagrams in Mermaid/PlantUML from codebase analysis.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/arch-diagram".into(),
+                category: SkillCategory::Documentation,
+            },
+        ]
+    }
+
+    /// List all skills available in the directory (built-in catalog).
+    ///
+    /// Returns the curated ClawdHub catalog. Skills that are already installed
+    /// can be cross-referenced by their trigger.
+    pub fn list_directory(&self) -> Vec<AvailableSkill> {
+        Self::default_directory()
+    }
 }
 
 impl Default for SkillMarketplace {

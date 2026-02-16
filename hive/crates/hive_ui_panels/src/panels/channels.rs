@@ -63,6 +63,7 @@ pub struct ChannelsView {
     streaming_agent: Option<String>,
 
     // UI state
+    #[allow(dead_code)]
     show_channel_list: bool,
     create_channel_mode: bool,
     new_channel_name: String,
@@ -70,6 +71,7 @@ pub struct ChannelsView {
 
 /// Display-ready message.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ChannelMessageDisplay {
     id: String,
     author_name: String,
