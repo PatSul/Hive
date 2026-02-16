@@ -3,8 +3,10 @@
 //! Produces structured standup summaries with per-agent "yesterday / today /
 //! blockers" reports, modeled after the classic agile daily standup format.
 
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use uuid::Uuid;
 
 use crate::persistence::AgentSnapshot;
@@ -51,6 +53,7 @@ impl DailyStandup {
 // ---------------------------------------------------------------------------
 
 /// In-memory standup history and generation service.
+#[derive(Serialize, Deserialize)]
 pub struct StandupService {
     standups: Vec<DailyStandup>,
 }
@@ -130,6 +133,27 @@ impl StandupService {
     /// Return the total number of standups in history.
     pub fn count(&self) -> usize {
         self.standups.len()
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the standup service to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a standup service from a JSON file. Returns an empty service if
+    /// the file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 }
 

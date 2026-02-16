@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -80,6 +81,7 @@ pub struct UsageMetric {
 // ---------------------------------------------------------------------------
 
 /// In-memory enterprise service managing teams, audit logs, and usage metrics.
+#[derive(Serialize, Deserialize)]
 pub struct EnterpriseService {
     teams: Vec<Team>,
     audit_log: Vec<AuditEntry>,
@@ -304,6 +306,27 @@ impl EnterpriseService {
     /// Returns the total number of audit entries.
     pub fn audit_count(&self) -> usize {
         self.audit_log.len()
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the enterprise service to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load an enterprise service from a JSON file. Returns an empty service
+    /// if the file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 
     // -----------------------------------------------------------------------

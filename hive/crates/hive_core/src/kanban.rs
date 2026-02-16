@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -117,6 +118,7 @@ pub struct BoardMetrics {
 // ---------------------------------------------------------------------------
 
 /// In-memory Kanban board with WIP-limit enforcement.
+#[derive(Serialize, Deserialize)]
 pub struct KanbanBoard {
     tasks: Vec<KanbanTask>,
     wip_limits: HashMap<KanbanColumn, usize>,
@@ -359,6 +361,27 @@ impl KanbanBoard {
         } else {
             self.wip_limits.insert(column, limit);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the kanban board to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a kanban board from a JSON file. Returns an empty board if the
+    /// file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 
     // -----------------------------------------------------------------------
@@ -888,5 +911,51 @@ mod tests {
         assert_eq!(json, "\"Critical\"");
         let parsed: Priority = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, Priority::Critical);
+    }
+
+    // -----------------------------------------------------------------------
+    // 16. file persistence round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn save_and_load_file_round_trip() {
+        let dir = std::env::temp_dir().join("hive-kanban-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("kanban_board.json");
+
+        // Build a board with tasks, subtasks, comments, WIP limits.
+        let mut board = KanbanBoard::new();
+        let t1 = board.add_task("Task A", Some("Description A".into()), Priority::High);
+        let t2 = board.add_task("Task B", None, Priority::Low);
+        board.add_subtask(&t1.id, "Subtask 1").unwrap();
+        board.add_comment(&t1.id, "Alice", "Looks good").unwrap();
+        board.move_task(&t2.id, KanbanColumn::InProgress).unwrap();
+        board.set_wip_limit(KanbanColumn::InProgress, 3);
+
+        board.save_to_file(&path).unwrap();
+        let loaded = KanbanBoard::load_from_file(&path).unwrap();
+
+        assert_eq!(loaded.all_tasks().len(), 2);
+        let loaded_t1 = loaded.get_task(&t1.id).unwrap();
+        assert_eq!(loaded_t1.title, "Task A");
+        assert_eq!(loaded_t1.description.as_deref(), Some("Description A"));
+        assert_eq!(loaded_t1.priority, Priority::High);
+        assert_eq!(loaded_t1.subtasks.len(), 1);
+        assert_eq!(loaded_t1.subtasks[0].title, "Subtask 1");
+        assert_eq!(loaded_t1.comments.len(), 1);
+        assert_eq!(loaded_t1.comments[0].author, "Alice");
+
+        let loaded_t2 = loaded.get_task(&t2.id).unwrap();
+        assert_eq!(loaded_t2.column, KanbanColumn::InProgress);
+
+        // Clean up
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_missing_file_returns_empty() {
+        let path = std::env::temp_dir().join("nonexistent-hive-kanban.json");
+        let board = KanbanBoard::load_from_file(&path).unwrap();
+        assert!(board.all_tasks().is_empty());
     }
 }

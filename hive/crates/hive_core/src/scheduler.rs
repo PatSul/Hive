@@ -1,5 +1,7 @@
+use anyhow::Result;
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -185,6 +187,7 @@ pub struct ScheduledJob {
 /// Maintains a set of scheduled jobs and checks on each `tick()` whether any
 /// are due to run. The caller is responsible for invoking `tick()` periodically
 /// (e.g. once per minute).
+#[derive(Serialize, Deserialize)]
 pub struct Scheduler {
     jobs: Vec<ScheduledJob>,
 }
@@ -294,6 +297,27 @@ impl Scheduler {
     /// Convenience wrapper: tick with `Utc::now()`.
     pub fn tick_now(&mut self) -> Vec<String> {
         self.tick(Utc::now())
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the scheduler to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a scheduler from a JSON file. Returns an empty scheduler if the
+    /// file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 }
 

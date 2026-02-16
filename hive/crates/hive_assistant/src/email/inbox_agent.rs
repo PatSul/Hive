@@ -2,8 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tracing::{info, warn};
 
-use crate::email::{EmailProvider, UnifiedEmail};
+use crate::email::{EmailProvider, EmailService, UnifiedEmail};
 use crate::storage::AssistantStorage;
 
 // ---------------------------------------------------------------------------
@@ -28,6 +31,8 @@ pub struct EmailNotification {
 pub struct InboxAgent {
     pub poll_interval: Duration,
     storage: Arc<AssistantStorage>,
+    /// Handle to the background polling task, if running.
+    poll_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl InboxAgent {
@@ -35,6 +40,7 @@ impl InboxAgent {
         Self {
             poll_interval,
             storage,
+            poll_handle: Mutex::new(None),
         }
     }
 
@@ -42,8 +48,6 @@ impl InboxAgent {
     ///
     /// This filters the provided emails to find only important ones and
     /// updates the poll state in storage.
-    ///
-    /// TODO: implement with actual inbox polling via provider APIs
     pub fn poll(
         &self,
         emails: &[UnifiedEmail],
@@ -68,6 +72,119 @@ impl InboxAgent {
             .collect();
 
         Ok(notifications)
+    }
+
+    /// Fetch emails from all configured providers and return notifications.
+    ///
+    /// Calls `EmailService::fetch_gmail_inbox()` and
+    /// `EmailService::fetch_outlook_inbox()`, combines the results, and
+    /// filters them through the existing `poll()` method.
+    pub fn fetch_and_poll(
+        &self,
+        email_service: &EmailService,
+    ) -> Result<Vec<EmailNotification>, String> {
+        let mut all_notifications: Vec<EmailNotification> = Vec::new();
+
+        // -- Gmail -----------------------------------------------------------
+        match email_service.fetch_gmail_inbox() {
+            Ok(emails) if !emails.is_empty() => {
+                info!("InboxAgent: fetched {} Gmail emails", emails.len());
+                match self.poll(&emails, "gmail") {
+                    Ok(notifs) => all_notifications.extend(notifs),
+                    Err(e) => warn!("InboxAgent: Gmail poll error: {e}"),
+                }
+            }
+            Ok(_) => {
+                // Empty result (no token or no messages) -- nothing to do.
+            }
+            Err(e) => {
+                warn!("InboxAgent: Gmail fetch error: {e}");
+            }
+        }
+
+        // -- Outlook ---------------------------------------------------------
+        match email_service.fetch_outlook_inbox() {
+            Ok(emails) if !emails.is_empty() => {
+                info!("InboxAgent: fetched {} Outlook emails", emails.len());
+                match self.poll(&emails, "outlook") {
+                    Ok(notifs) => all_notifications.extend(notifs),
+                    Err(e) => warn!("InboxAgent: Outlook poll error: {e}"),
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!("InboxAgent: Outlook fetch error: {e}");
+            }
+        }
+
+        info!(
+            "InboxAgent: fetch_and_poll complete, {} notifications",
+            all_notifications.len()
+        );
+        Ok(all_notifications)
+    }
+
+    /// Start a background polling loop that periodically calls
+    /// `fetch_and_poll()`.
+    ///
+    /// The spawned tokio task runs at the configured `poll_interval` cadence
+    /// and can be stopped by calling `stop_polling()` or dropping the
+    /// `InboxAgent`.
+    pub async fn start_polling(
+        self: Arc<Self>,
+        email_service: Arc<EmailService>,
+        interval: Duration,
+    ) {
+        let agent = Arc::clone(&self);
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            // Consume the first tick immediately (fires at t=0).
+            ticker.tick().await;
+
+            loop {
+                ticker.tick().await;
+
+                info!("InboxAgent: polling tick");
+                match agent.fetch_and_poll(&email_service) {
+                    Ok(notifications) => {
+                        if !notifications.is_empty() {
+                            info!(
+                                "InboxAgent: {} new notifications this cycle",
+                                notifications.len()
+                            );
+                            // Future enhancement: push notifications to a
+                            // channel or callback for the UI layer to consume.
+                        }
+                    }
+                    Err(e) => {
+                        warn!("InboxAgent: polling cycle error: {e}");
+                    }
+                }
+            }
+        });
+
+        // Store the handle so we can cancel it later.
+        let mut guard = self.poll_handle.lock().await;
+        // If a previous task was running, abort it first.
+        if let Some(old_handle) = guard.take() {
+            old_handle.abort();
+        }
+        *guard = Some(handle);
+    }
+
+    /// Stop the background polling loop if one is running.
+    pub async fn stop_polling(&self) {
+        let mut guard = self.poll_handle.lock().await;
+        if let Some(handle) = guard.take() {
+            handle.abort();
+            info!("InboxAgent: polling stopped");
+        }
+    }
+
+    /// Returns `true` if the background polling task is currently active.
+    pub async fn is_polling(&self) -> bool {
+        let guard = self.poll_handle.lock().await;
+        guard.as_ref().is_some_and(|h| !h.is_finished())
     }
 
     /// Get the last poll time for a provider.

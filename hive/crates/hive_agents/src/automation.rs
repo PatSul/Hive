@@ -9,10 +9,14 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 use std::time::Duration;
 
+use hive_core::channels::{ChannelMessage, MessageAuthor};
+use hive_core::config::HiveConfig;
+use hive_core::kanban::{KanbanBoard, Priority};
+use hive_core::notifications::{AppNotification, NotificationType};
 use hive_terminal::executor::CommandExecutor;
 
 // ---------------------------------------------------------------------------
@@ -182,6 +186,7 @@ fn default_true() -> bool {
 // ---------------------------------------------------------------------------
 
 /// In-memory service for creating, managing, and simulating automation workflows.
+#[derive(Serialize, Deserialize)]
 pub struct AutomationService {
     workflows: Vec<Workflow>,
     run_history: Vec<WorkflowRunResult>,
@@ -647,26 +652,23 @@ impl AutomationService {
         &self.run_history
     }
 
-    /// Execute a workflow that contains only `run_command` steps.
+    /// Execute a workflow, handling all supported action types.
     ///
     /// This is intentionally a blocking call, suitable for running on a
     /// background thread. Commands are validated by the SecurityGateway
     /// inside `CommandExecutor`.
-    pub fn execute_run_commands_blocking(
+    ///
+    /// Supported actions:
+    /// - `RunCommand` — execute a shell command via `CommandExecutor`
+    /// - `SendMessage` — write a message to a channel JSON file under `~/.hive/channels/`
+    /// - `CallApi` — make an HTTP request via `reqwest`
+    /// - `CreateTask` — add a task to the kanban board at `~/.hive/kanban.json`
+    /// - `SendNotification` — write a notification JSON file under `~/.hive/notifications/`
+    /// - `ExecuteSkill` — store a pending skill execution request under `~/.hive/pending_skills/`
+    pub fn execute_workflow_blocking(
         workflow: &Workflow,
         working_dir: PathBuf,
     ) -> Result<WorkflowRunResult> {
-        // Ensure we never run anything unexpected in V1.
-        for step in &workflow.steps {
-            match step.action {
-                ActionType::RunCommand { .. } => {}
-                _ => bail!(
-                    "Unsupported action in workflow '{}': only run_command is supported in V1",
-                    workflow.name
-                ),
-            }
-        }
-
         let started_at = Utc::now();
 
         // Run tokio-based process execution on an isolated runtime to avoid
@@ -683,33 +685,76 @@ impl AutomationService {
         let mut error: Option<String> = None;
 
         for step in &workflow.steps {
-            let ActionType::RunCommand { ref command } = step.action else {
-                continue;
+            let step_result = match &step.action {
+                ActionType::RunCommand { command } => {
+                    let timeout = Duration::from_secs(step.timeout_secs.unwrap_or(30));
+                    let result = rt.block_on(executor.execute_with_timeout(command, timeout));
+
+                    match result {
+                        Ok(output) if output.exit_code == 0 => Ok(()),
+                        Ok(output) => {
+                            let stderr = output.stderr.trim();
+                            Err(if stderr.is_empty() {
+                                format!(
+                                    "Command failed (exit={}): {}",
+                                    output.exit_code, command
+                                )
+                            } else {
+                                format!(
+                                    "Command failed (exit={}): {}\n{}",
+                                    output.exit_code, command, stderr
+                                )
+                            })
+                        }
+                        Err(e) => Err(format!("Command failed: {command}\n{e}")),
+                    }
+                }
+
+                ActionType::SendMessage {
+                    channel,
+                    content,
+                } => {
+                    Self::execute_send_message(channel, content)
+                }
+
+                ActionType::CallApi {
+                    url,
+                    method,
+                } => {
+                    rt.block_on(Self::execute_call_api(url, method))
+                }
+
+                ActionType::CreateTask { title } => {
+                    Self::execute_create_task(title)
+                }
+
+                ActionType::SendNotification {
+                    title,
+                    body,
+                } => {
+                    Self::execute_send_notification(title, body)
+                }
+
+                ActionType::ExecuteSkill {
+                    skill_trigger,
+                    input,
+                } => {
+                    Self::execute_skill(skill_trigger, input)
+                }
             };
 
-            let timeout = Duration::from_secs(step.timeout_secs.unwrap_or(30));
-            let result = rt.block_on(executor.execute_with_timeout(command, timeout));
-
-            match result {
-                Ok(output) if output.exit_code == 0 => {
+            match step_result {
+                Ok(()) => {
                     steps_completed += 1;
                 }
-                Ok(output) => {
-                    success = false;
-                    let stderr = output.stderr.trim();
-                    error = Some(if stderr.is_empty() {
-                        format!("Command failed (exit={}): {}", output.exit_code, command)
-                    } else {
-                        format!(
-                            "Command failed (exit={}): {}\n{}",
-                            output.exit_code, command, stderr
-                        )
-                    });
-                    break;
-                }
                 Err(e) => {
+                    warn!(
+                        workflow_id = %workflow.id,
+                        step_name = %step.name,
+                        "Step failed: {e}"
+                    );
                     success = false;
-                    error = Some(format!("Command failed: {command}\n{e}"));
+                    error = Some(e);
                     break;
                 }
             }
@@ -725,6 +770,196 @@ impl AutomationService {
         })
     }
 
+    /// Deprecated alias for `execute_workflow_blocking`.
+    #[deprecated(note = "Use execute_workflow_blocking instead")]
+    pub fn execute_run_commands_blocking(
+        workflow: &Workflow,
+        working_dir: PathBuf,
+    ) -> Result<WorkflowRunResult> {
+        Self::execute_workflow_blocking(workflow, working_dir)
+    }
+
+    // -----------------------------------------------------------------------
+    // Action handlers (private)
+    // -----------------------------------------------------------------------
+
+    /// Send a message to a channel by writing to `~/.hive/channels/{channel}.json`.
+    fn execute_send_message(channel: &str, content: &str) -> std::result::Result<(), String> {
+        let base_dir = match HiveConfig::base_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("Cannot resolve ~/.hive directory for SendMessage: {e}");
+                return Ok(()); // fire-and-forget
+            }
+        };
+
+        let channels_dir = base_dir.join("channels");
+        let _ = std::fs::create_dir_all(&channels_dir);
+
+        // Try to find the channel file by name. Channel IDs can be the name
+        // itself (e.g. "general") or a UUID. We search for a matching file.
+        let channel_file = channels_dir.join(format!("{channel}.json"));
+
+        let message = ChannelMessage {
+            id: Uuid::new_v4().to_string(),
+            author: MessageAuthor::System,
+            content: content.to_string(),
+            timestamp: Utc::now(),
+            thread_id: None,
+            model: None,
+            cost: None,
+        };
+
+        if channel_file.exists() {
+            // Load existing channel, append message, save back
+            match std::fs::read_to_string(&channel_file) {
+                Ok(json) => {
+                    if let Ok(mut ch) = serde_json::from_str::<hive_core::channels::AgentChannel>(&json) {
+                        ch.messages.push(message);
+                        ch.updated_at = Utc::now();
+                        let updated = serde_json::to_string_pretty(&ch)
+                            .map_err(|e| format!("Failed to serialize channel: {e}"))?;
+                        std::fs::write(&channel_file, updated)
+                            .map_err(|e| format!("Failed to write channel file: {e}"))?;
+                    } else {
+                        warn!("Could not parse channel file {}", channel_file.display());
+                    }
+                }
+                Err(e) => {
+                    warn!("Could not read channel file: {e}");
+                }
+            }
+        } else {
+            // Create a minimal channel message file for pickup
+            let msg_json = serde_json::to_string_pretty(&message)
+                .map_err(|e| format!("Failed to serialize message: {e}"))?;
+            let pending_dir = channels_dir.join("pending");
+            let _ = std::fs::create_dir_all(&pending_dir);
+            let pending_file = pending_dir.join(format!("{channel}_{}.json", Uuid::new_v4()));
+            std::fs::write(&pending_file, msg_json)
+                .map_err(|e| format!("Failed to write pending message: {e}"))?;
+        }
+
+        debug!(channel, "SendMessage action completed");
+        Ok(())
+    }
+
+    /// Make an HTTP request via reqwest (async, called within the runtime).
+    async fn execute_call_api(url: &str, method: &str) -> std::result::Result<(), String> {
+        let client = reqwest::Client::new();
+
+        let request = match method.to_uppercase().as_str() {
+            "GET" => client.get(url),
+            "POST" => client.post(url),
+            "PUT" => client.put(url),
+            "DELETE" => client.delete(url),
+            "PATCH" => client.patch(url),
+            "HEAD" => client.head(url),
+            other => return Err(format!("Unsupported HTTP method: {other}")),
+        };
+
+        match request.send().await {
+            Ok(response) => {
+                let status = response.status();
+                debug!(url, %status, "CallApi action completed");
+                if status.is_client_error() || status.is_server_error() {
+                    Err(format!("HTTP request to {url} returned status {status}"))
+                } else {
+                    Ok(())
+                }
+            }
+            Err(e) => {
+                Err(format!("HTTP request to {url} failed: {e}"))
+            }
+        }
+    }
+
+    /// Create a task on the kanban board at `~/.hive/kanban.json`.
+    fn execute_create_task(title: &str) -> std::result::Result<(), String> {
+        let base_dir = match HiveConfig::base_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("Cannot resolve ~/.hive directory for CreateTask: {e}");
+                return Ok(()); // fire-and-forget
+            }
+        };
+
+        let kanban_path = base_dir.join("kanban.json");
+        let mut board = KanbanBoard::load_from_file(&kanban_path)
+            .unwrap_or_else(|_| KanbanBoard::new());
+
+        board.add_task(title, None, Priority::Medium);
+
+        board
+            .save_to_file(&kanban_path)
+            .map_err(|e| format!("Failed to save kanban board: {e}"))?;
+
+        debug!(title, "CreateTask action completed");
+        Ok(())
+    }
+
+    /// Send a notification by writing to `~/.hive/notifications/`.
+    fn execute_send_notification(title: &str, body: &str) -> std::result::Result<(), String> {
+        let base_dir = match HiveConfig::base_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("Cannot resolve ~/.hive directory for SendNotification: {e}");
+                return Ok(()); // fire-and-forget
+            }
+        };
+
+        // Persist notification as a JSON file for the app to pick up
+        let notifications_dir = base_dir.join("notifications");
+        let _ = std::fs::create_dir_all(&notifications_dir);
+
+        let notification = AppNotification::new(NotificationType::Info, body)
+            .with_title(title);
+        let json = serde_json::to_string_pretty(&notification)
+            .map_err(|e| format!("Failed to serialize notification: {e}"))?;
+        let file_path = notifications_dir.join(format!("{}.json", notification.id));
+        std::fs::write(&file_path, json)
+            .map_err(|e| format!("Failed to write notification file: {e}"))?;
+
+        debug!(title, "SendNotification action completed");
+        Ok(())
+    }
+
+    /// Execute a skill by storing a pending request under `~/.hive/pending_skills/`.
+    ///
+    /// Since `SkillsRegistry` may not be accessible in this blocking context,
+    /// we write the request as a JSON file that can be picked up by the main
+    /// application loop.
+    fn execute_skill(skill_trigger: &str, input: &str) -> std::result::Result<(), String> {
+        let base_dir = match HiveConfig::base_dir() {
+            Ok(d) => d,
+            Err(e) => {
+                warn!("Cannot resolve ~/.hive directory for ExecuteSkill: {e}");
+                return Ok(()); // fire-and-forget
+            }
+        };
+
+        let pending_dir = base_dir.join("pending_skills");
+        let _ = std::fs::create_dir_all(&pending_dir);
+
+        let request_id = Uuid::new_v4().to_string();
+        let request = serde_json::json!({
+            "id": request_id,
+            "skill_trigger": skill_trigger,
+            "input": input,
+            "created_at": Utc::now().to_rfc3339(),
+            "status": "pending"
+        });
+
+        let json = serde_json::to_string_pretty(&request)
+            .map_err(|e| format!("Failed to serialize skill request: {e}"))?;
+        let file_path = pending_dir.join(format!("{request_id}.json"));
+        std::fs::write(&file_path, json)
+            .map_err(|e| format!("Failed to write pending skill file: {e}"))?;
+
+        debug!(skill_trigger, "ExecuteSkill action queued for pickup");
+        Ok(())
+    }
+
     /// Return the total number of workflows.
     pub fn workflow_count(&self) -> usize {
         self.workflows.len()
@@ -736,6 +971,27 @@ impl AutomationService {
             .iter()
             .filter(|w| w.status == WorkflowStatus::Active)
             .count()
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the automation service to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load an automation service from a JSON file. Returns an empty service
+    /// if the file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 
     /// Evaluate a single condition against an actual value.
@@ -796,10 +1052,44 @@ impl AutomationService {
                         );
                     }
                 }
-                _ => bail!(
-                    "step '{}' uses unsupported action type; V1 supports only run_command",
-                    step.name
-                ),
+                ActionType::SendMessage { channel, content } => {
+                    if channel.trim().is_empty() {
+                        bail!("step '{}' has an empty channel", step.name);
+                    }
+                    if content.trim().is_empty() {
+                        bail!("step '{}' has empty message content", step.name);
+                    }
+                }
+                ActionType::CallApi { url, method } => {
+                    if url.trim().is_empty() {
+                        bail!("step '{}' has an empty URL", step.name);
+                    }
+                    let valid_methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
+                    if !valid_methods.contains(&method.to_uppercase().as_str()) {
+                        bail!(
+                            "step '{}' has unsupported HTTP method: {}",
+                            step.name, method
+                        );
+                    }
+                }
+                ActionType::CreateTask { title } => {
+                    if title.trim().is_empty() {
+                        bail!("step '{}' has an empty task title", step.name);
+                    }
+                }
+                ActionType::SendNotification { title, body } => {
+                    if title.trim().is_empty() && body.trim().is_empty() {
+                        bail!(
+                            "step '{}' has both empty notification title and body",
+                            step.name
+                        );
+                    }
+                }
+                ActionType::ExecuteSkill { skill_trigger, .. } => {
+                    if skill_trigger.trim().is_empty() {
+                        bail!("step '{}' has an empty skill trigger", step.name);
+                    }
+                }
             }
         }
 
@@ -1446,17 +1736,44 @@ mod tests {
     }
 
     #[test]
-    fn reload_user_workflows_blocks_insecure_api_urls() {
+    fn reload_user_workflows_loads_call_api_template() {
         let tmp = tempfile::tempdir().unwrap();
         let workflows_dir = tmp.path().join(USER_WORKFLOW_DIR);
         std::fs::create_dir_all(&workflows_dir).unwrap();
 
         let json = r#"{
-  "name": "Bad API",
+  "name": "API Workflow",
   "steps": [
     {
       "name": "Call local service",
       "action": { "type": "call_api", "url": "http://127.0.0.1/api", "method": "POST" }
+    }
+  ]
+}"#;
+        std::fs::write(workflows_dir.join("api.json"), json).unwrap();
+
+        let mut svc = AutomationService::new();
+        let report = svc.reload_user_workflows(tmp.path());
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.failed, 0);
+        assert!(
+            svc.list_workflows().iter().any(|wf| wf.id == "file:api"),
+            "expected file-based workflow id"
+        );
+    }
+
+    #[test]
+    fn reload_user_workflows_rejects_invalid_action_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workflows_dir = tmp.path().join(USER_WORKFLOW_DIR);
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        let json = r#"{
+  "name": "Bad Method",
+  "steps": [
+    {
+      "name": "Call with invalid method",
+      "action": { "type": "call_api", "url": "http://example.com/api", "method": "INVALID" }
     }
   ]
 }"#;
@@ -1467,9 +1784,46 @@ mod tests {
         assert_eq!(report.loaded, 0);
         assert_eq!(report.failed, 1);
         assert!(
-            report.errors[0].contains("only run_command"),
+            report.errors[0].contains("unsupported HTTP method"),
             "unexpected error: {}",
             report.errors[0]
         );
+    }
+
+    // -- file persistence ---------------------------------------------------
+
+    #[test]
+    fn save_and_load_file_round_trip() {
+        let dir = std::env::temp_dir().join("hive-automation-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("automation.json");
+
+        let (mut svc, id) = make_service_with_active_workflow();
+        svc.simulate_run(&id).unwrap();
+
+        svc.save_to_file(&path).unwrap();
+        let loaded = AutomationService::load_from_file(&path).unwrap();
+
+        assert_eq!(loaded.workflow_count(), 1);
+        let wf = loaded.get_workflow(&id).unwrap();
+        assert_eq!(wf.name, "Deploy Pipeline");
+        assert_eq!(wf.status, WorkflowStatus::Active);
+        assert_eq!(wf.run_count, 1);
+        assert!(wf.last_run.is_some());
+        assert_eq!(wf.steps.len(), 1);
+
+        let history = loaded.list_run_history();
+        assert_eq!(history.len(), 1);
+        assert!(history[0].success);
+
+        // Clean up
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_missing_file_returns_empty_service() {
+        let path = std::env::temp_dir().join("nonexistent-hive-automation.json");
+        let svc = AutomationService::load_from_file(&path).unwrap();
+        assert_eq!(svc.workflow_count(), 0);
     }
 }

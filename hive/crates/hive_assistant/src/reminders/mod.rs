@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 use uuid::Uuid;
+
+use hive_core::scheduler::CronSchedule;
 
 use crate::storage::AssistantStorage;
 
@@ -136,11 +139,45 @@ impl ReminderService {
         Ok(reminder)
     }
 
+    /// Create an event-based reminder that triggers when a named event occurs.
+    pub fn create_event_reminder(
+        &self,
+        title: &str,
+        description: &str,
+        event_name: &str,
+    ) -> Result<Reminder, String> {
+        self.create_event_reminder_for_project(title, description, event_name, None)
+    }
+
+    /// Create an event-based reminder for a specific project root.
+    pub fn create_event_reminder_for_project(
+        &self,
+        title: &str,
+        description: &str,
+        event_name: &str,
+        project_root: Option<&str>,
+    ) -> Result<Reminder, String> {
+        let now = Utc::now();
+        let reminder = Reminder {
+            id: Uuid::new_v4().to_string(),
+            title: title.to_string(),
+            description: description.to_string(),
+            trigger: ReminderTrigger::OnEvent(event_name.to_string()),
+            project_root: project_root.map(|p| p.to_string()),
+            status: ReminderStatus::Active,
+            created_at: now.to_rfc3339(),
+            updated_at: now.to_rfc3339(),
+        };
+        self.storage.insert_reminder(&reminder)?;
+        Ok(reminder)
+    }
+
     /// Check all active reminders and return those that should trigger now.
     ///
-    /// A `ReminderTrigger::At` reminder triggers if the trigger time is at
-    /// or before `now`. Recurring and OnEvent reminders are not evaluated
-    /// here (they require a cron evaluator / event bus, which is Phase 2).
+    /// - `ReminderTrigger::At` triggers if the trigger time is at or before `now`.
+    /// - `ReminderTrigger::Recurring` triggers if the cron expression matches `now`.
+    /// - `ReminderTrigger::OnEvent` is intentionally a no-op here; use
+    ///   [`check_event`](Self::check_event) to fire event-based reminders.
     pub fn tick(&self) -> Result<Vec<TriggeredReminder>, String> {
         let now = Utc::now();
         let active = self.storage.list_reminders_by_status("active")?;
@@ -157,11 +194,54 @@ impl ReminderService {
                         });
                     }
                 }
-                ReminderTrigger::Recurring(_) => {
-                    // TODO: evaluate cron expression against current time
+                ReminderTrigger::Recurring(cron_expr) => {
+                    match CronSchedule::parse(cron_expr) {
+                        Ok(cron) => {
+                            if cron.matches(&now) {
+                                triggered.push(TriggeredReminder {
+                                    reminder_id: reminder.id.clone(),
+                                    title: reminder.title.clone(),
+                                    triggered_at: now.to_rfc3339(),
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                reminder_id = %reminder.id,
+                                cron_expr = %cron_expr,
+                                "Failed to parse cron expression, skipping: {e}"
+                            );
+                        }
+                    }
                 }
                 ReminderTrigger::OnEvent(_) => {
-                    // TODO: check event bus for matching events
+                    // Event-based reminders fire via check_event() method,
+                    // not during periodic tick().
+                }
+            }
+        }
+
+        Ok(triggered)
+    }
+
+    /// Check event-based reminders against a specific event name.
+    ///
+    /// Call this method when an event occurs (e.g. `"pr_merged"`, `"build_failed"`)
+    /// to trigger any active reminders whose `OnEvent` trigger matches the given
+    /// event name.
+    pub fn check_event(&self, event_name: &str) -> Result<Vec<TriggeredReminder>, String> {
+        let now = Utc::now();
+        let active = self.storage.list_reminders_by_status("active")?;
+        let mut triggered = Vec::new();
+
+        for reminder in &active {
+            if let ReminderTrigger::OnEvent(ref trigger_event) = reminder.trigger {
+                if trigger_event == event_name {
+                    triggered.push(TriggeredReminder {
+                        reminder_id: reminder.id.clone(),
+                        title: reminder.title.clone(),
+                        triggered_at: now.to_rfc3339(),
+                    });
                 }
             }
         }
@@ -398,6 +478,105 @@ mod tests {
         let triggered = service.tick().unwrap();
         assert_eq!(triggered.len(), 1);
         assert_eq!(triggered[0].title, "Overdue");
+    }
+
+    #[test]
+    fn test_tick_fires_recurring_every_minute_cron() {
+        // "* * * * *" matches every minute, so tick() should always trigger.
+        let service = make_service();
+        service
+            .create_recurring("Always fires", "Fires every minute", "* * * * *")
+            .unwrap();
+
+        let triggered = service.tick().unwrap();
+        assert_eq!(triggered.len(), 1);
+        assert_eq!(triggered[0].title, "Always fires");
+    }
+
+    #[test]
+    fn test_tick_does_not_fire_recurring_wrong_cron() {
+        // Use a cron that only fires at minute 59, hour 23 — extremely unlikely
+        // to match the current second unless the test runs at exactly 23:59.
+        // We use a more reliable approach: pick a cron for a specific minute
+        // that is NOT the current minute.
+        let service = make_service();
+        let now = Utc::now();
+        // Pick a minute that is definitely not the current one
+        let wrong_minute = (now.format("%M").to_string().parse::<u32>().unwrap() + 30) % 60;
+        let cron_expr = format!("{wrong_minute} 23 31 12 0");
+        service
+            .create_recurring("Never fires", "Should not trigger", &cron_expr)
+            .unwrap();
+
+        let triggered = service.tick().unwrap();
+        assert!(triggered.is_empty());
+    }
+
+    #[test]
+    fn test_tick_skips_invalid_cron_expression() {
+        let service = make_service();
+        service
+            .create_recurring("Bad cron", "Has invalid cron", "not a cron")
+            .unwrap();
+
+        // Should not crash, just skip the invalid cron
+        let triggered = service.tick().unwrap();
+        assert!(triggered.is_empty());
+    }
+
+    #[test]
+    fn test_check_event_fires_matching_reminders() {
+        let service = make_service();
+        service
+            .create_event_reminder("PR merged alert", "Notify on merge", "pr_merged")
+            .unwrap();
+        service
+            .create_event_reminder("Build failed alert", "Notify on failure", "build_failed")
+            .unwrap();
+
+        let triggered = service.check_event("pr_merged").unwrap();
+        assert_eq!(triggered.len(), 1);
+        assert_eq!(triggered[0].title, "PR merged alert");
+    }
+
+    #[test]
+    fn test_check_event_does_not_fire_unmatched() {
+        let service = make_service();
+        service
+            .create_event_reminder("PR merged alert", "Notify on merge", "pr_merged")
+            .unwrap();
+
+        let triggered = service.check_event("build_failed").unwrap();
+        assert!(triggered.is_empty());
+    }
+
+    #[test]
+    fn test_check_event_fires_multiple_matching() {
+        let service = make_service();
+        service
+            .create_event_reminder("Alert 1", "First", "deploy_complete")
+            .unwrap();
+        service
+            .create_event_reminder("Alert 2", "Second", "deploy_complete")
+            .unwrap();
+        service
+            .create_event_reminder("Unrelated", "Different event", "pr_merged")
+            .unwrap();
+
+        let triggered = service.check_event("deploy_complete").unwrap();
+        assert_eq!(triggered.len(), 2);
+    }
+
+    #[test]
+    fn test_tick_does_not_fire_event_reminders() {
+        // Event-based reminders should not fire during tick()
+        let service = make_service();
+        service
+            .create_event_reminder("Event only", "Should not tick", "some_event")
+            .unwrap();
+
+        let triggered = service.tick().unwrap();
+        assert!(triggered.is_empty());
     }
 
     #[test]

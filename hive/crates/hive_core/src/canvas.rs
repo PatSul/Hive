@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -125,6 +126,7 @@ pub struct CanvasState {
 // ---------------------------------------------------------------------------
 
 /// In-memory live canvas with element and connection management.
+#[derive(Serialize, Deserialize)]
 pub struct LiveCanvas {
     id: String,
     name: String,
@@ -447,6 +449,23 @@ impl LiveCanvas {
             created_at: state.created_at,
             updated_at: state.updated_at,
         })
+    }
+
+    /// Persist the live canvas to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a live canvas from a JSON file. Returns a default canvas if the
+    /// file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new("Untitled Canvas"));
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 }
 

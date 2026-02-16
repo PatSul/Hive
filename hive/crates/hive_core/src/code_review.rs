@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,7 @@ pub struct ReviewStats {
 // ---------------------------------------------------------------------------
 
 /// In-memory code review store following the same pattern as `NotificationStore`.
+#[derive(Serialize, Deserialize)]
 pub struct CodeReviewStore {
     reviews: Vec<CodeReview>,
 }
@@ -206,6 +208,27 @@ impl CodeReviewStore {
     /// Returns a slice of all reviews.
     pub fn list_reviews(&self) -> &[CodeReview] {
         &self.reviews
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the code review store to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a code review store from a JSON file. Returns an empty store if
+    /// the file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 
     /// Adds a file change to a review. Returns an error if the review is not found.

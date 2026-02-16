@@ -4,9 +4,11 @@
 //! The service tracks these in memory and can identify agents that have gone
 //! silent (exceeded the configurable timeout).
 
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
 // ---------------------------------------------------------------------------
 // Data Types
@@ -29,6 +31,7 @@ pub struct AgentHeartbeat {
 ///
 /// Agents call [`beat`] periodically. The service considers an agent "dead"
 /// if it has not sent a heartbeat within `timeout_secs` seconds.
+#[derive(Serialize, Deserialize)]
 pub struct HeartbeatService {
     heartbeats: HashMap<String, AgentHeartbeat>,
     timeout_secs: u64,
@@ -102,6 +105,27 @@ impl HeartbeatService {
     /// Return the configured timeout in seconds.
     pub fn timeout_secs(&self) -> u64 {
         self.timeout_secs
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the heartbeat service to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a heartbeat service from a JSON file. Returns an empty service
+    /// with the given timeout if the file does not exist.
+    pub fn load_from_file(path: &Path, default_timeout_secs: u64) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new(default_timeout_secs));
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 }
 
@@ -256,5 +280,42 @@ mod tests {
         let hbs = svc.all_heartbeats();
         let hb = hbs.iter().find(|h| h.agent_id == "agent-no-task").unwrap();
         assert!(hb.current_task.is_none());
+    }
+
+    #[test]
+    fn save_and_load_file_round_trip() {
+        let dir = std::env::temp_dir().join("hive-heartbeat-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("heartbeats.json");
+
+        let mut svc = HeartbeatService::new(120);
+        svc.beat("alpha", "active", Some("task-A".into()));
+        svc.beat("bravo", "idle", None);
+        svc.beat("charlie", "working", Some("task-C".into()));
+
+        svc.save_to_file(&path).unwrap();
+        let loaded = HeartbeatService::load_from_file(&path, 120).unwrap();
+
+        assert_eq!(loaded.count(), 3);
+        assert_eq!(loaded.timeout_secs(), 120);
+        assert!(loaded.is_alive("alpha"));
+        assert!(loaded.is_alive("bravo"));
+        assert!(loaded.is_alive("charlie"));
+
+        let hbs = loaded.all_heartbeats();
+        let alpha = hbs.iter().find(|h| h.agent_id == "alpha").unwrap();
+        assert_eq!(alpha.status, "active");
+        assert_eq!(alpha.current_task.as_deref(), Some("task-A"));
+
+        // Clean up
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_missing_file_returns_empty_service() {
+        let path = std::env::temp_dir().join("nonexistent-hive-heartbeats.json");
+        let svc = HeartbeatService::load_from_file(&path, 60).unwrap();
+        assert_eq!(svc.count(), 0);
+        assert_eq!(svc.timeout_secs(), 60);
     }
 }

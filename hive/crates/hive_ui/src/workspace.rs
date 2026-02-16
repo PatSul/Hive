@@ -69,8 +69,8 @@ use hive_ui_panels::panels::{
     learning::{LearningPanel, LearningPanelData},
     logs::{LogsData, LogsPanel},
     models_browser::{ModelsBrowserView, ProjectModelsChanged},
-    monitor::{MonitorData, MonitorPanel},
-    review::{AiCommitState, BranchEntry, GitOpsTab, LfsFileEntry, PrForm, ReviewData, ReviewPanel},
+    monitor::{MonitorData, MonitorPanel, ProviderStatus, SystemResources},
+    review::{AiCommitState, BranchEntry, GitOpsTab, LfsFileEntry, PrForm, PrSummary, ReviewData, ReviewPanel},
     routing::{RoutingData, RoutingPanel},
     settings::{SettingsSaved, SettingsView},
     shield::{ShieldPanel, ShieldPanelData},
@@ -2029,7 +2029,7 @@ impl HiveWorkspace {
         // regardless of the UI executor.
         std::thread::spawn(move || {
             let result =
-                hive_agents::automation::AutomationService::execute_run_commands_blocking(
+                hive_agents::automation::AutomationService::execute_workflow_blocking(
                     &workflow_for_thread,
                     working_dir,
                 );
@@ -4069,9 +4069,193 @@ impl HiveWorkspace {
     }
 
     fn refresh_pr_data(&mut self, cx: &mut Context<Self>) {
-        // Stub: PR refresh just notifies for now; actual implementation
-        // would fetch open PRs from the GitHub API.
+        // Mark loading state immediately so the UI shows a spinner.
+        self.review_data.pr_data.loading = true;
         cx.notify();
+
+        // Validate that this is a git repo by reading the current branch.
+        // If this fails, there is no point trying to fetch PR data.
+        let _current_branch = match hive_fs::git::GitService::open(&self.current_project_root)
+            .and_then(|gs| gs.current_branch())
+        {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("refresh_pr_data: cannot read current branch: {e}");
+                self.review_data.pr_data.loading = false;
+                cx.notify();
+                return;
+            }
+        };
+
+        // Try the GitHub API path first if we have both a token and a
+        // parseable GitHub remote.
+        let github_token = self.get_github_token(cx);
+        let github_remote = self.parse_github_remote(cx);
+
+        if let (Some(token), Some((owner, repo))) = (github_token, github_remote) {
+            self.review_data.pr_data.github_connected = true;
+
+            let task = cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+                let result = std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|e| format!("Runtime error: {e}"))?;
+                    rt.block_on(async {
+                        let client = hive_integrations::GitHubClient::new(&token)
+                            .map_err(|e| format!("GitHub client error: {e}"))?;
+                        let pulls = client
+                            .list_pulls(&owner, &repo)
+                            .await
+                            .map_err(|e| format!("GitHub API error: {e}"))?;
+
+                        // Parse JSON array into PrSummary entries.
+                        let summaries: Vec<PrSummary> = pulls
+                            .as_array()
+                            .unwrap_or(&Vec::new())
+                            .iter()
+                            .filter_map(|pr| {
+                                Some(PrSummary {
+                                    number: pr.get("number")?.as_u64()?,
+                                    title: pr.get("title")?.as_str()?.to_string(),
+                                    author: pr
+                                        .get("user")
+                                        .and_then(|u| u.get("login"))
+                                        .and_then(|l| l.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string(),
+                                    head: pr
+                                        .get("head")
+                                        .and_then(|h| h.get("ref"))
+                                        .and_then(|r| r.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    base: pr
+                                        .get("base")
+                                        .and_then(|b| b.get("ref"))
+                                        .and_then(|r| r.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    state: pr
+                                        .get("state")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("open")
+                                        .to_string(),
+                                    created_at: pr
+                                        .get("created_at")
+                                        .and_then(|c| c.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    url: pr
+                                        .get("html_url")
+                                        .and_then(|u| u.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                })
+                            })
+                            .collect();
+                        Ok(summaries)
+                    })
+                })
+                .join()
+                .unwrap_or(Err("Thread panicked".to_string()));
+
+                let _ = this.update(app, |workspace, cx| {
+                    workspace.review_data.pr_data.loading = false;
+                    match result {
+                        Ok(prs) => {
+                            info!("PR refresh: fetched {} open PRs from GitHub", prs.len());
+                            workspace.review_data.pr_data.open_prs = prs;
+                        }
+                        Err(e) => {
+                            warn!("PR refresh GitHub fetch failed, falling back to git log: {e}");
+                            // Fallback: populate from git log.
+                            workspace.populate_pr_data_from_git_log();
+                        }
+                    }
+                    cx.notify();
+                });
+            });
+            self._stream_task = Some(task);
+        } else {
+            // No GitHub integration — populate from git log data directly.
+            self.review_data.pr_data.github_connected = false;
+            self.populate_pr_data_from_git_log();
+            self.review_data.pr_data.loading = false;
+            cx.notify();
+        }
+    }
+
+    /// Fallback PR population from local git log when GitHub API is unavailable.
+    ///
+    /// Reads recent commits on the current branch that are ahead of `main` (or
+    /// the configured base branch) and synthesises pseudo-PR entries so the
+    /// Pull Requests tab still shows useful information.
+    fn populate_pr_data_from_git_log(&mut self) {
+        let base = &self.review_data.pr_data.pr_form.base_branch;
+        let git = match hive_fs::git::GitService::open(&self.current_project_root) {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        let branch = match git.current_branch() {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+
+        // If we are on the base branch itself there is nothing to show.
+        if branch == *base {
+            self.review_data.pr_data.open_prs.clear();
+            return;
+        }
+
+        // Use git log to get recent commits (simulate a single "draft PR").
+        let commits = match git.log(20) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        if commits.is_empty() {
+            return;
+        }
+
+        // Build a single pseudo-PR from the branch's commits.
+        let first_msg = commits
+            .first()
+            .map(|c| c.message.clone())
+            .unwrap_or_default();
+        let author = commits
+            .first()
+            .map(|c| c.author.clone())
+            .unwrap_or_else(|| "local".to_string());
+
+        let body_lines: Vec<String> = commits
+            .iter()
+            .take(10)
+            .map(|c| format!("- {} ({})", c.message, &c.hash[..8.min(c.hash.len())]))
+            .collect();
+
+        // Pre-fill the PR form with useful defaults from the branch.
+        self.review_data.pr_data.pr_form.title = first_msg.clone();
+        self.review_data.pr_data.pr_form.body = body_lines.join("\n");
+
+        let summary = PrSummary {
+            number: 0,
+            title: format!("[local] {}", first_msg),
+            author,
+            head: branch.clone(),
+            base: base.clone(),
+            state: "draft".to_string(),
+            created_at: commits
+                .first()
+                .map(|c| {
+                    chrono::DateTime::from_timestamp(c.timestamp, 0)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default(),
+            url: String::new(),
+        };
+
+        self.review_data.pr_data.open_prs = vec![summary];
     }
 
     // -- Skills panel handlers -----------------------------------------------
@@ -4609,7 +4793,139 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         info!("Monitor: refresh");
+        self.refresh_monitor_data(cx);
         cx.notify();
+    }
+
+    /// Gather real system metrics and update `self.monitor_data`.
+    ///
+    /// Focuses on macOS-compatible approaches using `sysctl` and `ps`.
+    /// Falls back to placeholder values when a metric cannot be read.
+    fn refresh_monitor_data(&mut self, cx: &Context<Self>) {
+        // -- System resources --------------------------------------------------
+        let resources = self.gather_system_resources();
+        self.monitor_data.resources = resources;
+
+        // -- Provider status ---------------------------------------------------
+        // If the AI service global is present, probe each configured provider
+        // key to see if it is reachable. We approximate "online" by checking
+        // whether the provider has a configured API key.
+        if cx.has_global::<AppConfig>() {
+            let config = cx.global::<AppConfig>().0.get();
+            let mut providers: Vec<ProviderStatus> = Vec::new();
+
+            // Check individual API key fields on HiveConfig.
+            let has_anthropic = config.anthropic_api_key.as_ref().is_some_and(|k| !k.is_empty());
+            providers.push(ProviderStatus::new("Anthropic", has_anthropic, if has_anthropic { Some(0) } else { None }));
+
+            let has_openai = config.openai_api_key.as_ref().is_some_and(|k| !k.is_empty());
+            providers.push(ProviderStatus::new("OpenAI", has_openai, if has_openai { Some(0) } else { None }));
+
+            let has_google = config.google_api_key.as_ref().is_some_and(|k| !k.is_empty());
+            providers.push(ProviderStatus::new("Google Gemini", has_google, if has_google { Some(0) } else { None }));
+
+            let has_openrouter = config.openrouter_api_key.as_ref().is_some_and(|k| !k.is_empty());
+            providers.push(ProviderStatus::new("OpenRouter", has_openrouter, if has_openrouter { Some(0) } else { None }));
+
+            let has_groq = config.groq_api_key.as_ref().is_some_and(|k| !k.is_empty());
+            providers.push(ProviderStatus::new("Groq", has_groq, if has_groq { Some(0) } else { None }));
+
+            // Local providers: check if the configured URLs are set.
+            let has_ollama = !config.ollama_url.is_empty();
+            providers.push(ProviderStatus::new("Ollama (local)", has_ollama, if has_ollama { Some(0) } else { None }));
+
+            let has_lmstudio = !config.lmstudio_url.is_empty();
+            providers.push(ProviderStatus::new("LM Studio", has_lmstudio, if has_lmstudio { Some(0) } else { None }));
+
+            if let Some(ref url) = config.local_provider_url {
+                if !url.is_empty() {
+                    providers.push(ProviderStatus::new("Custom Local", true, Some(0)));
+                }
+            }
+
+            self.monitor_data.providers = providers;
+        }
+
+        // -- Uptime (seconds since process start) -----------------------------
+        // macOS: ps -o etime= -p <pid> gives elapsed time.
+        if let Ok(output) = std::process::Command::new("ps")
+            .args(["-o", "etime=", "-p", &std::process::id().to_string()])
+            .output()
+        {
+            if output.status.success() {
+                let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                self.monitor_data.uptime_secs = parse_etime(&raw);
+            }
+        }
+    }
+
+    /// Read system resource metrics (CPU, memory, disk) using macOS-friendly
+    /// commands and stdlib APIs.
+    fn gather_system_resources(&self) -> SystemResources {
+        let mut res = SystemResources {
+            cpu_percent: 0.0,
+            memory_used: 0,
+            memory_total: 0,
+            disk_used: 0,
+            disk_total: 0,
+        };
+
+        // Total physical memory via sysctl (macOS).
+        if let Ok(output) = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                res.memory_total = s.parse::<u64>().unwrap_or(0);
+            }
+        }
+
+        // Process memory (resident set size in KB) via ps.
+        if let Ok(output) = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // ps reports RSS in kilobytes.
+                res.memory_used = s.parse::<u64>().unwrap_or(0) * 1024;
+            }
+        }
+
+        // CPU usage: use `ps -o %cpu=` for this process as a quick estimate.
+        if let Ok(output) = std::process::Command::new("ps")
+            .args(["-o", "%cpu=", "-p", &std::process::id().to_string()])
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                res.cpu_percent = s.parse::<f64>().unwrap_or(0.0);
+            }
+        }
+
+        // Disk usage for the project directory via df.
+        if let Ok(output) = std::process::Command::new("df")
+            .args(["-k", &self.current_project_root.to_string_lossy()])
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                // Second line of df output contains the numbers.
+                if let Some(data_line) = text.lines().nth(1) {
+                    let cols: Vec<&str> = data_line.split_whitespace().collect();
+                    // df -k columns: Filesystem 1K-blocks Used Available Capacity ...
+                    if cols.len() >= 4 {
+                        let total_kb = cols[1].parse::<u64>().unwrap_or(0);
+                        let used_kb = cols[2].parse::<u64>().unwrap_or(0);
+                        res.disk_total = total_kb * 1024;
+                        res.disk_used = used_kb * 1024;
+                    }
+                }
+            }
+        }
+
+        res
     }
 
     // -- Workflow Builder run handler -----------------------------------------
@@ -4669,7 +4985,7 @@ impl HiveWorkspace {
         // Execute on a background OS thread (tokio runtime inside).
         std::thread::spawn(move || {
             let result =
-                hive_agents::automation::AutomationService::execute_run_commands_blocking(
+                hive_agents::automation::AutomationService::execute_workflow_blocking(
                     &workflow_for_thread,
                     working_dir,
                 );
@@ -5715,6 +6031,27 @@ fn sync_chat_cache(cache: &mut CachedChatData, svc: &ChatService) {
 // ---------------------------------------------------------------------------
 // Standalone helpers
 // ---------------------------------------------------------------------------
+
+/// Parse a `ps -o etime=` elapsed time string into seconds.
+///
+/// Format variations: `MM:SS`, `HH:MM:SS`, `D-HH:MM:SS`.
+fn parse_etime(s: &str) -> u64 {
+    let s = s.trim();
+    let (days, rest) = if let Some(idx) = s.find('-') {
+        let d = s[..idx].parse::<u64>().unwrap_or(0);
+        (d, &s[idx + 1..])
+    } else {
+        (0, s)
+    };
+    let parts: Vec<u64> = rest.split(':').filter_map(|p| p.parse().ok()).collect();
+    let (hours, minutes, seconds) = match parts.len() {
+        3 => (parts[0], parts[1], parts[2]),
+        2 => (0, parts[0], parts[1]),
+        1 => (0, 0, parts[0]),
+        _ => (0, 0, 0),
+    };
+    days * 86400 + hours * 3600 + minutes * 60 + seconds
+}
 
 fn parse_github_owner_repo(url: &str) -> Option<(String, String)> {
     // HTTPS: https://github.com/owner/repo.git

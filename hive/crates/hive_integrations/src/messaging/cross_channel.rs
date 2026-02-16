@@ -5,9 +5,11 @@
 //! [`MessagingProvider`] itself but a coordination layer that works
 //! alongside the [`MessagingHub`].
 
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
@@ -69,6 +71,7 @@ pub struct CrossSearchResult {
 // ── Service ────────────────────────────────────────────────────────
 
 /// Inner state behind an `Arc<Mutex<_>>`.
+#[derive(Serialize, Deserialize)]
 struct CrossChannelState {
     channel_links: Vec<ChannelLink>,
     thread_links: Vec<ThreadLink>,
@@ -351,6 +354,29 @@ impl CrossChannelService {
         state.channel_links.clear();
         state.thread_links.clear();
         state.conversations.clear();
+    }
+
+    // ── Persistence ─────────────────────────────────────────────
+
+    /// Persist the cross-channel service state to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let state = self.state.lock().unwrap();
+        let json = serde_json::to_string_pretty(&*state)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a cross-channel service from a JSON file. Returns an empty
+    /// service if the file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        let state: CrossChannelState = serde_json::from_str(&json)?;
+        Ok(Self {
+            state: Arc::new(Mutex::new(state)),
+        })
     }
 }
 

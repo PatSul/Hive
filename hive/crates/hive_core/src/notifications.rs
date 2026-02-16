@@ -1,5 +1,7 @@
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +41,7 @@ impl AppNotification {
 }
 
 /// In-memory notification store.
+#[derive(Serialize, Deserialize)]
 pub struct NotificationStore {
     notifications: Vec<AppNotification>,
     max_notifications: usize,
@@ -81,6 +84,27 @@ impl NotificationStore {
 
     pub fn clear(&mut self) {
         self.notifications.clear();
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
+
+    /// Persist the notification store to a JSON file.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a notification store from a JSON file. Returns an empty store if
+    /// the file does not exist.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        let json = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&json)?)
     }
 }
 
@@ -210,5 +234,38 @@ mod tests {
         assert_eq!(parsed.message, "test");
         assert_eq!(parsed.title.as_deref(), Some("Title"));
         assert_eq!(parsed.notification_type, NotificationType::Warning);
+    }
+
+    #[test]
+    fn save_and_load_file_round_trip() {
+        let dir = std::env::temp_dir().join("hive-notifications-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("notifications.json");
+
+        let mut store = NotificationStore::new();
+        store.push(AppNotification::new(NotificationType::Info, "msg1"));
+        store.push(
+            AppNotification::new(NotificationType::Error, "msg2").with_title("Alert"),
+        );
+        store.mark_read(&store.all()[0].id.clone());
+
+        store.save_to_file(&path).unwrap();
+        let loaded = NotificationStore::load_from_file(&path).unwrap();
+
+        assert_eq!(loaded.all().len(), 2);
+        assert_eq!(loaded.unread_count(), 1);
+        assert_eq!(loaded.all()[0].message, "msg2");
+        assert_eq!(loaded.all()[0].title.as_deref(), Some("Alert"));
+        assert_eq!(loaded.all()[0].notification_type, NotificationType::Error);
+
+        // Clean up
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_missing_file_returns_empty_store() {
+        let path = std::env::temp_dir().join("nonexistent-hive-notifications.json");
+        let store = NotificationStore::load_from_file(&path).unwrap();
+        assert!(store.all().is_empty());
     }
 }
