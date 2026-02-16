@@ -8,7 +8,8 @@ pub mod local_ai;
 pub mod shell;
 
 pub use browser::{
-    ActionResult, BrowserAction, BrowserAutomation, BrowserInstance, BrowserPool, BrowserPoolConfig,
+    ActionResult, BrowserAction, BrowserAutomation, BrowserInstance, BrowserPool,
+    BrowserPoolConfig, CdpBrowserManager, CdpConnection, CdpPageInfo,
 };
 pub use cli::{CheckStatus, CliCommand, CliOutput, CliService, CommandArg, DoctorCheck};
 pub use docker::{

@@ -8,6 +8,7 @@ license = "BSL-1.1"
 hive_core = { path = "../hive_core" }
 hive_ai = { path = "../hive_ai" }
 hive_shield = { path = "../hive_shield" }
+hive_integrations = { path = "../hive_integrations" }
 
 tokio.workspace = true
 serde.workspace = true

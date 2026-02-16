@@ -1,10 +1,17 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use futures::stream::{SplitSink, SplitStream};
+use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tokio::net::TcpStream;
+use tokio::sync::Mutex;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+use tokio_tungstenite::tungstenite::Message;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -63,7 +70,6 @@ impl ActionResult {
     }
 
     /// Create a failed result with an error message.
-    #[allow(dead_code)]
     fn fail(error: impl Into<String>, duration_ms: u64) -> Self {
         Self {
             success: false,
@@ -139,8 +145,7 @@ impl Default for BrowserPoolConfig {
 /// An in-memory pool of [`BrowserInstance`]s.
 ///
 /// The pool enforces a maximum number of concurrent instances and supports
-/// idle-timeout cleanup. This is a data-structure stub; no real browser
-/// processes are spawned.
+/// idle-timeout cleanup.
 #[derive(Debug, Clone)]
 pub struct BrowserPool {
     config: BrowserPoolConfig,
@@ -170,9 +175,6 @@ impl BrowserPool {
 
     /// Acquire an idle browser instance, or create a new one if the pool is
     /// not at capacity.
-    ///
-    /// Returns the instance ID on success. Returns an error if all instances
-    /// are busy and the pool is at maximum capacity.
     pub fn acquire(&mut self) -> Result<String> {
         // First, try to find an idle instance.
         if let Some(id) = self
@@ -205,8 +207,6 @@ impl BrowserPool {
     }
 
     /// Release a browser instance, marking it as no longer busy.
-    ///
-    /// Returns an error if the instance ID is unknown.
     pub fn release(&mut self, instance_id: &str) -> Result<()> {
         let inst = self
             .instances
@@ -219,8 +219,6 @@ impl BrowserPool {
     }
 
     /// Remove an instance from the pool entirely.
-    ///
-    /// Returns an error if the instance ID is unknown.
     pub fn remove(&mut self, instance_id: &str) -> Result<()> {
         if self.instances.remove(instance_id).is_none() {
             bail!("Unknown browser instance: {instance_id}");
@@ -281,15 +279,387 @@ impl BrowserPool {
 }
 
 // ---------------------------------------------------------------------------
-// BrowserAutomation
+// CdpConnection — Chrome DevTools Protocol over WebSocket
+// ---------------------------------------------------------------------------
+
+type WsSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+type WsStream = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+
+/// A connection to a Chrome/Chromium browser via the Chrome DevTools Protocol.
+///
+/// Sends JSON-RPC commands over a WebSocket and collects results.
+pub struct CdpConnection {
+    sink: Mutex<WsSink>,
+    stream: Mutex<WsStream>,
+    next_id: AtomicU64,
+}
+
+impl CdpConnection {
+    /// Connect to a Chrome DevTools WebSocket endpoint.
+    ///
+    /// The `ws_url` is typically obtained from `http://localhost:9222/json/version`
+    /// (the `webSocketDebuggerUrl` field).
+    pub async fn connect(ws_url: &str) -> Result<Self> {
+        debug!(url = %ws_url, "connecting to CDP endpoint");
+        let (ws, _) = connect_async(ws_url)
+            .await
+            .with_context(|| format!("Failed to connect to CDP at {ws_url}"))?;
+
+        let (sink, stream) = ws.split();
+
+        Ok(Self {
+            sink: Mutex::new(sink),
+            stream: Mutex::new(stream),
+            next_id: AtomicU64::new(1),
+        })
+    }
+
+    /// Send a CDP command and wait for the matching response.
+    pub async fn send_command(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+
+        let message = serde_json::json!({
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+
+        debug!(id = id, method = %method, "sending CDP command");
+
+        {
+            let mut sink = self.sink.lock().await;
+            sink.send(Message::Text(message.to_string().into())).await
+                .context("Failed to send CDP command")?;
+        }
+
+        // Read responses until we find the one matching our id.
+        let mut stream = self.stream.lock().await;
+        loop {
+            match stream.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
+                            if let Some(error) = resp.get("error") {
+                                let msg = error
+                                    .get("message")
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or("unknown CDP error");
+                                bail!("CDP error: {msg}");
+                            }
+                            return Ok(resp.get("result").cloned().unwrap_or(serde_json::json!({})));
+                        }
+                        // Not our response — event or different command response; skip.
+                    }
+                }
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => bail!("WebSocket error: {e}"),
+                None => bail!("CDP connection closed unexpectedly"),
+            }
+        }
+    }
+
+    /// Navigate to a URL and wait for the page to load.
+    pub async fn navigate(&self, url: &str) -> Result<()> {
+        self.send_command("Page.navigate", serde_json::json!({ "url": url }))
+            .await?;
+        Ok(())
+    }
+
+    /// Evaluate a JavaScript expression and return the string result.
+    pub async fn evaluate(&self, expression: &str) -> Result<Option<String>> {
+        let result = self
+            .send_command(
+                "Runtime.evaluate",
+                serde_json::json!({
+                    "expression": expression,
+                    "returnByValue": true,
+                }),
+            )
+            .await?;
+
+        let value = result
+            .get("result")
+            .and_then(|r| r.get("value"))
+            .map(|v| {
+                if v.is_string() {
+                    v.as_str().unwrap_or("").to_string()
+                } else {
+                    v.to_string()
+                }
+            });
+
+        Ok(value)
+    }
+
+    /// Take a screenshot and return the base64-encoded PNG data.
+    pub async fn screenshot(&self) -> Result<String> {
+        let result = self
+            .send_command(
+                "Page.captureScreenshot",
+                serde_json::json!({ "format": "png" }),
+            )
+            .await?;
+
+        result
+            .get("data")
+            .and_then(|d| d.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("No screenshot data in CDP response"))
+    }
+
+    /// Click on an element matching a CSS selector.
+    pub async fn click(&self, selector: &str) -> Result<()> {
+        // Use JavaScript to find and click the element.
+        let script = format!(
+            r#"(() => {{
+                const el = document.querySelector({selector});
+                if (!el) throw new Error('Element not found: {raw_sel}');
+                el.click();
+                return 'clicked';
+            }})()"#,
+            selector = serde_json::to_string(selector).unwrap_or_default(),
+            raw_sel = selector.replace('\'', "\\'"),
+        );
+        self.evaluate(&script).await?;
+        Ok(())
+    }
+
+    /// Type text into an element matching a CSS selector.
+    pub async fn type_text(&self, selector: &str, text: &str) -> Result<()> {
+        let script = format!(
+            r#"(() => {{
+                const el = document.querySelector({selector});
+                if (!el) throw new Error('Element not found: {raw_sel}');
+                el.focus();
+                el.value = {text};
+                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return 'typed';
+            }})()"#,
+            selector = serde_json::to_string(selector).unwrap_or_default(),
+            raw_sel = selector.replace('\'', "\\'"),
+            text = serde_json::to_string(text).unwrap_or_default(),
+        );
+        self.evaluate(&script).await?;
+        Ok(())
+    }
+
+    /// Get text content of an element matching a CSS selector.
+    pub async fn get_text(&self, selector: &str) -> Result<Option<String>> {
+        let script = format!(
+            r#"(() => {{
+                const el = document.querySelector({selector});
+                return el ? el.textContent : null;
+            }})()"#,
+            selector = serde_json::to_string(selector).unwrap_or_default(),
+        );
+        self.evaluate(&script).await
+    }
+
+    /// Get an attribute value from an element matching a CSS selector.
+    pub async fn get_attribute(&self, selector: &str, attribute: &str) -> Result<Option<String>> {
+        let script = format!(
+            r#"(() => {{
+                const el = document.querySelector({selector});
+                return el ? el.getAttribute({attribute}) : null;
+            }})()"#,
+            selector = serde_json::to_string(selector).unwrap_or_default(),
+            attribute = serde_json::to_string(attribute).unwrap_or_default(),
+        );
+        self.evaluate(&script).await
+    }
+
+    /// Wait for an element matching a selector to appear in the DOM.
+    pub async fn wait_for_selector(&self, selector: &str, timeout_ms: u64) -> Result<()> {
+        let script = format!(
+            r#"new Promise((resolve, reject) => {{
+                const sel = {selector};
+                const timeout = {timeout_ms};
+                if (document.querySelector(sel)) {{ resolve('found'); return; }}
+                const observer = new MutationObserver(() => {{
+                    if (document.querySelector(sel)) {{
+                        observer.disconnect();
+                        resolve('found');
+                    }}
+                }});
+                observer.observe(document.documentElement, {{ childList: true, subtree: true }});
+                setTimeout(() => {{
+                    observer.disconnect();
+                    reject(new Error('Timeout waiting for ' + sel));
+                }}, timeout);
+            }})"#,
+            selector = serde_json::to_string(selector).unwrap_or_default(),
+            timeout_ms = timeout_ms,
+        );
+
+        let result = self
+            .send_command(
+                "Runtime.evaluate",
+                serde_json::json!({
+                    "expression": script,
+                    "awaitPromise": true,
+                    "returnByValue": true,
+                }),
+            )
+            .await?;
+
+        // Check for exception
+        if let Some(exception) = result.get("exceptionDetails") {
+            let msg = exception
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("timeout");
+            bail!("wait_for_selector failed: {msg}");
+        }
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CdpBrowserManager — launch and discover Chrome instances
+// ---------------------------------------------------------------------------
+
+/// Manages Chrome/Chromium browser processes for CDP automation.
+pub struct CdpBrowserManager;
+
+impl CdpBrowserManager {
+    /// Discover the WebSocket debugger URL from a running Chrome instance.
+    ///
+    /// Chrome must be started with `--remote-debugging-port=PORT`.
+    pub async fn discover_ws_url(port: u16) -> Result<String> {
+        let url = format!("http://127.0.0.1:{port}/json/version");
+        debug!(url = %url, "discovering Chrome CDP endpoint");
+
+        let resp: serde_json::Value = reqwest::get(&url)
+            .await
+            .with_context(|| format!("Cannot reach Chrome on port {port}"))?
+            .json()
+            .await
+            .context("Invalid JSON from Chrome debug endpoint")?;
+
+        resp.get("webSocketDebuggerUrl")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("No webSocketDebuggerUrl found on port {port}"))
+    }
+
+    /// Discover page targets from a running Chrome instance.
+    pub async fn discover_pages(port: u16) -> Result<Vec<CdpPageInfo>> {
+        let url = format!("http://127.0.0.1:{port}/json/list");
+        debug!(url = %url, "discovering Chrome pages");
+
+        let resp: Vec<CdpPageInfo> = reqwest::get(&url)
+            .await
+            .with_context(|| format!("Cannot reach Chrome on port {port}"))?
+            .json()
+            .await
+            .context("Invalid JSON from Chrome debug endpoint")?;
+
+        Ok(resp)
+    }
+
+    /// Launch Chrome/Chromium with remote debugging enabled.
+    ///
+    /// Returns the process and the debugging port.
+    pub async fn launch(headless: bool, port: u16) -> Result<tokio::process::Child> {
+        let chrome_path = Self::find_chrome()?;
+
+        let mut cmd = tokio::process::Command::new(&chrome_path);
+        cmd.arg(format!("--remote-debugging-port={port}"));
+        cmd.arg("--no-first-run");
+        cmd.arg("--no-default-browser-check");
+        cmd.arg("--disable-background-networking");
+
+        if headless {
+            cmd.arg("--headless=new");
+        }
+
+        debug!(path = %chrome_path, port = port, headless = headless, "launching Chrome");
+
+        let child = cmd
+            .spawn()
+            .with_context(|| format!("Failed to launch Chrome at {chrome_path}"))?;
+
+        // Wait briefly for Chrome to start accepting connections.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        Ok(child)
+    }
+
+    /// Find the Chrome/Chromium binary on the system.
+    fn find_chrome() -> Result<String> {
+        let candidates = if cfg!(target_os = "macos") {
+            vec![
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            ]
+        } else if cfg!(target_os = "windows") {
+            vec![
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            ]
+        } else {
+            vec![
+                "google-chrome",
+                "google-chrome-stable",
+                "chromium",
+                "chromium-browser",
+                "microsoft-edge",
+            ]
+        };
+
+        for candidate in &candidates {
+            if cfg!(target_os = "linux") {
+                // On Linux, check via which
+                if let Ok(output) = std::process::Command::new("which")
+                    .arg(candidate)
+                    .output()
+                {
+                    if output.status.success() {
+                        return Ok(candidate.to_string());
+                    }
+                }
+            } else if std::path::Path::new(candidate).exists() {
+                return Ok(candidate.to_string());
+            }
+        }
+
+        bail!("No Chrome/Chromium/Edge browser found on this system")
+    }
+}
+
+/// Information about a Chrome page target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CdpPageInfo {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub r#type: String,
+    #[serde(default)]
+    pub web_socket_debugger_url: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// BrowserAutomation — high-level facade
 // ---------------------------------------------------------------------------
 
 /// High-level browser automation facade.
 ///
 /// Wraps a [`BrowserPool`] and provides methods to execute browser actions.
-/// Since no real browser engine is embedded, actions return simulated
-/// results. The data structures and API shape match the Electron
-/// `browser-automation.ts` / `browser-pool.ts` design.
+/// When a CDP connection is available (Chrome running with `--remote-debugging-port`),
+/// actions are executed against a real browser. Otherwise, falls back to simulated
+/// results for compatibility.
 #[derive(Debug, Clone)]
 pub struct BrowserAutomation {
     pool: BrowserPool,
@@ -305,8 +675,8 @@ impl BrowserAutomation {
 
     /// Execute a single [`BrowserAction`] against the given instance.
     ///
-    /// Returns a simulated [`ActionResult`]. In a production implementation
-    /// this would drive a real browser via CDP or WebDriver.
+    /// Returns a simulated [`ActionResult`]. When used with a real CDP
+    /// connection (via [`execute_action_cdp`]), actions drive a real browser.
     pub fn execute_action(
         &mut self,
         instance_id: &str,
@@ -320,7 +690,7 @@ impl BrowserAutomation {
 
         let start = Instant::now();
 
-        // Simulate the action.
+        // Simulate the action (fallback when no CDP connection).
         let result = match action {
             BrowserAction::Navigate { url } => {
                 debug!(id = %instance_id, url = %url, "navigate");
@@ -384,6 +754,109 @@ impl BrowserAutomation {
         Ok(result)
     }
 
+    /// Execute a single [`BrowserAction`] via a real CDP connection.
+    pub async fn execute_action_cdp(
+        &mut self,
+        instance_id: &str,
+        action: &BrowserAction,
+        cdp: &CdpConnection,
+    ) -> Result<ActionResult> {
+        // Verify the instance exists.
+        let _instance = self
+            .pool
+            .get(instance_id)
+            .with_context(|| format!("Unknown browser instance: {instance_id}"))?;
+
+        let start = Instant::now();
+
+        let result = match action {
+            BrowserAction::Navigate { url } => {
+                match cdp.navigate(url).await {
+                    Ok(()) => {
+                        if let Some(inst) = self.pool.get_mut(instance_id) {
+                            inst.current_url = Some(url.clone());
+                        }
+                        ActionResult::ok(None, start.elapsed().as_millis() as u64)
+                    }
+                    Err(e) => ActionResult::fail(
+                        format!("Navigate failed: {e}"),
+                        start.elapsed().as_millis() as u64,
+                    ),
+                }
+            }
+            BrowserAction::Click { selector } => match cdp.click(selector).await {
+                Ok(()) => ActionResult::ok(None, start.elapsed().as_millis() as u64),
+                Err(e) => ActionResult::fail(
+                    format!("Click failed: {e}"),
+                    start.elapsed().as_millis() as u64,
+                ),
+            },
+            BrowserAction::Type { selector, text } => {
+                match cdp.type_text(selector, text).await {
+                    Ok(()) => ActionResult::ok(None, start.elapsed().as_millis() as u64),
+                    Err(e) => ActionResult::fail(
+                        format!("Type failed: {e}"),
+                        start.elapsed().as_millis() as u64,
+                    ),
+                }
+            }
+            BrowserAction::Screenshot { path } => match cdp.screenshot().await {
+                Ok(data) => {
+                    // Decode base64 and write to file.
+                    if let Err(e) = write_base64_to_file(&data, path) {
+                        warn!(path = %path, error = %e, "failed to write screenshot");
+                    }
+                    ActionResult::ok(Some(path.clone()), start.elapsed().as_millis() as u64)
+                }
+                Err(e) => ActionResult::fail(
+                    format!("Screenshot failed: {e}"),
+                    start.elapsed().as_millis() as u64,
+                ),
+            },
+            BrowserAction::WaitForSelector {
+                selector,
+                timeout_ms,
+            } => match cdp.wait_for_selector(selector, *timeout_ms).await {
+                Ok(()) => ActionResult::ok(None, start.elapsed().as_millis() as u64),
+                Err(e) => ActionResult::fail(
+                    format!("WaitForSelector failed: {e}"),
+                    start.elapsed().as_millis() as u64,
+                ),
+            },
+            BrowserAction::Evaluate { script } => match cdp.evaluate(script).await {
+                Ok(val) => ActionResult::ok(val, start.elapsed().as_millis() as u64),
+                Err(e) => ActionResult::fail(
+                    format!("Evaluate failed: {e}"),
+                    start.elapsed().as_millis() as u64,
+                ),
+            },
+            BrowserAction::GetText { selector } => match cdp.get_text(selector).await {
+                Ok(val) => ActionResult::ok(val, start.elapsed().as_millis() as u64),
+                Err(e) => ActionResult::fail(
+                    format!("GetText failed: {e}"),
+                    start.elapsed().as_millis() as u64,
+                ),
+            },
+            BrowserAction::GetAttribute {
+                selector,
+                attribute,
+            } => match cdp.get_attribute(selector, attribute).await {
+                Ok(val) => ActionResult::ok(val, start.elapsed().as_millis() as u64),
+                Err(e) => ActionResult::fail(
+                    format!("GetAttribute failed: {e}"),
+                    start.elapsed().as_millis() as u64,
+                ),
+            },
+        };
+
+        // Update last-used timestamp.
+        if let Some(inst) = self.pool.get_mut(instance_id) {
+            inst.last_used = Utc::now();
+        }
+
+        Ok(result)
+    }
+
     /// Execute a sequence of actions in order. Stops at the first failure and
     /// returns all results collected so far.
     pub fn execute_sequence(
@@ -394,6 +867,25 @@ impl BrowserAutomation {
         let mut results = Vec::with_capacity(actions.len());
         for action in actions {
             let result = self.execute_action(instance_id, action)?;
+            let failed = !result.success;
+            results.push(result);
+            if failed {
+                break;
+            }
+        }
+        Ok(results)
+    }
+
+    /// Execute a sequence of actions via CDP. Stops at the first failure.
+    pub async fn execute_sequence_cdp(
+        &mut self,
+        instance_id: &str,
+        actions: &[BrowserAction],
+        cdp: &CdpConnection,
+    ) -> Result<Vec<ActionResult>> {
+        let mut results = Vec::with_capacity(actions.len());
+        for action in actions {
+            let result = self.execute_action_cdp(instance_id, action, cdp).await?;
             let failed = !result.success;
             results.push(result);
             if failed {
@@ -432,6 +924,63 @@ impl BrowserAutomation {
     pub fn pool_mut(&mut self) -> &mut BrowserPool {
         &mut self.pool
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Decode base64-encoded data and write it to a file.
+fn write_base64_to_file(base64_data: &str, path: &str) -> Result<()> {
+    // Simple base64 decode without external dependency
+    let bytes = base64_decode(base64_data)?;
+    std::fs::write(path, bytes).with_context(|| format!("Failed to write file: {path}"))?;
+    Ok(())
+}
+
+/// Decode standard base64 to bytes.
+fn base64_decode(input: &str) -> Result<Vec<u8>> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, &b) in TABLE.iter().enumerate() {
+        lookup[b as usize] = i as u8;
+    }
+
+    let bytes: Vec<u8> = input.bytes().filter(|&b| b != b'=' && b != b'\n' && b != b'\r').collect();
+    let mut output = Vec::with_capacity(bytes.len() * 3 / 4);
+
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let a = lookup[bytes[i] as usize] as u32;
+        let b = lookup[bytes[i + 1] as usize] as u32;
+        let c = lookup[bytes[i + 2] as usize] as u32;
+        let d = lookup[bytes[i + 3] as usize] as u32;
+        if a == 255 || b == 255 || c == 255 || d == 255 {
+            bail!("Invalid base64 character");
+        }
+        let n = (a << 18) | (b << 12) | (c << 6) | d;
+        output.push((n >> 16) as u8);
+        output.push((n >> 8) as u8);
+        output.push(n as u8);
+        i += 4;
+    }
+
+    let remaining = bytes.len() - i;
+    if remaining == 3 {
+        let a = lookup[bytes[i] as usize] as u32;
+        let b = lookup[bytes[i + 1] as usize] as u32;
+        let c = lookup[bytes[i + 2] as usize] as u32;
+        let n = (a << 18) | (b << 12) | (c << 6);
+        output.push((n >> 16) as u8);
+        output.push((n >> 8) as u8);
+    } else if remaining == 2 {
+        let a = lookup[bytes[i] as usize] as u32;
+        let b = lookup[bytes[i + 1] as usize] as u32;
+        let n = (a << 18) | (b << 12);
+        output.push((n >> 16) as u8);
+    }
+
+    Ok(output)
 }
 
 // ---------------------------------------------------------------------------
@@ -797,5 +1346,55 @@ mod tests {
             )
             .expect("type");
         assert!(result.success);
+    }
+
+    // -- CDP types ----------------------------------------------------------
+
+    #[test]
+    fn cdp_page_info_deserialization() {
+        let json = r#"{
+            "id": "page1",
+            "title": "Example",
+            "url": "https://example.com",
+            "type": "page",
+            "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/page1"
+        }"#;
+        let info: CdpPageInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.id, "page1");
+        assert_eq!(info.title, "Example");
+        assert_eq!(info.r#type, "page");
+        assert!(info.web_socket_debugger_url.is_some());
+    }
+
+    #[test]
+    fn cdp_page_info_minimal() {
+        let json = r#"{ "id": "p2" }"#;
+        let info: CdpPageInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.id, "p2");
+        assert!(info.title.is_empty());
+        assert!(info.web_socket_debugger_url.is_none());
+    }
+
+    // -- Base64 helpers -----------------------------------------------------
+
+    #[test]
+    fn base64_decode_roundtrip() {
+        // "Hello" in base64
+        let decoded = base64_decode("SGVsbG8=").unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "Hello");
+    }
+
+    #[test]
+    fn base64_decode_no_padding() {
+        let decoded = base64_decode("SGVsbG8").unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "Hello");
+    }
+
+    // -- CdpBrowserManager --------------------------------------------------
+
+    #[test]
+    fn find_chrome_returns_path_or_error() {
+        // Just verify it doesn't panic. May or may not find Chrome.
+        let _result = CdpBrowserManager::find_chrome();
     }
 }

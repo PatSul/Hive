@@ -29,8 +29,8 @@ pub use reminders::{Reminder, ReminderStatus, ReminderTrigger, TriggeredReminder
 /// - Daily briefings combining calendar, email, and reminders
 /// - Reminder management and tick-based triggering
 /// - Approval workflows
-/// - Email operations (stubs for Phase 2)
-/// - Calendar operations (stubs for Phase 2)
+/// - Email operations (Gmail + Outlook via hive_integrations)
+/// - Calendar operations (Google Calendar + Outlook via hive_integrations)
 pub struct AssistantService {
     #[allow(dead_code)]
     storage: Arc<AssistantStorage>,
@@ -44,19 +44,38 @@ impl AssistantService {
     /// Open a persistent assistant database at the given path.
     pub fn open(db_path: &str) -> Result<Self, String> {
         let storage = Arc::new(AssistantStorage::open(db_path)?);
-        Ok(Self::from_storage(storage))
+        Ok(Self::from_storage(storage, EmailService::new(), CalendarService::new()))
+    }
+
+    /// Open a persistent assistant database with pre-configured OAuth tokens.
+    pub fn open_with_tokens(
+        db_path: &str,
+        gmail_token: Option<String>,
+        outlook_token: Option<String>,
+        google_calendar_token: Option<String>,
+        outlook_calendar_token: Option<String>,
+    ) -> Result<Self, String> {
+        let storage = Arc::new(AssistantStorage::open(db_path)?);
+        let email_service = EmailService::with_tokens(gmail_token, outlook_token);
+        let calendar_service =
+            CalendarService::with_tokens(google_calendar_token, outlook_calendar_token);
+        Ok(Self::from_storage(storage, email_service, calendar_service))
     }
 
     /// Create an in-memory assistant service (useful for tests).
     pub fn in_memory() -> Result<Self, String> {
         let storage = Arc::new(AssistantStorage::in_memory()?);
-        Ok(Self::from_storage(storage))
+        Ok(Self::from_storage(storage, EmailService::new(), CalendarService::new()))
     }
 
-    fn from_storage(storage: Arc<AssistantStorage>) -> Self {
+    fn from_storage(
+        storage: Arc<AssistantStorage>,
+        email_service: EmailService,
+        calendar_service: CalendarService,
+    ) -> Self {
         Self {
-            email_service: EmailService::new(),
-            calendar_service: CalendarService::new(),
+            email_service,
+            calendar_service,
             reminder_service: ReminderService::new(Arc::clone(&storage)),
             approval_service: ApprovalService::new(Arc::clone(&storage)),
             storage,
@@ -76,10 +95,10 @@ impl AssistantService {
     pub fn daily_briefing_for_project(&self, project_root: Option<&Path>) -> DailyBriefing {
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
-        // Fetch today's events (stub returns empty).
+        // Fetch today's events from configured calendar providers.
         let events = self.calendar_service.today_events().unwrap_or_default();
 
-        // Build email digest from empty inbox (stub).
+        // Fetch Gmail inbox and build digest.
         let gmail_emails = self.email_service.fetch_gmail_inbox().unwrap_or_default();
         let email_digest = if gmail_emails.is_empty() {
             None

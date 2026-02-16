@@ -97,6 +97,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # OS notifications (Linux & macOS)
 notify-rust = "4"
 
+# WebSocket (browser automation CDP)
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+
 [profile.release]
 opt-level = 3
 lto = "thin"
