@@ -11,8 +11,8 @@
 <p align="center">
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
-  <img src="https://img.shields.io/badge/tests-2k%2B-brightgreen" alt="Tests" />
-  <img src="https://img.shields.io/badge/crates-13-blue" alt="Crates" />
+  <img src="https://img.shields.io/badge/tests-2.5k%2B-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/crates-16-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-0-brightgreen" alt="Warnings" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux-informational" alt="Windows | macOS (Apple Silicon) | Linux" />
   <img src="https://img.shields.io/badge/UI-GPUI-blueviolet" alt="GPUI" />
@@ -36,22 +36,27 @@ Hive is a **native Rust desktop AI platform** built on [GPUI](https://gpui.rs) �
 - Multi-agent swarm (Queen + teams)
 - 11 AI providers with auto-routing
 - Git worktree isolation per team
+- Full Git Ops (commits, PRs, branches, gitflow, LFS)
 - Context engine (TF-IDF scoring)
 - Cost tracking & budget enforcement
 - Code review & testing automation
+- ClawdHub skill marketplace
+- Automation workflows (cron, event, webhook triggers)
+- Docker sandbox with real CLI integration
 - MCP client + server
+- P2P federation across instances
 
 </td>
 <td width="33%" valign="top">
 
 ### Assistant Excellence
-- Email triage & drafting workflows
-- Calendar planning workflows
-- Smart scheduling & daily briefings
-- Reminders with OS notifications
-- Approval workflows
+- Email triage & AI-powered drafting
+- Calendar integration & daily briefings
+- Reminders (time, recurring cron, event-triggered)
+- Approval workflows with audit trails
 - Document generation (7 formats)
 - Smart home control
+- Voice assistant (wake word + intent)
 
 </td>
 <td width="33%" valign="top">
@@ -124,9 +129,9 @@ The assistant uses the same AI infrastructure as the development platform — sa
 
 | Capability | Details |
 |---|---|
-| **Email** | Assistant email workflows with shield-scanned outbound content. Gmail/Outlook integration clients are included in `hive_integrations`; direct provider wiring in `hive_assistant` is in progress. |
-| **Calendar** | Assistant calendar workflows with conflict detection and scheduling logic. Google/Outlook integration clients are included in `hive_integrations`; direct provider wiring in `hive_assistant` is in progress. |
-| **Reminders** | Time-based and recurring. Snooze/dismiss. Native OS notifications. SQLite persistence. |
+| **Email** | Gmail and Outlook inbox polling, email digest generation, AI-powered composition and reply drafting with shield-scanned outbound content. |
+| **Calendar** | Google Calendar and Outlook event fetching, daily briefing generation, conflict detection and scheduling logic. |
+| **Reminders** | Time-based, recurring (cron), and event-triggered. Snooze/dismiss. Project-scoped. Native OS notifications. SQLite persistence. |
 | **Approvals** | Multi-level workflows (Low / Medium / High / Critical). Submit, approve, reject with severity tracking. |
 | **Documents** | Generate CSV, DOCX, XLSX, HTML, Markdown, PDF, and PPTX from templates or AI. |
 | **Smart Home** | Philips Hue control — lighting scenes, routines, individual light states. |
@@ -192,6 +197,46 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 
 ---
 
+## Automation & Skills
+
+| Feature | Details |
+|---|---|
+| **Automation Workflows** | Multi-step workflows with triggers (manual, cron schedule, event, webhook) and 6 action types (run command, send message, call API, create task, send notification, execute skill). YAML-based definitions in `~/.hive/workflows/`. |
+| **ClawdHub Marketplace** | Browse, install, remove, and toggle skills. Create custom skills. Add remote skill sources. Built-in directory of curated skills. Security scanning on install. |
+| **Personas** | Named agent personalities with custom system prompts, prompt overrides per task type, and configurable model preferences. |
+| **Auto-Commit** | Watches for staged changes and generates AI-powered commit messages. |
+| **Daily Standups** | Automated agent activity summaries across all teams and workflows. |
+| **Voice Assistant** | Wake-word detection, natural-language voice commands, intent recognition, and state-aware responses. |
+
+---
+
+## Terminal & Execution
+
+| Feature | Details |
+|---|---|
+| **Shell Execution** | Run commands with configurable timeout, output capture, working directory management, and exit code tracking. |
+| **Docker Sandbox** | Full container lifecycle: create, start, stop, exec, pause, unpause, remove. Real Docker CLI integration with simulation fallback for testing. |
+| **Browser Automation** | Chrome DevTools Protocol over WebSocket: navigation, screenshots, JavaScript evaluation, DOM manipulation. |
+| **CLI Service** | Built-in commands (`/doctor`, `/clear`, etc.) and system health checks. |
+| **Local AI Detection** | Auto-discovers Ollama, LM Studio, and llama.cpp running on localhost. |
+
+---
+
+## P2P Federation
+
+Hive instances can discover and communicate with each other over the network, enabling distributed swarm execution and shared learning.
+
+| Feature | Details |
+|---|---|
+| **Peer Discovery** | UDP broadcast for automatic LAN discovery, plus manual bootstrap peers |
+| **WebSocket Transport** | Bidirectional P2P connections with split-sink/stream architecture |
+| **Typed Protocol** | 12 built-in message kinds (Hello, Welcome, Heartbeat, TaskRequest, TaskResult, AgentRelay, ChannelSync, FleetLearn, StateSync, etc.) plus extensible custom types |
+| **Channel Sync** | Synchronize agent channel messages across federated instances |
+| **Fleet Learning** | Share learning outcomes across a distributed fleet of nodes |
+| **Peer Registry** | Persistent tracking of known peers with connection state management |
+
+---
+
 ## Integrations
 
 <table>
@@ -200,7 +245,8 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 <tr><td><strong>Messaging</strong></td><td>Slack, Discord, Teams, Telegram, Matrix, WebChat</td></tr>
 <tr><td><strong>Cloud</strong></td><td>GitHub, Cloudflare, Vercel, Supabase</td></tr>
 <tr><td><strong>Smart Home</strong></td><td>Philips Hue</td></tr>
-<tr><td><strong>Protocol</strong></td><td>MCP client + server, OAuth2 (PKCE), Webhooks</td></tr>
+<tr><td><strong>Voice</strong></td><td>ClawdTalk (voice-over-phone via Telnyx)</td></tr>
+<tr><td><strong>Protocol</strong></td><td>MCP client + server, OAuth2 (PKCE), Webhooks, P2P federation</td></tr>
 </table>
 
 ---
@@ -209,19 +255,21 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 
 | Chain | Features |
 |---|---|
-| **EVM** (Ethereum, Polygon, Arbitrum, BSC, Avalanche, Optimism, Base) | Wallet management and RPC configuration; ERC-20 deployment backend is scaffolded and currently disabled in this build |
-| **Solana** | Wallet management; SPL token deployment backend is scaffolded and currently disabled in this build |
+| **EVM** (Ethereum, Polygon, Arbitrum, BSC, Avalanche, Optimism, Base) | Wallet management, real JSON-RPC (`eth_getBalance`, `eth_gasPrice`), per-chain RPC configuration, ERC-20 token deployment with cost estimation |
+| **Solana** | Wallet management, real JSON-RPC (`getBalance`, `getTokenAccountsByOwner`, `getMinimumBalanceForRentExemption`), SPL token deployment with rent cost estimation |
 | **Security** | Encrypted private key storage (AES-256-GCM), no keys ever sent to AI providers |
 
 ---
 
-## Architecture — 13-Crate Workspace
+## Architecture — 16-Crate Workspace
 
 ```
 hive/crates/
 ├── hive_app           Binary entry point — window, tray, build.rs (winres)
-├── hive_core          Config, SecurityGateway, persistence (SQLite), Kanban, secure storage
-├── hive_ui            GPUI views — 18 panels, components, theme, workspace orchestration
+├── hive_ui            Workspace shell, chat service, learning bridge, title/status bars
+├── hive_ui_core       Theme, actions, globals, sidebar, welcome screen
+├── hive_ui_panels     All panel implementations (18+ panels)
+├── hive_core          Config, SecurityGateway, persistence (SQLite), Kanban, channels, scheduling
 ├── hive_ai            11 AI providers, model router, complexity classifier, context engine, RAG
 ├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP, skills, personas
 ├── hive_shield        PII detection, secrets scanning, vulnerability assessment, access control
@@ -230,32 +278,36 @@ hive/crates/
 ├── hive_fs            File operations, git integration, file watchers, search
 ├── hive_terminal      Command execution, Docker sandbox, browser automation, local AI detection
 ├── hive_docs          Document generation — CSV, DOCX, XLSX, HTML, Markdown, PDF, PPTX
-├── hive_blockchain    EVM + Solana wallets, RPC config, deployment scaffolding
-└── hive_integrations  Google, Microsoft, GitHub, messaging, OAuth2, smart home, cloud, webhooks
+├── hive_blockchain    EVM + Solana wallets, RPC config, token deployment with real JSON-RPC
+├── hive_integrations  Google, Microsoft, GitHub, messaging, OAuth2, smart home, cloud, webhooks
+└── hive_network       P2P federation, WebSocket transport, UDP discovery, peer registry, sync
 ```
 
 ---
 
-## UI — 18 Panels
+## UI — 20+ Panels
 
 | Panel | Description |
 |---|---|
 | Chat | Main AI conversation interface |
 | History | Conversation history browser |
-| Files | Project file browser |
+| Files | Project file browser with create/delete/navigate |
 | Specs | Specification management |
 | Agents | Multi-agent swarm orchestration |
+| Workflows | Visual workflow builder (drag-and-drop nodes) |
+| Channels | Agent messaging channels (Telegram/Slack-style) |
 | Kanban | Task board with drag-and-drop |
-| Monitor | System and agent monitoring |
-| Logs | Application logs viewer |
-| Costs | AI cost tracking and budget |
-| Review | Code review interface |
-| Skills | Skill marketplace management |
+| Monitor | Real-time system resource monitoring (CPU, RAM, disk) |
+| Logs | Application logs viewer with level filtering |
+| Costs | AI cost tracking and budget with CSV export |
+| Git Ops | Full git workflow: staging, commits, push, PRs, branches, gitflow, LFS |
+| ClawdHub | Skill marketplace: browse, install, remove, toggle, create, sources |
 | Routing | Model routing configuration |
+| Models | Model registry browser |
 | Learning | Self-improvement dashboard |
 | Shield | Security scanning status |
-| Assistant | Personal assistant dashboard |
-| Token Launch | Token launch workflow and deployment validation |
+| Assistant | Personal assistant: email, calendar, reminders |
+| Token Launch | Token deployment wizard with chain selection |
 | Settings | Application configuration |
 | Help | Documentation and guides |
 
@@ -357,10 +409,10 @@ cargo test
 
 | Metric | Value |
 |---|---|
-| Crates | 13 |
-| Rust source files | 210+ |
-| Lines of Rust | 100,000+ |
-| Tests | 2,300+ |
+| Crates | 16 |
+| Rust source files | 250+ |
+| Lines of Rust | 120,000+ |
+| Tests | 2,486 |
 | Compiler warnings | 0 |
 | Memory footprint | < 50 MB |
 | Startup time | < 1 second |
