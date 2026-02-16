@@ -22,6 +22,13 @@ pub struct ChannelMessageSent {
     pub assigned_agents: Vec<String>,
 }
 
+/// Emitted when the user creates a new channel from the channel list sidebar.
+#[derive(Debug, Clone)]
+pub struct ChannelCreated {
+    pub name: String,
+    pub agents: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -75,6 +82,7 @@ struct ChannelMessageDisplay {
 }
 
 impl EventEmitter<ChannelMessageSent> for ChannelsView {}
+impl EventEmitter<ChannelCreated> for ChannelsView {}
 
 impl ChannelsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -315,6 +323,37 @@ impl ChannelsView {
         self.message_input.read(cx).value().to_string()
     }
 
+    /// Toggle channel creation mode.
+    pub fn toggle_create_mode(&mut self, cx: &mut Context<Self>) {
+        self.create_channel_mode = !self.create_channel_mode;
+        self.new_channel_name.clear();
+        cx.notify();
+    }
+
+    /// Create a new channel from the current input.
+    pub fn create_new_channel(&mut self, cx: &mut Context<Self>) {
+        let name = self.new_channel_name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        // Default: all agents
+        let agents = vec![
+            "Investigate".into(),
+            "Implement".into(),
+            "Verify".into(),
+            "Critique".into(),
+            "Debug".into(),
+            "CodeReview".into(),
+        ];
+        cx.emit(ChannelCreated {
+            name: name.clone(),
+            agents,
+        });
+        self.create_channel_mode = false;
+        self.new_channel_name.clear();
+        cx.notify();
+    }
+
     fn agent_icon(&self, persona: &str) -> String {
         match persona {
             "Investigate" => "\u{1F50D}",
@@ -420,10 +459,18 @@ impl ChannelsView {
                     )
                     .child(
                         div()
-                            .id("new-channel-btn")
+                            .id("new-channel-header-btn")
                             .text_size(theme.font_size_sm)
                             .text_color(theme.accent_cyan)
                             .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    let n = this.channels.len() + 1;
+                                    this.new_channel_name = format!("#custom-{n}");
+                                    this.create_new_channel(cx);
+                                }),
+                            )
                             .child("+"),
                     ),
             )
@@ -437,6 +484,32 @@ impl ChannelsView {
                     .p(theme.space_2)
                     .gap(theme.space_1)
                     .children(items),
+            )
+            // "New Channel" button at bottom of channel list
+            .child(
+                div()
+                    .id("new-channel-btn")
+                    .flex()
+                    .items_center()
+                    .gap(theme.space_2)
+                    .px(theme.space_3)
+                    .py(theme.space_2)
+                    .mx(theme.space_2)
+                    .mb(theme.space_2)
+                    .rounded(theme.radius_md)
+                    .bg(theme.bg_tertiary)
+                    .cursor_pointer()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.text_muted)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            let n = this.channels.len() + 1;
+                            this.new_channel_name = format!("#custom-{n}");
+                            this.create_new_channel(cx);
+                        }),
+                    )
+                    .child("+ New Channel"),
             )
     }
 

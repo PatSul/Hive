@@ -4,6 +4,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use serde::{Deserialize, Serialize};
+use tracing::{error, info};
 
 use hive_agents::automation::{
     ActionType, Condition, TriggerType, Workflow, WorkflowStatus, WorkflowStep,
@@ -167,6 +168,43 @@ impl WorkflowCanvasState {
             canvas_offset_y: 0.0,
             zoom: 1.0,
         }
+    }
+
+    /// Save this canvas state to ~/.hive/workflows/{workflow_id}.canvas.json
+    pub fn save_to_disk(&self) -> anyhow::Result<()> {
+        let dir = hive_core::config::HiveConfig::base_dir()?.join("workflows");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{}.canvas.json", self.workflow_id));
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a canvas state from disk by workflow_id.
+    pub fn load_from_disk(workflow_id: &str) -> anyhow::Result<Self> {
+        let dir = hive_core::config::HiveConfig::base_dir()?.join("workflows");
+        let path = dir.join(format!("{workflow_id}.canvas.json"));
+        let json = std::fs::read_to_string(path)?;
+        let state: Self = serde_json::from_str(&json)?;
+        Ok(state)
+    }
+
+    /// List all saved canvas workflow IDs on disk.
+    pub fn list_saved() -> Vec<String> {
+        let dir = match hive_core::config::HiveConfig::base_dir() {
+            Ok(d) => d.join("workflows"),
+            Err(_) => return Vec::new(),
+        };
+        let mut ids = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(id) = name.strip_suffix(".canvas.json") {
+                    ids.push(id.to_string());
+                }
+            }
+        }
+        ids
     }
 }
 
@@ -406,6 +444,35 @@ impl WorkflowBuilderView {
         cx.notify();
     }
 
+    /// Persist the current canvas state to disk, clear the dirty flag, and emit
+    /// a [`WorkflowSaved`] event.
+    pub fn save_workflow(&mut self, cx: &mut Context<Self>) {
+        // Sync viewport state into the serialisable canvas model.
+        self.canvas.canvas_offset_x = self.canvas_offset.0;
+        self.canvas.canvas_offset_y = self.canvas_offset.1;
+        self.canvas.zoom = self.zoom;
+
+        match self.canvas.save_to_disk() {
+            Ok(()) => {
+                self.is_dirty = false;
+                info!(
+                    workflow_id = %self.canvas.workflow_id,
+                    name = %self.canvas.name,
+                    "Workflow canvas saved to disk"
+                );
+                cx.emit(WorkflowSaved(self.canvas.workflow_id.clone()));
+            }
+            Err(e) => {
+                error!(
+                    workflow_id = %self.canvas.workflow_id,
+                    err = %e,
+                    "Failed to save workflow canvas to disk"
+                );
+            }
+        }
+        cx.notify();
+    }
+
     /// Port position for a node (relative to canvas). Returns (x, y) center of port.
     fn port_position(node: &CanvasNode, port: Port) -> (f64, f64) {
         match port {
@@ -582,6 +649,7 @@ impl WorkflowBuilderView {
         let mut elements: Vec<AnyElement> = Vec::new();
         let offset_x = self.canvas_offset.0 as f32;
         let offset_y = self.canvas_offset.1 as f32;
+        let zoom = self.zoom as f32;
 
         for node in &self.canvas.nodes {
             let color = self.node_color(node.kind);
@@ -592,9 +660,11 @@ impl WorkflowBuilderView {
             let node_id2 = node.id.clone();
             let node_id_input = node.id.clone();
 
-            // Compute display position with canvas offset
-            let display_x = node.x as f32 + offset_x;
-            let display_y = node.y as f32 + offset_y;
+            // Compute display position with canvas offset, scaled by zoom
+            let display_x = (node.x as f32 + offset_x) * zoom;
+            let display_y = (node.y as f32 + offset_y) * zoom;
+            let node_w = node.width as f32 * zoom;
+            let node_h = node.height as f32 * zoom;
 
             // Determine which ports to show based on node kind
             let has_input = node.kind != NodeKind::Trigger;
@@ -612,7 +682,7 @@ impl WorkflowBuilderView {
                         .id(ElementId::Name(format!("port-in-{}", node.id).into()))
                         .absolute()
                         .left(px(-5.0))
-                        .top(px(node.height as f32 / 2.0 - 5.0))
+                        .top(px(node_h / 2.0 - 5.0))
                         .w(px(10.0))
                         .h(px(10.0))
                         .rounded(theme.radius_full)
@@ -643,7 +713,7 @@ impl WorkflowBuilderView {
                         .id(ElementId::Name(format!("port-out-{}", node.id).into()))
                         .absolute()
                         .right(px(-5.0))
-                        .top(px(node.height as f32 / 2.0 - 5.0))
+                        .top(px(node_h / 2.0 - 5.0))
                         .w(px(10.0))
                         .h(px(10.0))
                         .rounded(theme.radius_full)
@@ -670,7 +740,7 @@ impl WorkflowBuilderView {
                         .id(ElementId::Name(format!("port-true-{}", node.id).into()))
                         .absolute()
                         .right(px(-5.0))
-                        .top(px(node.height as f32 * 0.25 - 5.0))
+                        .top(px(node_h * 0.25 - 5.0))
                         .w(px(10.0))
                         .h(px(10.0))
                         .rounded(theme.radius_full)
@@ -691,7 +761,7 @@ impl WorkflowBuilderView {
                         .id(ElementId::Name(format!("port-false-{}", node.id).into()))
                         .absolute()
                         .right(px(-5.0))
-                        .top(px(node.height as f32 * 0.75 - 5.0))
+                        .top(px(node_h * 0.75 - 5.0))
                         .w(px(10.0))
                         .h(px(10.0))
                         .rounded(theme.radius_full)
@@ -714,8 +784,8 @@ impl WorkflowBuilderView {
                 .absolute()
                 .left(px(display_x))
                 .top(px(display_y))
-                .w(px(node.width as f32))
-                .h(px(node.height as f32))
+                .w(px(node_w))
+                .h(px(node_h))
                 .rounded(theme.radius_md)
                 .bg(bg)
                 .border_1()
@@ -788,10 +858,10 @@ impl WorkflowBuilderView {
             if let (Some(from), Some(to)) = (from_node, to_node) {
                 let (fp_x, fp_y) = Self::port_position(from, edge.from_port);
                 let (tp_x, tp_y) = Self::port_position(to, edge.to_port);
-                let from_x = fp_x as f32 + offset_x;
-                let from_y = fp_y as f32 + offset_y;
-                let to_x = tp_x as f32 + offset_x;
-                let to_y = tp_y as f32 + offset_y;
+                let from_x = (fp_x as f32 + offset_x) * zoom;
+                let from_y = (fp_y as f32 + offset_y) * zoom;
+                let to_x = (tp_x as f32 + offset_x) * zoom;
+                let to_y = (tp_y as f32 + offset_y) * zoom;
 
                 // Edge color based on port type
                 let edge_color = match edge.from_port {
@@ -964,7 +1034,86 @@ impl Render for WorkflowBuilderView {
             .child(
                 div()
                     .flex()
+                    .items_center()
                     .gap(theme.space_2)
+                    // Palette toggle button
+                    .child({
+                        let palette_bg = if self.show_node_palette {
+                            let mut c = theme.accent_cyan;
+                            c.a = 0.15;
+                            c
+                        } else {
+                            theme.bg_tertiary
+                        };
+                        div()
+                            .id("toggle-palette-btn")
+                            .px(theme.space_2)
+                            .py(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .bg(palette_bg)
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_secondary)
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.show_node_palette = !this.show_node_palette;
+                                    cx.notify();
+                                }),
+                            )
+                            .child("Palette")
+                    })
+                    // Zoom controls
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_1)
+                            .child(
+                                div()
+                                    .id("zoom-out-btn")
+                                    .px(theme.space_2)
+                                    .py(theme.space_1)
+                                    .rounded(theme.radius_sm)
+                                    .bg(theme.bg_tertiary)
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_secondary)
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.zoom = (this.zoom - 0.1).max(0.3);
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child("\u{2212}"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .child(format!("{:.0}%", self.zoom * 100.0)),
+                            )
+                            .child(
+                                div()
+                                    .id("zoom-in-btn")
+                                    .px(theme.space_2)
+                                    .py(theme.space_1)
+                                    .rounded(theme.radius_sm)
+                                    .bg(theme.bg_tertiary)
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_secondary)
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.zoom = (this.zoom + 0.1).min(3.0);
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child("+"),
+                            ),
+                    )
                     // Save button
                     .child(
                         div()
@@ -984,6 +1133,12 @@ impl Render for WorkflowBuilderView {
                                 theme.text_muted
                             })
                             .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _e, _w, cx| {
+                                    this.save_workflow(cx);
+                                }),
+                            )
                             .child("Save"),
                     )
                     // Run button
@@ -1068,6 +1223,8 @@ impl Render for WorkflowBuilderView {
         // Properties (right)
         let properties = self.render_properties_panel(theme).into_any_element();
 
+        let show_palette = self.show_node_palette;
+
         div()
             .id("workflow-builder-panel")
             .flex()
@@ -1079,7 +1236,7 @@ impl Render for WorkflowBuilderView {
                     .flex()
                     .flex_1()
                     .min_h(px(0.0))
-                    .child(palette)
+                    .when(show_palette, |el| el.child(palette))
                     .child(canvas_area)
                     .when(self.show_properties_panel || self.selected_node_id.is_some(), |el| {
                         el.child(properties)

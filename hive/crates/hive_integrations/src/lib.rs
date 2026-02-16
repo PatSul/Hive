@@ -6,6 +6,7 @@ pub mod ide;
 pub mod messaging;
 pub mod microsoft;
 pub mod oauth;
+pub mod oauth_callback;
 pub mod smart_home;
 pub mod webhooks;
 
@@ -33,5 +34,6 @@ pub use messaging::{
 pub use microsoft::outlook_calendar::OutlookCalendarClient;
 pub use microsoft::outlook_email::OutlookEmailClient;
 pub use oauth::{OAuthClient, OAuthConfig, OAuthToken};
+pub use oauth_callback::OAuthCallbackServer;
 pub use smart_home::PhilipsHueClient;
 pub use webhooks::{Webhook, WebhookRegistry};
