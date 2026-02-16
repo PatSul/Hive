@@ -1,6 +1,6 @@
 use gpui_component::IconName;
 
-/// The 18 navigable panels in the application.
+/// The 19 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
@@ -15,6 +15,7 @@ pub enum Panel {
     Review,
     Skills,
     Routing,
+    Models,
     Learning,
     Shield,
     Assistant,
@@ -24,7 +25,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 18] = [
+    pub const ALL: [Panel; 19] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
@@ -37,6 +38,7 @@ impl Panel {
         Panel::Review,
         Panel::Skills,
         Panel::Routing,
+        Panel::Models,
         Panel::Learning,
         Panel::Shield,
         Panel::Assistant,
@@ -59,6 +61,7 @@ impl Panel {
             Self::Review => "Review",
             Self::Skills => "Skills",
             Self::Routing => "Routing",
+            Self::Models => "Models",
             Self::Learning => "Learning",
             Self::Shield => "Shield",
             Self::Assistant => "Assistant",
@@ -92,6 +95,7 @@ impl Panel {
             Self::Review => IconName::Eye,
             Self::Skills => IconName::Star,
             Self::Routing => IconName::Map,
+            Self::Models => IconName::BookOpen,
             Self::Learning => IconName::Redo2,
             Self::Shield => IconName::EyeOff,
             Self::Assistant => IconName::Bell,
@@ -119,6 +123,7 @@ impl Panel {
             "Review" => Self::Review,
             "Skills" => Self::Skills,
             "Routing" => Self::Routing,
+            "Models" => Self::Models,
             "Learning" => Self::Learning,
             "Shield" => Self::Shield,
             "Assistant" => Self::Assistant,
@@ -144,6 +149,7 @@ impl Panel {
             Self::Review => "Review",
             Self::Skills => "Skills",
             Self::Routing => "Routing",
+            Self::Models => "Models",
             Self::Learning => "Learning",
             Self::Shield => "Shield",
             Self::Assistant => "Assistant",
@@ -154,7 +160,7 @@ impl Panel {
     }
 }
 
-/// Sidebar component with 18 navigation icon buttons.
+/// Sidebar component with 19 navigation icon buttons.
 pub struct Sidebar {
     pub active_panel: Panel,
 }

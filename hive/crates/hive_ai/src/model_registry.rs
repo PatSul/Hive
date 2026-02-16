@@ -280,6 +280,111 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             ]),
         },
         ModelInfo {
+            id: "gpt-5.2-pro".into(),
+            name: "GPT-5.2 Pro".into(),
+            provider: "openai".into(),
+            provider_type: ProviderType::OpenAI,
+            tier: ModelTier::Premium,
+            context_window: 400_000,
+            input_price_per_mtok: 21.0,
+            output_price_per_mtok: 168.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::NativeAgents,
+                ModelCapability::Vision,
+                ModelCapability::ExtendedThinking,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+        },
+        // ---- OpenAI Codex ----
+        // NOTE: gpt-5.3-codex and gpt-5.3-codex-spark are excluded — no public
+        // API access yet (ChatGPT-only / Codex CLI). They will appear
+        // automatically once OpenAI adds them to the /v1/models endpoint.
+        ModelInfo {
+            id: "gpt-5.2-codex".into(),
+            name: "GPT-5.2 Codex".into(),
+            provider: "openai".into(),
+            provider_type: ProviderType::OpenAI,
+            tier: ModelTier::Premium,
+            context_window: 400_000,
+            input_price_per_mtok: 1.75,
+            output_price_per_mtok: 14.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::NativeAgents,
+                ModelCapability::CodeExecution,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+        },
+        ModelInfo {
+            id: "gpt-5.1-codex".into(),
+            name: "GPT-5.1 Codex".into(),
+            provider: "openai".into(),
+            provider_type: ProviderType::OpenAI,
+            tier: ModelTier::Mid,
+            context_window: 400_000,
+            input_price_per_mtok: 1.25,
+            output_price_per_mtok: 10.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::NativeAgents,
+                ModelCapability::CodeExecution,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+        },
+        ModelInfo {
+            id: "gpt-5.1-codex-mini".into(),
+            name: "GPT-5.1 Codex Mini".into(),
+            provider: "openai".into(),
+            provider_type: ProviderType::OpenAI,
+            tier: ModelTier::Budget,
+            context_window: 400_000,
+            input_price_per_mtok: 0.25,
+            output_price_per_mtok: 2.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::CodeExecution,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+        },
+        ModelInfo {
+            id: "gpt-5-codex".into(),
+            name: "GPT-5 Codex".into(),
+            provider: "openai".into(),
+            provider_type: ProviderType::OpenAI,
+            tier: ModelTier::Mid,
+            context_window: 400_000,
+            input_price_per_mtok: 1.25,
+            output_price_per_mtok: 10.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::NativeAgents,
+                ModelCapability::CodeExecution,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+        },
+        ModelInfo {
+            id: "codex-mini-latest".into(),
+            name: "Codex Mini".into(),
+            provider: "openai".into(),
+            provider_type: ProviderType::OpenAI,
+            tier: ModelTier::Mid,
+            context_window: 200_000,
+            input_price_per_mtok: 1.50,
+            output_price_per_mtok: 6.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::CodeExecution,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+        },
+        ModelInfo {
             id: "o3".into(),
             name: "o3".into(),
             provider: "openai".into(),
@@ -725,6 +830,62 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
 });
 
 // ---------------------------------------------------------------------------
+// Enrichment helper
+// ---------------------------------------------------------------------------
+
+/// Look up a model by exact id in the static registry.
+///
+/// This is used to enrich live-catalog models with known pricing, tier,
+/// capabilities, and context-window data that APIs often omit.
+pub fn lookup_by_id(id: &str) -> Option<&'static ModelInfo> {
+    MODEL_REGISTRY.iter().find(|m| m.id == id)
+}
+
+/// Enrich a model from a live catalog with metadata from the static registry.
+///
+/// If the registry has a matching entry (by exact id), the following fields
+/// are overwritten with the registry values (which are typically more accurate
+/// than what the provider API returns):
+///
+/// - `tier` (catalog APIs rarely expose this)
+/// - `input_price_per_mtok` / `output_price_per_mtok` (only if the registry
+///   value is nonzero — catalogs sometimes return 0 for paid models)
+/// - `capabilities` (only if the registry entry has capabilities and the
+///   catalog entry does not)
+/// - `context_window` (only if the registry value is larger — catalog APIs
+///   sometimes report a lower default)
+///
+/// The `name` field is also updated if the registry provides a friendlier
+/// display name (i.e. differs from the raw `id`).
+pub fn enrich_from_registry(model: &mut ModelInfo) {
+    if let Some(reg) = lookup_by_id(&model.id) {
+        // Always prefer the registry tier — catalog APIs don't expose this.
+        model.tier = reg.tier;
+
+        // Pricing: prefer registry if non-zero (catalogs often return 0).
+        if reg.input_price_per_mtok > 0.0 || reg.output_price_per_mtok > 0.0 {
+            model.input_price_per_mtok = reg.input_price_per_mtok;
+            model.output_price_per_mtok = reg.output_price_per_mtok;
+        }
+
+        // Capabilities: prefer registry if it has data and catalog doesn't.
+        if model.capabilities.is_empty() && !reg.capabilities.is_empty() {
+            model.capabilities = reg.capabilities.clone();
+        }
+
+        // Context window: prefer the larger value.
+        if reg.context_window > model.context_window {
+            model.context_window = reg.context_window;
+        }
+
+        // Display name: prefer the registry's friendlier name.
+        if reg.name != reg.id {
+            model.name = reg.name.clone();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Lookup helpers
 // ---------------------------------------------------------------------------
 
@@ -800,7 +961,7 @@ mod tests {
         );
 
         let openai = models_for_provider(ProviderType::OpenAI);
-        assert_eq!(openai.len(), 12);
+        assert_eq!(openai.len(), 18);
         assert!(
             openai
                 .iter()

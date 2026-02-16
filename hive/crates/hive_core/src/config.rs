@@ -132,6 +132,7 @@ pub struct HiveConfig {
     // Model routing
     pub default_model: String,
     pub auto_routing: bool,
+    pub project_models: Vec<String>,
 
     // Budget
     pub daily_budget_usd: f64,
@@ -174,6 +175,7 @@ impl Default for HiveConfig {
             privacy_mode: false,
             default_model: "gpt-4o-mini".into(),
             auto_routing: true,
+            project_models: Vec::new(),
             daily_budget_usd: 10.0,
             monthly_budget_usd: 100.0,
             theme: "dark".into(),

@@ -6,7 +6,10 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use hive_ai::model_registry::MODEL_REGISTRY;
 use hive_ai::types::{ModelInfo, ModelTier, ProviderType};
 
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{HiveTheme, SwitchToModels};
+
+/// Max models to show per provider group before requiring expansion.
+const MAX_VISIBLE_PER_GROUP: usize = 8;
 
 // ---------------------------------------------------------------------------
 // Events
@@ -69,8 +72,21 @@ pub struct ModelSelectorView {
     google_fetch_status: FetchStatus,
     google_api_key: Option<String>,
 
+    // Groq live catalog
+    fetched_groq_models: Vec<ModelInfo>,
+    groq_fetch_status: FetchStatus,
+    groq_api_key: Option<String>,
+
     // Discovered local models (from auto-detection)
     discovered_local_models: Vec<ModelInfo>,
+
+    // Project model curation: when non-empty, only show these models (+ local)
+    project_models: HashSet<String>,
+
+    // UI state: which provider groups are collapsed (hidden)
+    collapsed_providers: HashSet<ProviderType>,
+    // UI state: which provider groups have been expanded beyond MAX_VISIBLE_PER_GROUP
+    expanded_providers: HashSet<ProviderType>,
 }
 
 impl EventEmitter<ModelSelected> for ModelSelectorView {}
@@ -114,7 +130,13 @@ impl ModelSelectorView {
             fetched_google_models: Vec::new(),
             google_fetch_status: FetchStatus::Idle,
             google_api_key: None,
+            fetched_groq_models: Vec::new(),
+            groq_fetch_status: FetchStatus::Idle,
+            groq_api_key: None,
             discovered_local_models: Vec::new(),
+            project_models: HashSet::new(),
+            collapsed_providers: HashSet::new(),
+            expanded_providers: HashSet::new(),
         }
     }
 
@@ -182,11 +204,48 @@ impl ModelSelectorView {
         }
     }
 
+    /// Store the Groq API key; invalidate cached catalog on change.
+    pub fn set_groq_api_key(&mut self, key: Option<String>, cx: &mut Context<Self>) {
+        let changed = self.groq_api_key != key;
+        self.groq_api_key = key;
+        if changed {
+            hive_ai::providers::groq_catalog::invalidate_cache();
+            self.fetched_groq_models.clear();
+            self.groq_fetch_status = FetchStatus::Idle;
+            cx.notify();
+        }
+    }
+
     /// Update discovered local models (from auto-detection scan).
     pub fn set_local_models(&mut self, models: Vec<ModelInfo>, cx: &mut Context<Self>) {
         if self.discovered_local_models != models {
             self.discovered_local_models = models;
             cx.notify();
+        }
+    }
+
+    /// Set the curated project model list. When non-empty, the dropdown only
+    /// shows models whose ID is in this set (plus any local models).
+    pub fn set_project_models(&mut self, models: Vec<String>, cx: &mut Context<Self>) {
+        let new_set: HashSet<String> = models.into_iter().collect();
+        if self.project_models != new_set {
+            self.project_models = new_set;
+            cx.notify();
+        }
+    }
+
+    /// Returns true if a model should appear in the filtered dropdown.
+    ///
+    /// - If `project_models` is empty → backward compatible, show everything.
+    /// - Local providers (Ollama / LM Studio / GenericLocal) → always show.
+    /// - Otherwise → only show if the model ID is in the project set.
+    fn is_in_project_or_local(&self, model: &ModelInfo) -> bool {
+        if self.project_models.is_empty() {
+            return true;
+        }
+        match model.provider_type {
+            ProviderType::Ollama | ProviderType::LMStudio | ProviderType::GenericLocal => true,
+            _ => self.project_models.contains(&model.id),
         }
     }
 
@@ -204,6 +263,7 @@ impl ModelSelectorView {
             self.maybe_fetch_openai(cx);
             self.maybe_fetch_anthropic(cx);
             self.maybe_fetch_google(cx);
+            self.maybe_fetch_groq(cx);
         }
         cx.notify();
     }
@@ -406,6 +466,92 @@ impl ModelSelectorView {
         .detach();
     }
 
+    fn maybe_fetch_groq(&mut self, cx: &mut Context<Self>) {
+        if !self.enabled_providers.contains(&ProviderType::Groq) {
+            return;
+        }
+        if self.groq_fetch_status == FetchStatus::Loading
+            || self.groq_fetch_status == FetchStatus::Done
+        {
+            return;
+        }
+        let Some(api_key) = self.groq_api_key.clone() else {
+            return;
+        };
+        if api_key.is_empty() {
+            return;
+        }
+
+        self.groq_fetch_status = FetchStatus::Loading;
+        cx.notify();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(
+                    hive_ai::providers::groq_catalog::fetch_groq_models(&api_key),
+                ),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| match result {
+                Ok(models) => {
+                    this.fetched_groq_models = models;
+                    this.groq_fetch_status = FetchStatus::Done;
+                    cx.notify();
+                }
+                Err(_) => {
+                    this.groq_fetch_status = FetchStatus::Failed;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn retry_fetch(&mut self, provider: ProviderType, cx: &mut Context<Self>) {
+        // Reset status to Idle so the fetch will re-trigger
+        match provider {
+            ProviderType::OpenRouter => self.or_fetch_status = FetchStatus::Idle,
+            ProviderType::OpenAI => self.openai_fetch_status = FetchStatus::Idle,
+            ProviderType::Anthropic => self.anthropic_fetch_status = FetchStatus::Idle,
+            ProviderType::Google => self.google_fetch_status = FetchStatus::Idle,
+            ProviderType::Groq => self.groq_fetch_status = FetchStatus::Idle,
+            _ => return,
+        }
+        // Now re-trigger
+        match provider {
+            ProviderType::OpenRouter => self.maybe_fetch_openrouter(cx),
+            ProviderType::OpenAI => self.maybe_fetch_openai(cx),
+            ProviderType::Anthropic => self.maybe_fetch_anthropic(cx),
+            ProviderType::Google => self.maybe_fetch_google(cx),
+            ProviderType::Groq => self.maybe_fetch_groq(cx),
+            _ => {}
+        }
+    }
+
+    fn toggle_collapse(&mut self, provider: ProviderType, cx: &mut Context<Self>) {
+        if self.collapsed_providers.contains(&provider) {
+            self.collapsed_providers.remove(&provider);
+        } else {
+            self.collapsed_providers.insert(provider);
+        }
+        cx.notify();
+    }
+
+    fn toggle_expand(&mut self, provider: ProviderType, cx: &mut Context<Self>) {
+        if self.expanded_providers.contains(&provider) {
+            self.expanded_providers.remove(&provider);
+        } else {
+            self.expanded_providers.insert(provider);
+        }
+        cx.notify();
+    }
+
     fn is_provider_enabled(&self, provider: ProviderType) -> bool {
         match provider {
             // Local providers don't need API keys — always enabled.
@@ -427,11 +573,12 @@ impl ModelSelectorView {
         }
 
         // Merge fetched cloud catalog models
-        let catalogs: [&Vec<ModelInfo>; 4] = [
+        let catalogs: [&Vec<ModelInfo>; 5] = [
             &self.fetched_or_models,
             &self.fetched_openai_models,
             &self.fetched_anthropic_models,
             &self.fetched_google_models,
+            &self.fetched_groq_models,
         ];
         for catalog in catalogs {
             for m in catalog {
@@ -565,6 +712,7 @@ impl ModelSelectorView {
             let models: Vec<&ModelInfo> = all_models
                 .iter()
                 .filter(|m| m.provider_type == *ptype)
+                .filter(|m| self.is_in_project_or_local(m))
                 .filter(|m| Self::matches_search(m, query))
                 .collect();
             if models.is_empty() {
@@ -572,34 +720,70 @@ impl ModelSelectorView {
             }
             total_visible += models.len();
             groups.push(
-                self.render_group(label, &models, enabled, theme, cx)
+                self.render_group(*ptype, label, &models, enabled, theme, cx)
                     .into_any_element(),
             );
         }
 
-        // Show loading indicators for any catalogs still fetching
+        // Show loading / error indicators for catalogs
         let loading_statuses = [
-            (self.or_fetch_status, "OpenRouter"),
-            (self.openai_fetch_status, "OpenAI"),
-            (self.anthropic_fetch_status, "Anthropic"),
-            (self.google_fetch_status, "Google"),
+            (self.or_fetch_status, "OpenRouter", ProviderType::OpenRouter),
+            (self.openai_fetch_status, "OpenAI", ProviderType::OpenAI),
+            (self.anthropic_fetch_status, "Anthropic", ProviderType::Anthropic),
+            (self.google_fetch_status, "Google", ProviderType::Google),
+            (self.groq_fetch_status, "Groq", ProviderType::Groq),
         ];
-        for (status, name) in &loading_statuses {
-            if *status == FetchStatus::Loading {
-                groups.push(
-                    div()
-                        .px(theme.space_3)
-                        .py(theme.space_2)
-                        .text_size(theme.font_size_xs)
-                        .text_color(theme.text_muted)
-                        .child(format!("Loading {name} catalog\u{2026}"))
-                        .into_any_element(),
-                );
+        for (status, name, ptype) in &loading_statuses {
+            match status {
+                FetchStatus::Loading => {
+                    groups.push(
+                        div()
+                            .px(theme.space_3)
+                            .py(theme.space_2)
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .child(format!("Loading {name} catalog\u{2026}"))
+                            .into_any_element(),
+                    );
+                }
+                FetchStatus::Failed => {
+                    let retry_ptype = *ptype;
+                    groups.push(
+                        div()
+                            .id(ElementId::Name(format!("retry-{name}").into()))
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .px(theme.space_3)
+                            .py(theme.space_2)
+                            .text_size(theme.font_size_xs)
+                            .child(
+                                div()
+                                    .text_color(theme.accent_red)
+                                    .child(format!("Failed to load {name} catalog")),
+                            )
+                            .child(
+                                div()
+                                    .text_color(theme.accent_cyan)
+                                    .cursor_pointer()
+                                    .hover(|s| s.text_color(theme.accent_aqua))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _e, _w, cx| {
+                                            this.retry_fetch(retry_ptype, cx);
+                                        }),
+                                    )
+                                    .child("Retry"),
+                            )
+                            .into_any_element(),
+                    );
+                }
+                _ => {}
             }
         }
         let any_loading = loading_statuses
             .iter()
-            .any(|(s, _)| *s == FetchStatus::Loading);
+            .any(|(s, _, _)| *s == FetchStatus::Loading);
 
         // Empty state
         if total_visible == 0 && !any_loading {
@@ -619,7 +803,7 @@ impl ModelSelectorView {
             .mt(px(4.0))
             .w_full()
             .min_w(px(320.0))
-            .max_h(px(400.0))
+            .max_h(px(500.0))
             .overflow_y_scroll()
             .rounded(theme.radius_md)
             .bg(theme.bg_surface)
@@ -635,43 +819,177 @@ impl ModelSelectorView {
                 ),
             )
             .children(groups)
+            // "Manage Models…" link at bottom
+            .child(
+                div()
+                    .id("manage-models-link")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px(theme.space_3)
+                    .py(theme.space_2)
+                    .mt(theme.space_1)
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .cursor_pointer()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.accent_cyan)
+                    .hover(|s| s.text_color(theme.accent_aqua))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_this, _e, window, _cx| {
+                            window.dispatch_action(
+                                Box::new(SwitchToModels),
+                                _cx,
+                            );
+                        }),
+                    )
+                    .child("Manage Models\u{2026}"),
+            )
     }
 
     fn render_group(
         &self,
+        provider: ProviderType,
         label: &str,
         models: &[&ModelInfo],
         enabled: bool,
         theme: &HiveTheme,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let is_collapsed = self.collapsed_providers.contains(&provider);
+        let is_expanded = self.expanded_providers.contains(&provider);
+        let total_count = models.len();
+        let is_searching = !self.search_query.is_empty();
+
+        // Determine how many models to actually render
+        let visible_models: Vec<&&ModelInfo> = if is_collapsed {
+            vec![]
+        } else if is_expanded || is_searching || total_count <= MAX_VISIBLE_PER_GROUP {
+            models.iter().collect()
+        } else {
+            models.iter().take(MAX_VISIBLE_PER_GROUP).collect()
+        };
+
+        let has_more = !is_collapsed
+            && !is_expanded
+            && !is_searching
+            && total_count > MAX_VISIBLE_PER_GROUP;
+        let remaining = total_count.saturating_sub(MAX_VISIBLE_PER_GROUP);
+
         let mut entries: Vec<AnyElement> = Vec::new();
-        for model in models {
+        for model in &visible_models {
             entries.push(
                 self.render_entry(model, enabled, theme, cx)
                     .into_any_element(),
             );
         }
 
+        // "Show N more…" button
+        if has_more {
+            let ptype = provider;
+            entries.push(
+                div()
+                    .id(ElementId::Name(format!("show-more-{label}").into()))
+                    .px(theme.space_3)
+                    .py(theme.space_1)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.accent_cyan)
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(theme.accent_aqua))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _e, _w, cx| {
+                            this.toggle_expand(ptype, cx);
+                        }),
+                    )
+                    .child(format!("Show {remaining} more\u{2026}"))
+                    .into_any_element(),
+            );
+        }
+
+        // "Show less" button when expanded beyond limit
+        if is_expanded && !is_searching && total_count > MAX_VISIBLE_PER_GROUP {
+            let ptype = provider;
+            entries.push(
+                div()
+                    .id(ElementId::Name(format!("show-less-{label}").into()))
+                    .px(theme.space_3)
+                    .py(theme.space_1)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.accent_cyan)
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(theme.accent_aqua))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _e, _w, cx| {
+                            this.toggle_expand(ptype, cx);
+                        }),
+                    )
+                    .child("Show less")
+                    .into_any_element(),
+            );
+        }
+
         let header_suffix = if !enabled { " \u{2014} No API key" } else { "" };
+        let collapse_icon = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
+        let header_ptype = provider;
 
         div()
             .flex()
             .flex_col()
             .w_full()
-            // Provider header
+            // Provider header — clickable to collapse/expand
             .child(
                 div()
+                    .id(ElementId::Name(format!("group-header-{label}").into()))
+                    .flex()
+                    .items_center()
+                    .justify_between()
                     .px(theme.space_3)
                     .py(theme.space_1)
-                    .text_size(theme.font_size_xs)
-                    .text_color(if enabled {
-                        theme.text_muted
-                    } else {
-                        dimmed(theme.text_muted)
-                    })
-                    .font_weight(FontWeight::BOLD)
-                    .child(format!("{label}{header_suffix}")),
+                    .cursor_pointer()
+                    .hover(|s| s.bg(theme.bg_tertiary))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _e, _w, cx| {
+                            this.toggle_collapse(header_ptype, cx);
+                        }),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_1)
+                            .child(
+                                div()
+                                    .text_size(px(8.0))
+                                    .text_color(theme.text_muted)
+                                    .child(collapse_icon),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(if enabled {
+                                        theme.text_muted
+                                    } else {
+                                        dimmed(theme.text_muted)
+                                    })
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(format!("{label}{header_suffix}")),
+                            ),
+                    )
+                    // Model count badge
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .px(theme.space_1)
+                            .py(px(1.0))
+                            .rounded(theme.radius_full)
+                            .bg(theme.bg_primary)
+                            .child(format!("{total_count}")),
+                    ),
             )
             .children(entries)
     }
@@ -695,9 +1013,10 @@ impl ModelSelectorView {
         tier_bg.a = 0.15;
 
         let model_id = model.id.clone();
+        let ctx_k = model.context_window / 1000;
         let price = format!(
-            "${:.2}/M in \u{00B7} ${:.2}/M out",
-            model.input_price_per_mtok, model.output_price_per_mtok
+            "{}K ctx \u{00B7} ${:.2}/M in \u{00B7} ${:.2}/M out",
+            ctx_k, model.input_price_per_mtok, model.output_price_per_mtok
         );
 
         let text_color = if enabled {

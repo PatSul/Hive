@@ -77,6 +77,7 @@ pub async fn fetch_openai_models(api_key: &str) -> Result<Vec<ModelInfo>, String
                 || m.id.starts_with("o3")
                 || m.id.starts_with("o4")
                 || m.id.starts_with("chatgpt-")
+                || m.id.starts_with("codex-")
         })
         .map(|m| {
             // Try to find in static registry for pricing/context

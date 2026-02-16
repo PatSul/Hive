@@ -538,5 +538,9 @@ fn main() {
 
         open_main_window(cx).expect("Failed to open window");
 
+        // Bring the app to the foreground and ensure macOS shows its dock icon.
+        // Without this, running the binary directly (e.g. `cargo run`) may not
+        // display the app in the dock.
+        cx.activate(true);
     });
 }

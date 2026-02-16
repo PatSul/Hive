@@ -8,6 +8,7 @@ pub mod history;
 pub mod kanban;
 pub mod learning;
 pub mod logs;
+pub mod models_browser;
 pub mod monitor;
 pub mod review;
 pub mod routing;

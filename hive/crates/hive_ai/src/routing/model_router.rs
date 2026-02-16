@@ -204,6 +204,11 @@ impl ModelRouter {
         &self.fallback_manager
     }
 
+    /// Replace the fallback chain used for auto-routing.
+    pub fn update_fallback_chain(&mut self, chain: Vec<super::auto_fallback::FallbackChainEntry>) {
+        self.fallback_manager.set_fallback_chain(chain);
+    }
+
     /// Access the underlying complexity classifier.
     pub fn classifier(&self) -> &ComplexityClassifier {
         &self.classifier

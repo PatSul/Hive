@@ -620,6 +620,9 @@ impl SettingsView {
         let google_key = resolve_key(&self.google_key_input, self.had_google_key, cx, |cfg| {
             &cfg.google_api_key
         });
+        let groq_key = resolve_key(&self.groq_key_input, self.had_groq_key, cx, |cfg| {
+            &cfg.groq_api_key
+        });
 
         self.model_selector.update(cx, |selector, cx| {
             selector.set_enabled_providers(providers, cx);
@@ -627,6 +630,18 @@ impl SettingsView {
             selector.set_openai_api_key(openai_key, cx);
             selector.set_anthropic_api_key(anthropic_key, cx);
             selector.set_google_api_key(google_key, cx);
+            selector.set_groq_api_key(groq_key, cx);
+        });
+    }
+
+    /// Push the curated project model list into the model selector.
+    pub fn set_project_models(
+        &mut self,
+        models: Vec<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.model_selector.update(cx, |selector, cx| {
+            selector.set_project_models(models, cx);
         });
     }
 

@@ -170,6 +170,11 @@ pub struct FallbackEvent {
 // Default fallback chain
 // ---------------------------------------------------------------------------
 
+/// Public accessor for the default fallback chain.
+pub fn default_fallback_chain_pub() -> Vec<FallbackChainEntry> {
+    default_fallback_chain()
+}
+
 fn default_fallback_chain() -> Vec<FallbackChainEntry> {
     vec![
         // Premium tier
@@ -317,6 +322,20 @@ impl AutoFallbackManager {
     /// Create a manager with [`FallbackConfig::default()`].
     pub fn with_defaults() -> Self {
         Self::new(FallbackConfig::default())
+    }
+
+    /// Replace the fallback chain with a new one (e.g. built from project models).
+    pub fn set_fallback_chain(&mut self, chain: Vec<FallbackChainEntry>) {
+        info!(
+            entries = chain.len(),
+            "Fallback chain updated"
+        );
+        self.fallback_chain = chain;
+    }
+
+    /// Return a reference to the current fallback chain.
+    pub fn fallback_chain(&self) -> &[FallbackChainEntry] {
+        &self.fallback_chain
     }
 
     // ------------------------------------------------------------------

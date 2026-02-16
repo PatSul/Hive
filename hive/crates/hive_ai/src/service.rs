@@ -207,6 +207,77 @@ impl AiService {
         &mut self.router
     }
 
+    /// Rebuild the auto-routing fallback chain based on the user's project models.
+    ///
+    /// Looks up each model ID in `MODEL_REGISTRY` to determine its tier and
+    /// provider, then builds a new fallback chain grouped by tier. For any tier
+    /// that has no project models, the default chain entries for that tier are
+    /// preserved.
+    pub fn rebuild_fallback_chain_from_project_models(&mut self, project_models: &[String]) {
+        use crate::model_registry::MODEL_REGISTRY;
+        use crate::routing::{FallbackChainEntry, default_fallback_chain_pub};
+
+        if project_models.is_empty() {
+            // Empty project list → revert to defaults.
+            let default_chain = default_fallback_chain_pub();
+            self.router.update_fallback_chain(default_chain);
+            return;
+        }
+
+        let registry = &*MODEL_REGISTRY;
+
+        let mut chain: Vec<FallbackChainEntry> = Vec::new();
+        let mut priority = 0u32;
+
+        // Group project models by tier.
+        let tiers = [
+            crate::types::ModelTier::Premium,
+            crate::types::ModelTier::Mid,
+            crate::types::ModelTier::Budget,
+            crate::types::ModelTier::Free,
+        ];
+
+        for tier in &tiers {
+            let mut tier_entries: Vec<FallbackChainEntry> = Vec::new();
+
+            for model_id in project_models {
+                if let Some(info) = registry.iter().find(|m| m.id == *model_id) {
+                    if info.tier == *tier {
+                        tier_entries.push(FallbackChainEntry {
+                            provider: map_to_router_provider(info.provider_type),
+                            model: model_id.clone(),
+                            priority,
+                            cost_tier: *tier,
+                        });
+                        priority += 1;
+                    }
+                }
+            }
+
+            // If no project models for this tier, keep the defaults.
+            if tier_entries.is_empty() {
+                let defaults = default_fallback_chain_pub();
+                for entry in defaults {
+                    if entry.cost_tier == *tier {
+                        let mut e = entry;
+                        e.priority = priority;
+                        tier_entries.push(e);
+                        priority += 1;
+                    }
+                }
+            }
+
+            chain.extend(tier_entries);
+        }
+
+        info!(
+            entries = chain.len(),
+            "Rebuilt fallback chain from {} project models",
+            project_models.len()
+        );
+        self.router.update_fallback_chain(chain);
+    }
+
     /// List all registered providers.
     pub fn available_providers(&self) -> Vec<ProviderType> {
         self.providers.keys().copied().collect()

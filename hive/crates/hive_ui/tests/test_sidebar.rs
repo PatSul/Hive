@@ -14,17 +14,18 @@ fn test_from_index_valid() {
     assert_eq!(Panel::from_index(9), Some(Panel::Review));
     assert_eq!(Panel::from_index(10), Some(Panel::Skills));
     assert_eq!(Panel::from_index(11), Some(Panel::Routing));
-    assert_eq!(Panel::from_index(12), Some(Panel::Learning));
-    assert_eq!(Panel::from_index(13), Some(Panel::Shield));
-    assert_eq!(Panel::from_index(14), Some(Panel::Assistant));
-    assert_eq!(Panel::from_index(15), Some(Panel::TokenLaunch));
-    assert_eq!(Panel::from_index(16), Some(Panel::Settings));
-    assert_eq!(Panel::from_index(17), Some(Panel::Help));
+    assert_eq!(Panel::from_index(12), Some(Panel::Models));
+    assert_eq!(Panel::from_index(13), Some(Panel::Learning));
+    assert_eq!(Panel::from_index(14), Some(Panel::Shield));
+    assert_eq!(Panel::from_index(15), Some(Panel::Assistant));
+    assert_eq!(Panel::from_index(16), Some(Panel::TokenLaunch));
+    assert_eq!(Panel::from_index(17), Some(Panel::Settings));
+    assert_eq!(Panel::from_index(18), Some(Panel::Help));
 }
 
 #[test]
 fn test_from_index_out_of_bounds() {
-    assert_eq!(Panel::from_index(18), None);
+    assert_eq!(Panel::from_index(19), None);
     assert_eq!(Panel::from_index(100), None);
     assert_eq!(Panel::from_index(usize::MAX), None);
 }
@@ -44,7 +45,7 @@ fn test_sidebar_default_panel_is_chat() {
 
 #[test]
 fn test_panel_all_count() {
-    assert_eq!(Panel::ALL.len(), 18);
+    assert_eq!(Panel::ALL.len(), 19);
 }
 
 // -- Panel stored round-trip tests --------------------------------------

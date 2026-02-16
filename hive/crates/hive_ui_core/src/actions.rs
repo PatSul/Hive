@@ -20,6 +20,7 @@ actions!(
         SwitchToReview,
         SwitchToSkills,
         SwitchToRouting,
+        SwitchToModels,
         SwitchToTokenLaunch,
         SwitchToSpecs,
         SwitchToAgents,

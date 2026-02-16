@@ -29,8 +29,8 @@ pub use hive_ui_core::{
     ClearChat, NewConversation,
     SwitchToChat, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
     SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
-    SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning, SwitchToShield,
-    SwitchToAssistant, SwitchToSettings, SwitchToHelp,
+    SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
+    SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToHelp,
     OpenWorkspaceDirectory,
     FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
     FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
@@ -53,6 +53,7 @@ use hive_ui_panels::panels::{
     kanban::{KanbanData, KanbanPanel},
     learning::{LearningPanel, LearningPanelData},
     logs::{LogsData, LogsPanel},
+    models_browser::{ModelsBrowserView, ProjectModelsChanged},
     monitor::{MonitorData, MonitorPanel},
     review::{ReviewData, ReviewPanel},
     routing::{RoutingData, RoutingPanel},
@@ -82,6 +83,7 @@ pub struct HiveWorkspace {
     chat_input: Entity<ChatInputView>,
     chat_service: Entity<ChatService>,
     settings_view: Entity<SettingsView>,
+    models_browser_view: Entity<ModelsBrowserView>,
     /// Focus handle for the workspace root div. Ensures that `dispatch_action`
     /// from child panels (Files, History, etc.) can bubble up to the root
     /// div's `.on_action()` handlers even when no input element is focused.
@@ -250,6 +252,66 @@ impl HiveWorkspace {
         )
         .detach();
 
+        // Create the model browser view entity.
+        let project_models = if cx.has_global::<AppConfig>() {
+            cx.global::<AppConfig>().0.get().project_models.clone()
+        } else {
+            Vec::new()
+        };
+        let models_browser_view = cx.new(|cx| ModelsBrowserView::new(project_models, window, cx));
+
+        // Eagerly push API keys to the models browser so it can show static
+        // registry entries even before the user explicitly switches to the panel.
+        if cx.has_global::<AppConfig>() {
+            let cfg = cx.global::<AppConfig>().0.get();
+            let mut providers = HashSet::new();
+            if cfg.openrouter_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::OpenRouter);
+            }
+            if cfg.openai_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::OpenAI);
+            }
+            if cfg.anthropic_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::Anthropic);
+            }
+            if cfg.google_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::Google);
+            }
+            if cfg.groq_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::Groq);
+            }
+            if cfg.huggingface_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::HuggingFace);
+            }
+            models_browser_view.update(cx, |browser, cx| {
+                browser.set_enabled_providers(providers, cx);
+                browser.set_openrouter_api_key(cfg.openrouter_api_key.clone(), cx);
+                browser.set_openai_api_key(cfg.openai_api_key.clone(), cx);
+                browser.set_anthropic_api_key(cfg.anthropic_api_key.clone(), cx);
+                browser.set_google_api_key(cfg.google_api_key.clone(), cx);
+                browser.set_groq_api_key(cfg.groq_api_key.clone(), cx);
+                browser.set_huggingface_api_key(cfg.huggingface_api_key.clone(), cx);
+
+                // If the user left the Models panel open last session, kick off
+                // catalog fetches immediately so the panel isn't stuck on the
+                // static-registry fallback.
+                if restored_panel == Panel::Models {
+                    browser.trigger_fetches(cx);
+                }
+            });
+        }
+
+        // When the user adds/removes models from the project list, persist to config
+        // and push to settings model selector.
+        cx.subscribe_in(
+            &models_browser_view,
+            window,
+            |this, _view, event: &ProjectModelsChanged, _window, cx| {
+                this.handle_project_models_changed(&event.0, cx);
+            },
+        )
+        .detach();
+
         // Focus handle for the workspace root — ensures dispatch_action works
         // from child panel click handlers even when no input is focused.
         let focus_handle = cx.focus_handle();
@@ -279,6 +341,7 @@ impl HiveWorkspace {
             chat_input,
             chat_service,
             settings_view,
+            models_browser_view,
             focus_handle,
             history_data,
             files_data,
@@ -994,7 +1057,10 @@ impl HiveWorkspace {
                         if let Some(d) = cx.global::<AppAiService>().0.discovery() {
                             let models = d.snapshot().all_models();
                             self.settings_view.update(cx, |settings, cx| {
-                                settings.refresh_local_models(models, cx);
+                                settings.refresh_local_models(models.clone(), cx);
+                            });
+                            self.models_browser_view.update(cx, |browser, cx| {
+                                browser.set_local_models(models, cx);
                             });
                         }
                     }
@@ -1079,6 +1145,7 @@ impl HiveWorkspace {
             Panel::Review => ReviewPanel::render(&self.review_data, theme).into_any_element(),
             Panel::Skills => SkillsPanel::render(&self.skills_data, theme).into_any_element(),
             Panel::Routing => RoutingPanel::render(&self.routing_data, theme).into_any_element(),
+            Panel::Models => self.models_browser_view.clone().into_any_element(),
             Panel::TokenLaunch => {
                 TokenLaunchPanel::render(&self.token_launch_data, theme).into_any_element()
             }
@@ -1177,6 +1244,12 @@ impl HiveWorkspace {
             }
             Panel::Routing => {
                 self.refresh_routing_data(cx);
+            }
+            Panel::Models => {
+                self.push_keys_to_models_browser(cx);
+                self.models_browser_view.update(cx, |browser, cx| {
+                    browser.trigger_fetches(cx);
+                });
             }
             Panel::Skills => {
                 self.refresh_skills_data(cx);
@@ -1315,6 +1388,15 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Routing, cx);
+    }
+
+    fn handle_switch_to_models(
+        &mut self,
+        _action: &SwitchToModels,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::Models, cx);
     }
 
     fn handle_switch_to_token_launch(
@@ -2604,6 +2686,77 @@ impl HiveWorkspace {
 
     /// Called when `SettingsView` emits `SettingsSaved`. Reads all values from
     /// the view and persists them to `AppConfig`.
+    /// Push API keys + enabled providers to the models browser view.
+    fn push_keys_to_models_browser(&mut self, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppConfig>() {
+            return;
+        }
+        let config = cx.global::<AppConfig>().0.get();
+
+        let mut providers = HashSet::new();
+        let or_key = config.openrouter_api_key.clone();
+        let openai_key = config.openai_api_key.clone();
+        let anthropic_key = config.anthropic_api_key.clone();
+        let google_key = config.google_api_key.clone();
+        let groq_key = config.groq_api_key.clone();
+        let hf_key = config.huggingface_api_key.clone();
+
+        if or_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::OpenRouter);
+        }
+        if openai_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::OpenAI);
+        }
+        if anthropic_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::Anthropic);
+        }
+        if google_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::Google);
+        }
+        if groq_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::Groq);
+        }
+        if hf_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::HuggingFace);
+        }
+
+        self.models_browser_view.update(cx, |browser, cx| {
+            browser.set_enabled_providers(providers, cx);
+            browser.set_openrouter_api_key(or_key, cx);
+            browser.set_openai_api_key(openai_key, cx);
+            browser.set_anthropic_api_key(anthropic_key, cx);
+            browser.set_google_api_key(google_key, cx);
+            browser.set_groq_api_key(groq_key, cx);
+            browser.set_huggingface_api_key(hf_key, cx);
+        });
+    }
+
+    /// Handle changes to the project model list from the models browser.
+    fn handle_project_models_changed(&mut self, models: &[String], cx: &mut Context<Self>) {
+        // Persist to config.
+        if cx.has_global::<AppConfig>() {
+            if let Err(e) = cx.global::<AppConfig>().0.update(|cfg| {
+                cfg.project_models = models.to_vec();
+            }) {
+                warn!("Models: failed to persist project_models: {e}");
+            }
+        }
+
+        // Push to settings model selector.
+        self.settings_view.update(cx, |settings, cx| {
+            settings.set_project_models(models.to_vec(), cx);
+        });
+
+        // Rebuild auto-routing fallback chain from project models.
+        if cx.has_global::<AppAiService>() {
+            cx.global_mut::<AppAiService>()
+                .0
+                .rebuild_fallback_chain_from_project_models(models);
+        }
+
+        cx.notify();
+    }
+
     fn handle_settings_save_from_view(&mut self, cx: &mut Context<Self>) {
         info!("Settings: persisting from SettingsView");
 
@@ -2660,6 +2813,10 @@ impl HiveWorkspace {
             };
             self.status_bar.privacy_mode = snapshot.privacy_mode;
         }
+
+        // Re-push API keys to the models browser so new/changed keys take effect
+        // immediately without requiring the user to switch away and back.
+        self.push_keys_to_models_browser(cx);
 
         cx.notify();
     }
@@ -2721,6 +2878,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_review))
             .on_action(cx.listener(Self::handle_switch_to_skills))
             .on_action(cx.listener(Self::handle_switch_to_routing))
+            .on_action(cx.listener(Self::handle_switch_to_models))
             .on_action(cx.listener(Self::handle_switch_to_token_launch))
             .on_action(cx.listener(Self::handle_switch_to_specs))
             .on_action(cx.listener(Self::handle_switch_to_agents))
@@ -2884,6 +3042,7 @@ impl HiveWorkspace {
                             Panel::Review,
                             Panel::Skills,
                             Panel::Routing,
+                            Panel::Models,
                             Panel::Learning,
                         ],
                         active,

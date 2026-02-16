@@ -304,9 +304,11 @@ fn render_quick_start(theme: &HiveTheme) -> AnyElement {
         ))
         .child(step_row(
             2,
-            "Choose a model",
-            "Use the model selector in the status bar, or enable Auto Routing \
-             to let Hive pick the best model per task.",
+            "Choose your models",
+            "Open the Models panel in the sidebar to browse catalogs from OpenRouter, \
+             Groq, OpenAI, Anthropic, Google, and local providers. Add models to your \
+             project list \u{2014} the Settings model selector will show only those you picked. \
+             Enable Auto Routing and Hive assigns the best model per task automatically.",
             theme,
         ))
         .child(step_row(
@@ -319,7 +321,7 @@ fn render_quick_start(theme: &HiveTheme) -> AnyElement {
         .child(step_row(
             4,
             "Explore features",
-            "Use the grouped navigation: Core, Build, Observe, and Platform. \
+            "Use the grouped navigation: Core, Flow, Observe, Project, and System. \
              Open Agents to run built-in workflows and reload custom ones from \
              .hive/workflows/*.json.",
             theme,
@@ -426,6 +428,11 @@ fn render_features_overview(theme: &HiveTheme) -> AnyElement {
             "\u{1F916}",
             "Multi-Provider AI",
             "Route to 6+ providers with smart fallback",
+        ),
+        (
+            "\u{1F4DA}",
+            "Model Browser",
+            "Browse full catalogs, curate a project model list, auto-route by tier",
         ),
         (
             "\u{1F3E0}",
