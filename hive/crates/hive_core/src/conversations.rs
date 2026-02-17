@@ -222,6 +222,25 @@ impl ConversationStore {
         Ok(())
     }
 
+    /// Deletes all conversation JSON files from the conversations directory.
+    pub fn delete_all(&self) -> Result<usize> {
+        let entries = std::fs::read_dir(&self.dir)
+            .with_context(|| format!("Failed to read conversations dir: {}", self.dir.display()))?;
+
+        let mut count = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    warn!("Failed to delete conversation file {}: {e}", path.display());
+                } else {
+                    count += 1;
+                }
+            }
+        }
+        Ok(count)
+    }
+
     /// Lists summaries of all conversations, sorted by `updated_at` descending.
     pub fn list_summaries(&self) -> Result<Vec<ConversationSummary>> {
         let mut summaries = Vec::new();

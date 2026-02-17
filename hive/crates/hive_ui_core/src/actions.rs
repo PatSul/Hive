@@ -38,6 +38,9 @@ actions!(
         FilesNewFolder,
         // History panel
         HistoryRefresh,
+        HistoryClearAll,
+        HistoryClearAllConfirm,
+        HistoryClearAllCancel,
         // Kanban panel
         KanbanAddTask,
         // Logs panel

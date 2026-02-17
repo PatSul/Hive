@@ -240,6 +240,14 @@ impl Database {
         Ok(())
     }
 
+    /// Deletes all conversations, their messages, and FTS index entries.
+    pub fn clear_all_conversations(&self) -> Result<usize> {
+        self.conn.execute("DELETE FROM conversations_fts", [])?;
+        self.conn.execute("DELETE FROM messages", [])?;
+        let deleted = self.conn.execute("DELETE FROM conversations", [])?;
+        Ok(deleted)
+    }
+
     /// Searches conversations using FTS5 full-text search across titles and
     /// message content.  Falls back to LIKE-based search if the FTS query
     /// syntax is invalid (e.g. unmatched quotes).

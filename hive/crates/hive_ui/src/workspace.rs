@@ -35,6 +35,7 @@ pub use hive_ui_core::{
     FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
     FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
     HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
+    HistoryClearAll, HistoryClearAllConfirm, HistoryClearAllCancel,
     KanbanAddTask, LogsClear, LogsToggleAutoScroll, LogsSetFilter,
     CostsExportCsv, CostsResetToday, CostsClearHistory,
     ReviewStageAll, ReviewUnstageAll, ReviewCommit, ReviewDiscardAll,
@@ -2918,6 +2919,63 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.refresh_history();
+        cx.notify();
+    }
+
+    fn handle_history_clear_all(
+        &mut self,
+        _action: &HistoryClearAll,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("History: clear all requested — showing confirmation");
+        self.history_data.confirming_clear = true;
+        cx.notify();
+    }
+
+    fn handle_history_clear_all_confirm(
+        &mut self,
+        _action: &HistoryClearAllConfirm,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("History: clear all confirmed — deleting all conversations");
+
+        // Delete JSON files
+        if let Ok(store) = hive_core::ConversationStore::new() {
+            match store.delete_all() {
+                Ok(count) => info!("History: deleted {count} conversation files"),
+                Err(e) => warn!("History: failed to delete conversation files: {e}"),
+            }
+        }
+
+        // Delete from SQLite database
+        if let Ok(db) = hive_core::persistence::Database::open() {
+            match db.clear_all_conversations() {
+                Ok(count) => info!("History: deleted {count} conversations from database"),
+                Err(e) => warn!("History: failed to clear conversations from database: {e}"),
+            }
+        }
+
+        // Reset the current conversation
+        self.chat_service.update(cx, |svc, _cx| {
+            svc.new_conversation();
+        });
+        self.cached_chat_data.markdown_cache.clear();
+
+        self.history_data = HistoryData::empty();
+        self.session_dirty = true;
+        cx.notify();
+    }
+
+    fn handle_history_clear_all_cancel(
+        &mut self,
+        _action: &HistoryClearAllCancel,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("History: clear all cancelled");
+        self.history_data.confirming_clear = false;
         cx.notify();
     }
 
@@ -5822,6 +5880,9 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_history_load))
             .on_action(cx.listener(Self::handle_history_delete))
             .on_action(cx.listener(Self::handle_history_refresh))
+            .on_action(cx.listener(Self::handle_history_clear_all))
+            .on_action(cx.listener(Self::handle_history_clear_all_confirm))
+            .on_action(cx.listener(Self::handle_history_clear_all_cancel))
             // Kanban
             .on_action(cx.listener(Self::handle_kanban_add_task))
             // Logs

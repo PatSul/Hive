@@ -1,12 +1,16 @@
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, Utc};
 use gpui::*;
+use gpui::prelude::FluentBuilder;
 use gpui_component::{Icon, IconName};
 
 use hive_core::ConversationSummary;
 use hive_core::persistence::ConversationRow;
 
 use hive_ui_core::HiveTheme;
-use hive_ui_core::{HistoryDeleteConversation, HistoryLoadConversation, HistoryRefresh};
+use hive_ui_core::{
+    HistoryClearAll, HistoryClearAllCancel, HistoryClearAllConfirm,
+    HistoryDeleteConversation, HistoryLoadConversation, HistoryRefresh,
+};
 
 // ---------------------------------------------------------------------------
 // HistoryData — pre-loaded conversation data fed into the panel
@@ -24,6 +28,8 @@ pub struct HistoryData {
     pub selected_id: Option<String>,
     /// Current search/filter query (empty = show all).
     pub search_query: String,
+    /// Whether the "Clear All" confirmation prompt is showing.
+    pub confirming_clear: bool,
 }
 
 impl HistoryData {
@@ -33,6 +39,7 @@ impl HistoryData {
             conversations: Vec::new(),
             selected_id: None,
             search_query: String::new(),
+            confirming_clear: false,
         }
     }
 
@@ -65,6 +72,7 @@ impl HistoryData {
             conversations,
             selected_id: None,
             search_query: String::new(),
+            confirming_clear: false,
         }
     }
 
@@ -75,6 +83,7 @@ impl HistoryData {
             conversations: summaries,
             selected_id: None,
             search_query: String::new(),
+            confirming_clear: false,
         }
     }
 
@@ -147,7 +156,7 @@ impl HistoryPanel {
                     .bg(theme.bg_surface)
                     .border_1()
                     .border_color(theme.border)
-                    .child(render_header(&data.search_query, theme))
+                    .child(render_header(&data.search_query, data.confirming_clear, !data.conversations.is_empty(), theme))
                     .child(render_conversation_list(
                         &filtered,
                         data.selected_id.as_deref(),
@@ -162,15 +171,23 @@ impl HistoryPanel {
 // Header with title and search field
 // ---------------------------------------------------------------------------
 
-fn render_header(search_query: &str, theme: &HiveTheme) -> impl IntoElement {
-    div()
+fn render_header(
+    search_query: &str,
+    confirming_clear: bool,
+    has_conversations: bool,
+    theme: &HiveTheme,
+) -> impl IntoElement {
+    let bg_tertiary = theme.bg_tertiary;
+    let text_muted = theme.text_muted;
+
+    let mut header = div()
         .flex()
         .flex_col()
         .p(theme.space_3)
         .gap(theme.space_2)
         .border_b_1()
         .border_color(theme.border)
-        // Title row with refresh button
+        // Title row with clear-all + refresh buttons
         .child(
             div()
                 .flex()
@@ -184,17 +201,36 @@ fn render_header(search_query: &str, theme: &HiveTheme) -> impl IntoElement {
                         .child("History"),
                 )
                 .child(div().flex_1())
+                // Clear All button (only show when conversations exist)
+                .when(has_conversations && !confirming_clear, |this: Div| {
+                    this.child(
+                        div()
+                            .id("history-clear-all")
+                            .cursor_pointer()
+                            .p(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .hover(move |style: StyleRefinement| style.bg(bg_tertiary))
+                            .child(
+                                Icon::new(IconName::Delete)
+                                    .size_3p5()
+                                    .text_color(text_muted),
+                            )
+                            .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                                window.dispatch_action(Box::new(HistoryClearAll), cx);
+                            }),
+                    )
+                })
                 .child(
                     div()
                         .id("history-refresh")
                         .cursor_pointer()
                         .p(theme.space_1)
                         .rounded(theme.radius_sm)
-                        .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+                        .hover(move |style: StyleRefinement| style.bg(bg_tertiary))
                         .child(
                             Icon::new(IconName::Redo2)
                                 .size_3p5()
-                                .text_color(theme.text_muted),
+                                .text_color(text_muted),
                         )
                         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                             window.dispatch_action(Box::new(HistoryRefresh), cx);
@@ -202,7 +238,73 @@ fn render_header(search_query: &str, theme: &HiveTheme) -> impl IntoElement {
                 ),
         )
         // Search input
-        .child(render_search_field(search_query, theme))
+        .child(render_search_field(search_query, theme));
+
+    // Confirmation bar
+    if confirming_clear {
+        header = header.child(render_clear_confirmation(theme));
+    }
+
+    header
+}
+
+fn render_clear_confirmation(theme: &HiveTheme) -> impl IntoElement {
+    let accent_red = theme.accent_red;
+    let bg_tertiary = theme.bg_tertiary;
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_2)
+        .py(theme.space_2)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_primary)
+        .border_1()
+        .border_color(theme.accent_red)
+        .child(
+            div()
+                .flex_1()
+                .text_size(theme.font_size_sm)
+                .text_color(theme.text_primary)
+                .child("Delete all conversations?"),
+        )
+        .child(
+            div()
+                .id("history-clear-confirm")
+                .cursor_pointer()
+                .px(theme.space_2)
+                .py(theme.space_1)
+                .rounded(theme.radius_sm)
+                .bg(accent_red)
+                .text_size(theme.font_size_xs)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_primary)
+                .hover(move |style: StyleRefinement| {
+                    style.bg(accent_red).opacity(0.8)
+                })
+                .child("Yes, delete all")
+                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                    window.dispatch_action(Box::new(HistoryClearAllConfirm), cx);
+                }),
+        )
+        .child(
+            div()
+                .id("history-clear-cancel")
+                .cursor_pointer()
+                .px(theme.space_2)
+                .py(theme.space_1)
+                .rounded(theme.radius_sm)
+                .bg(bg_tertiary)
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .hover(move |style: StyleRefinement| style.bg(bg_tertiary))
+                .child("Cancel")
+                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                    window.dispatch_action(Box::new(HistoryClearAllCancel), cx);
+                }),
+        )
 }
 
 fn render_search_field(search_query: &str, theme: &HiveTheme) -> impl IntoElement {
