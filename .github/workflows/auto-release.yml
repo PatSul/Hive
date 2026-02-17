@@ -75,10 +75,10 @@ jobs:
 
       - name: Trigger Release workflow
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN cannot dispatch workflows (403). Use a PAT with
+          # Actions read/write scope stored as the RELEASE_PAT secret.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
-          # Tags pushed by GITHUB_TOKEN don't trigger other workflows,
-          # so we explicitly dispatch the Release workflow.
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
