@@ -20,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-license = "BSL-1.1"
+license = "MIT"
 
 [workspace.dependencies]
 # GPUI framework

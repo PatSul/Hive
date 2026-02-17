@@ -2,7 +2,7 @@
 name = "hive_shield"
 version = "0.2.0"
 edition = "2024"
-license = "BSL-1.1"
+license = "MIT"
 
 [dependencies]
 serde.workspace = true

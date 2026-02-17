@@ -1,6 +1,6 @@
 # Hive for Enterprise
 
-Hive is designed to be the most secure, high-performance AI platform for professional teams. While Hive is free for individuals and small teams under the [Business Source License (BSL) 1.1](../LICENSE), we offer **Commercial Licenses** and **Enterprise Support** for larger organizations.
+Hive is designed to be the most secure, high-performance AI platform for professional teams. Hive is free and open source under the [MIT License](../LICENSE). We also offer **Enterprise Support** for larger organizations.
 
 ---
 
@@ -17,11 +17,10 @@ Large organizations have unique security and compliance requirements that "wrapp
 
 ## Licensing Tiers
 
-| Feature | Community (BSL) | Enterprise |
+| Feature | Community (MIT) | Enterprise |
 |---|---|---|
-| Team Size | < 10 Members | Unlimited |
-| Revenue Limit | < $1M USD | No Limit |
-| Usage | Personal / Dev | Full Commercial Production |
+| Team Size | Unlimited | Unlimited |
+| Usage | Full (MIT License) | Full Commercial Production |
 | Support | Community (GitHub) | Priority 24/7 SLA |
 | Security | Standard Shield | Custom PII Patterns & Rules |
 | Deployment | Local Installation | MSI/PKG for Mass Deployment |
@@ -46,10 +45,8 @@ We help you build and deploy specialized "Expert Agents" (Legal, Compliance, Dev
 
 ## Get a Commercial License
 
-If your organization has more than 10 employees or exceeds $1M in annual revenue, a **Commercial License** is required to continue using Hive in production.
+Hive is free for everyone under the MIT License. For organizations needing priority support, custom integrations, or a security audit of the Hive architecture, contact us.
 
 **Ready to scale your swarm?**
-
-Contact our sales team to discuss volume licensing, custom integrations, or a security audit of the Hive architecture.
 
 - GitHub: [PatSul/Hive](https://github.com/PatSul/Hive)

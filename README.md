@@ -636,13 +636,11 @@ Initial release with 16-crate architecture, multi-agent swarm (Queen + HiveMind 
 
 ## Contributing
 
-Hive is source-available under BSL-1.1. Contributions are welcome for bug fixes, documentation, and non-commercial improvements. Please open an issue before submitting large PRs.
+Hive is open source under the MIT license. Contributions are welcome! Please open an issue before submitting large PRs.
 
 ## License
 
-This project is licensed under the **Business Source License 1.1**. It is free for personal and small-business use. For large-scale commercial use, please contact the author. The license will convert to Apache 2.0 on January 1, 2029. See [LICENSE](LICENSE) for details.
-
-For organizations requiring commercial use or priority support, see our [Enterprise Documentation](docs/ENTERPRISE.md).
+This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
 
 ## Security
 
