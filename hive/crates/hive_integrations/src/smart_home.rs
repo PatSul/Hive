@@ -34,10 +34,11 @@ pub struct HueScene {
 ///
 /// Communicates with a Hue bridge on the local network to control
 /// lights, scenes, and query bridge state.
-#[allow(dead_code)]
 pub struct PhilipsHueClient {
     client: Client,
+    #[allow(dead_code)]
     bridge_ip: String,
+    #[allow(dead_code)]
     api_key: String,
     base_url: String,
 }

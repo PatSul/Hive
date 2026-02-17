@@ -69,14 +69,15 @@ pub struct ChannelsView {
 
 /// Display-ready message.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ChannelMessageDisplay {
+    #[allow(dead_code)]
     id: String,
     author_name: String,
     author_icon: String,
     author_color: Hsla,
     content: String,
     timestamp: String,
+    #[allow(dead_code)]
     is_agent: bool,
     model: Option<String>,
 }
