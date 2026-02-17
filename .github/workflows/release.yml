@@ -73,6 +73,7 @@ jobs:
         shell: pwsh
         run: |
           Compress-Archive `
+            -Force `
             -Path "hive/target/${{ matrix.target }}/release/${{ matrix.artifact }}" `
             -DestinationPath "${{ matrix.archive }}"
 
