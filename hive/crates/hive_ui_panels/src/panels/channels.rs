@@ -147,6 +147,13 @@ impl ChannelsView {
         cx.notify();
     }
 
+    /// Select a channel by ID (used after creating a new channel).
+    pub fn select_channel(&mut self, channel_id: &str, cx: &mut Context<Self>) {
+        self.active_channel_id = Some(channel_id.to_string());
+        self.messages.clear();
+        cx.notify();
+    }
+
     /// Refresh the channel list from the store.
     pub fn refresh_channels(&mut self, store: &ChannelStore, cx: &mut Context<Self>) {
         self.channels = store

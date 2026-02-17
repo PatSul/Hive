@@ -424,7 +424,7 @@ fn header_title_row(enabled_count: usize, total_count: usize, theme: &HiveTheme)
                 .text_size(theme.font_size_xl)
                 .text_color(theme.text_primary)
                 .font_weight(FontWeight::BOLD)
-                .child("ClawdHub"),
+                .child("Skills Marketplace"),
         )
         .child(installed_count_badge(enabled_count, total_count, theme))
 }

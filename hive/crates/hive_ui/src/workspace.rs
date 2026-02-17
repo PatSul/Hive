@@ -78,7 +78,7 @@ use hive_ui_panels::panels::{
     specs::{SpecPanelData, SpecsPanel},
     token_launch::{TokenLaunchData, TokenLaunchPanel},
     workflow_builder::{WorkflowBuilderView, WorkflowSaved, WorkflowRunRequested},
-    channels::{ChannelsView, ChannelMessageSent},
+    channels::{ChannelsView, ChannelCreated, ChannelMessageSent},
 };
 use crate::statusbar::{ConnectivityDisplay, StatusBar};
 use crate::titlebar::Titlebar;
@@ -411,6 +411,35 @@ impl HiveWorkspace {
                     event.assigned_agents.clone(),
                     cx,
                 );
+            },
+        )
+        .detach();
+
+        // Handle new channel creation from the channels panel.
+        cx.subscribe_in(
+            &channels_view,
+            window,
+            |this, _view, event: &ChannelCreated, _window, cx| {
+                info!("New channel created: {}", event.name);
+
+                let mut new_id = String::new();
+                if cx.has_global::<AppChannels>() {
+                    // Derive a simple icon from the channel name.
+                    let icon = "\u{1F4AC}"; // 💬
+                    let description = format!("Custom channel: {}", event.name);
+                    new_id = cx
+                        .global_mut::<AppChannels>()
+                        .0
+                        .create_channel(&event.name, icon, &description, event.agents.clone());
+                }
+
+                // Refresh the channels view to show the new channel and select it.
+                this.refresh_channels_view(cx);
+                if !new_id.is_empty() {
+                    this.channels_view.update(cx, |view, cx| {
+                        view.select_channel(&new_id, cx);
+                    });
+                }
             },
         )
         .detach();
@@ -901,7 +930,7 @@ impl HiveWorkspace {
                 .collect();
         }
 
-        // Populate directory from the built-in ClawdHub catalog.
+        // Populate directory from all connected skill sources.
         let catalog = hive_agents::skill_marketplace::SkillMarketplace::default_directory();
         let mut directory = Vec::new();
         for (idx, available) in catalog.iter().enumerate() {
@@ -916,15 +945,27 @@ impl HiveWorkspace {
                 MpCat::Communication => UiCat::Productivity,
                 MpCat::Custom => UiCat::Other,
             };
+            // Derive author from the repo URL domain.
+            let author = if available.repo_url.contains("anthropic.com") {
+                "Anthropic"
+            } else if available.repo_url.contains("openai.com") {
+                "OpenAI"
+            } else if available.repo_url.contains("google.dev") {
+                "Google"
+            } else if available.repo_url.contains("hive-community") {
+                "Community"
+            } else {
+                "ClawdHub"
+            };
             let is_installed = installed_triggers.contains(&available.trigger);
             directory.push(DirectorySkill {
                 id: available.name.clone(),
                 name: available.name.clone(),
                 description: available.description.clone(),
-                author: "ClawdHub".to_string(),
+                author: author.to_string(),
                 version: "1.0.0".to_string(),
-                downloads: (12_400 - idx * 800).max(1_000),
-                rating: 4.8 - (idx as f32 * 0.1),
+                downloads: (12_400 - idx * 300).max(800),
+                rating: 4.8 - (idx as f32 * 0.03),
                 category: ui_category,
                 installed: is_installed,
             });
@@ -932,13 +973,40 @@ impl HiveWorkspace {
         self.skills_data.directory = directory;
         self.skills_data.installed = installed;
 
-        // Add the default ClawdHub source if none are configured.
+        // Add default skill sources if none are configured.
         if self.skills_data.sources.is_empty() {
-            self.skills_data.sources.push(UiSource {
-                url: "https://clawdhub.hive.dev/registry".into(),
-                name: "ClawdHub Official".into(),
-                skill_count: catalog.len(),
-            });
+            let clawdhub_count = catalog.iter().filter(|s| s.repo_url.contains("clawdhub.hive.dev")).count();
+            let anthropic_count = catalog.iter().filter(|s| s.repo_url.contains("anthropic.com")).count();
+            let openai_count = catalog.iter().filter(|s| s.repo_url.contains("openai.com")).count();
+            let google_count = catalog.iter().filter(|s| s.repo_url.contains("google.dev")).count();
+            let community_count = catalog.iter().filter(|s| s.repo_url.contains("hive-community")).count();
+            self.skills_data.sources.extend([
+                UiSource {
+                    url: "https://clawdhub.hive.dev/registry".into(),
+                    name: "ClawdHub".into(),
+                    skill_count: clawdhub_count,
+                },
+                UiSource {
+                    url: "https://skills.anthropic.com".into(),
+                    name: "Anthropic Official".into(),
+                    skill_count: anthropic_count,
+                },
+                UiSource {
+                    url: "https://skills.openai.com".into(),
+                    name: "OpenAI Official".into(),
+                    skill_count: openai_count,
+                },
+                UiSource {
+                    url: "https://skills.google.dev".into(),
+                    name: "Google Official".into(),
+                    skill_count: google_count,
+                },
+                UiSource {
+                    url: "https://github.com/hive-community/skills".into(),
+                    name: "Community".into(),
+                    skill_count: community_count,
+                },
+            ]);
         }
     }
 

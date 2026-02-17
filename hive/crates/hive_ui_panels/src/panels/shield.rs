@@ -435,15 +435,31 @@ fn render_policies_section(policies: &[PolicyDisplay], theme: &HiveTheme) -> Any
     if policies.is_empty() {
         section = section.child(
             div()
-                .py(theme.space_4)
-                .flex()
-                .items_center()
-                .justify_center()
+                .py(theme.space_3)
+                .flex_col()
+                .gap(theme.space_2)
                 .child(
                     div()
                         .text_size(theme.font_size_sm)
+                        .text_color(theme.text_secondary)
+                        .child("Default policies are active. All outbound requests pass through HiveShield's 4-layer protection:"),
+                )
+                .child(
+                    div()
+                        .pl(theme.space_3)
+                        .flex_col()
+                        .gap(theme.space_1)
+                        .child(div().text_size(theme.font_size_xs).text_color(theme.text_muted).child("• PII detection — 11+ sensitive data types"))
+                        .child(div().text_size(theme.font_size_xs).text_color(theme.text_muted).child("• Secrets scanning — API keys, tokens, credentials"))
+                        .child(div().text_size(theme.font_size_xs).text_color(theme.text_muted).child("• Vulnerability assessment — injection & jailbreak detection"))
+                        .child(div().text_size(theme.font_size_xs).text_color(theme.text_muted).child("• Access control — PII cloaking required for cloud providers")),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
                         .text_color(theme.text_muted)
-                        .child("No access policies configured."),
+                        .pt(theme.space_1)
+                        .child("Local providers (Ollama, LM Studio) are fully trusted. Cloud providers require PII cloaking and are limited to Internal classification."),
                 ),
         );
     } else {

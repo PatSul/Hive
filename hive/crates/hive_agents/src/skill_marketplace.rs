@@ -444,13 +444,16 @@ impl SkillMarketplace {
 
     // -- directory (built-in catalog) ----------------------------------------
 
-    /// Return the built-in ClawdHub skill directory catalog.
+    /// Return the built-in skill directory catalog from all connected sources.
     ///
-    /// This provides a curated set of skills available for installation without
-    /// requiring a network connection. Skills in this catalog can be installed
-    /// via `install_skill()`.
+    /// This provides a curated set of skills from multiple official directories
+    /// available for installation without requiring a network connection. Skills
+    /// in this catalog can be installed via `install_skill()`.
     pub fn default_directory() -> Vec<AvailableSkill> {
-        vec![
+        let mut skills = Vec::with_capacity(40);
+
+        // -- ClawdHub (Hive community) ----------------------------------------
+        skills.extend_from_slice(&[
             AvailableSkill {
                 name: "API Designer".into(),
                 trigger: "/api-design".into(),
@@ -535,7 +538,179 @@ impl SkillMarketplace {
                 repo_url: "https://clawdhub.hive.dev/skills/arch-diagram".into(),
                 category: SkillCategory::Documentation,
             },
-        ]
+            AvailableSkill {
+                name: "Regex Builder".into(),
+                trigger: "/regex".into(),
+                description: "Build, test, and explain regular expressions from natural language descriptions.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/regex-builder".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Error Handler".into(),
+                trigger: "/error-handling".into(),
+                description: "Add comprehensive error handling, retry logic, and fallback patterns to existing code.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/error-handler".into(),
+                category: SkillCategory::Refactoring,
+            },
+            AvailableSkill {
+                name: "SQL Optimizer".into(),
+                trigger: "/sql-optimize".into(),
+                description: "Analyze SQL queries for performance issues and suggest index strategies and rewrites.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/sql-optimizer".into(),
+                category: SkillCategory::Analysis,
+            },
+            AvailableSkill {
+                name: "Git Bisect Helper".into(),
+                trigger: "/bisect".into(),
+                description: "Automate git bisect workflows to identify the exact commit that introduced a bug.".into(),
+                repo_url: "https://clawdhub.hive.dev/skills/git-bisect".into(),
+                category: SkillCategory::Analysis,
+            },
+        ]);
+
+        // -- Anthropic Official -----------------------------------------------
+        skills.extend_from_slice(&[
+            AvailableSkill {
+                name: "Claude Prompt Engineer".into(),
+                trigger: "/prompt-eng".into(),
+                description: "Optimize prompts for Claude models with best-practice techniques, XML tags, and chain-of-thought.".into(),
+                repo_url: "https://skills.anthropic.com/prompt-engineer".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Claude Tool Builder".into(),
+                trigger: "/tool-builder".into(),
+                description: "Create and validate tool-use schemas for Claude's function calling with type-safe definitions.".into(),
+                repo_url: "https://skills.anthropic.com/tool-builder".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "MCP Server Scaffold".into(),
+                trigger: "/mcp-scaffold".into(),
+                description: "Scaffold Model Context Protocol servers with typed tools, resources, and transport handlers.".into(),
+                repo_url: "https://skills.anthropic.com/mcp-scaffold".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Safety Evaluator".into(),
+                trigger: "/safety-eval".into(),
+                description: "Evaluate prompts and outputs against Anthropic's usage policies and safety guidelines.".into(),
+                repo_url: "https://skills.anthropic.com/safety-evaluator".into(),
+                category: SkillCategory::Security,
+            },
+            AvailableSkill {
+                name: "Context Window Optimizer".into(),
+                trigger: "/ctx-optimize".into(),
+                description: "Analyze and optimize context window usage with smart chunking, summarization, and RAG strategies.".into(),
+                repo_url: "https://skills.anthropic.com/context-optimizer".into(),
+                category: SkillCategory::Analysis,
+            },
+        ]);
+
+        // -- OpenAI Official --------------------------------------------------
+        skills.extend_from_slice(&[
+            AvailableSkill {
+                name: "GPT Prompt Optimizer".into(),
+                trigger: "/gpt-optimize".into(),
+                description: "Optimize prompts for OpenAI models with structured outputs, function calling, and token efficiency.".into(),
+                repo_url: "https://skills.openai.com/prompt-optimizer".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Embeddings Pipeline".into(),
+                trigger: "/embeddings".into(),
+                description: "Build text embedding pipelines for semantic search, clustering, and RAG with OpenAI models.".into(),
+                repo_url: "https://skills.openai.com/embeddings-pipeline".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Function Schema Generator".into(),
+                trigger: "/fn-schema".into(),
+                description: "Generate JSON Schema function definitions for OpenAI function calling from code signatures.".into(),
+                repo_url: "https://skills.openai.com/function-schema".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Fine-Tune Data Prep".into(),
+                trigger: "/finetune-prep".into(),
+                description: "Prepare and validate JSONL training datasets for OpenAI fine-tuning with quality checks.".into(),
+                repo_url: "https://skills.openai.com/finetune-prep".into(),
+                category: SkillCategory::Analysis,
+            },
+        ]);
+
+        // -- Google Official --------------------------------------------------
+        skills.extend_from_slice(&[
+            AvailableSkill {
+                name: "Gemini Multimodal".into(),
+                trigger: "/gemini-multi".into(),
+                description: "Build multimodal prompts combining text, images, audio, and video for Gemini models.".into(),
+                repo_url: "https://skills.google.dev/gemini-multimodal".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Vertex AI Pipeline".into(),
+                trigger: "/vertex-pipeline".into(),
+                description: "Create Vertex AI ML pipelines with data preprocessing, training, and deployment stages.".into(),
+                repo_url: "https://skills.google.dev/vertex-pipeline".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Firebase Rules Generator".into(),
+                trigger: "/firebase-rules".into(),
+                description: "Generate and validate Firebase security rules from natural language access policies.".into(),
+                repo_url: "https://skills.google.dev/firebase-rules".into(),
+                category: SkillCategory::Security,
+            },
+        ]);
+
+        // -- Community --------------------------------------------------------
+        skills.extend_from_slice(&[
+            AvailableSkill {
+                name: "Docker Compose Builder".into(),
+                trigger: "/docker-compose".into(),
+                description: "Generate Docker Compose configurations from project structure with networking, volumes, and health checks.".into(),
+                repo_url: "https://github.com/hive-community/skills/docker-compose".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Terraform Module".into(),
+                trigger: "/terraform".into(),
+                description: "Generate Terraform modules for AWS, GCP, and Azure with best-practice patterns and variables.".into(),
+                repo_url: "https://github.com/hive-community/skills/terraform".into(),
+                category: SkillCategory::CodeGeneration,
+            },
+            AvailableSkill {
+                name: "Unit Test Generator".into(),
+                trigger: "/test-gen".into(),
+                description: "Generate comprehensive unit tests with edge cases, mocking, and coverage targets for any language.".into(),
+                repo_url: "https://github.com/hive-community/skills/test-gen".into(),
+                category: SkillCategory::Testing,
+            },
+            AvailableSkill {
+                name: "README Generator".into(),
+                trigger: "/readme".into(),
+                description: "Generate professional README files from project analysis with badges, examples, and API docs.".into(),
+                repo_url: "https://github.com/hive-community/skills/readme-gen".into(),
+                category: SkillCategory::Documentation,
+            },
+            AvailableSkill {
+                name: "Commit Message Writer".into(),
+                trigger: "/commit-msg".into(),
+                description: "Generate conventional commit messages from staged diffs with scope detection and breaking change flags.".into(),
+                repo_url: "https://github.com/hive-community/skills/commit-msg".into(),
+                category: SkillCategory::Communication,
+            },
+            AvailableSkill {
+                name: "Code Translator".into(),
+                trigger: "/translate-code".into(),
+                description: "Translate code between programming languages while preserving idioms and best practices.".into(),
+                repo_url: "https://github.com/hive-community/skills/code-translator".into(),
+                category: SkillCategory::Refactoring,
+            },
+        ]);
+
+        skills
     }
 
     /// List all skills available in the directory (built-in catalog).
