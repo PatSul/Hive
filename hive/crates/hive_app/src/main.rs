@@ -23,7 +23,8 @@ use hive_ui::globals::{
     AppChannels, AppCli, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppGcp, AppGitLab,
     AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace,
     AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas, AppProjectManagement,
-    AppRpcConfig, AppSecurity, AppShield, AppSkills, AppSpecs, AppTts, AppUpdater, AppWallets,
+    AppRpcConfig, AppScheduler, AppSecurity, AppShield, AppSkills, AppSpecs, AppTts, AppUpdater,
+    AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
@@ -270,6 +271,33 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         Err(e) => {
             error!("AssistantService init failed: {e}");
         }
+    }
+
+    // Scheduler + tick driver — cron jobs and reminder checks once per minute.
+    //
+    // The Scheduler lives in an Arc<Mutex<>> so the background tick-driver
+    // thread can call tick() while the main thread retains access for
+    // add/remove operations.  The tick driver opens its own AssistantStorage
+    // connection for ReminderService to avoid contention with the main thread.
+    {
+        let scheduler_path = HiveConfig::base_dir()
+            .map(|d| d.join("scheduler.json"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("scheduler.json"));
+        let scheduler = hive_core::scheduler::Scheduler::load_from_file(&scheduler_path)
+            .unwrap_or_else(|e| {
+                warn!("Scheduler load failed, starting empty: {e}");
+                hive_core::scheduler::Scheduler::new()
+            });
+        let scheduler = std::sync::Arc::new(std::sync::Mutex::new(scheduler));
+        cx.set_global(AppScheduler(std::sync::Arc::clone(&scheduler)));
+        info!("Scheduler initialized");
+
+        let tick_config = hive_assistant::tick_driver::TickDriverConfig {
+            interval: Duration::from_secs(60),
+            assistant_db_path: assistant_db_str.clone(),
+        };
+        hive_assistant::tick_driver::start_tick_driver(scheduler, tick_config);
+        info!("Tick driver started (scheduler + reminders, 60s interval)");
     }
 
     // Wallet store — load existing wallets or start empty.

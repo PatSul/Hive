@@ -2,8 +2,10 @@ pub mod approval;
 pub mod calendar;
 pub mod email;
 pub mod plugin;
+pub mod plugins;
 pub mod reminders;
 pub mod storage;
+pub mod tick_driver;
 
 use std::sync::Arc;
 use std::path::Path;
@@ -20,6 +22,7 @@ pub use approval::{ApprovalLevel, ApprovalRequest, ApprovalStatus};
 pub use calendar::UnifiedEvent;
 pub use email::{EmailDigest, EmailProvider, UnifiedEmail};
 pub use plugin::{AssistantCapability, AssistantPlugin};
+pub use plugins::{PluginRegistry, ReminderPlugin};
 pub use reminders::{Reminder, ReminderStatus, ReminderTrigger, TriggeredReminder as TriggeredRem};
 
 /// The central coordination point for the assistant subsystem.
@@ -38,6 +41,7 @@ pub struct AssistantService {
     pub calendar_service: CalendarService,
     pub reminder_service: ReminderService,
     pub approval_service: ApprovalService,
+    pub plugin_registry: PluginRegistry,
 }
 
 impl AssistantService {
@@ -78,6 +82,7 @@ impl AssistantService {
             calendar_service,
             reminder_service: ReminderService::new(Arc::clone(&storage)),
             approval_service: ApprovalService::new(Arc::clone(&storage)),
+            plugin_registry: PluginRegistry::with_defaults(),
             storage,
         }
     }

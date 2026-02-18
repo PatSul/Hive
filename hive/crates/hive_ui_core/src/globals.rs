@@ -4,7 +4,7 @@
 //! (which reads them) and the bootstrap code (which sets them) share the same
 //! types.  Each wrapper is a newtype around the service it wraps.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use gpui::Global;
 
@@ -20,6 +20,7 @@ use hive_assistant::AssistantService;
 use hive_blockchain::rpc_config::RpcConfigStore;
 use hive_blockchain::wallet_store::WalletStore;
 use hive_core::channels::ChannelStore;
+use hive_core::scheduler::Scheduler;
 use hive_network::HiveNode;
 use hive_core::config::ConfigManager;
 use hive_core::notifications::NotificationStore;
@@ -105,6 +106,14 @@ impl Global for AppCli {}
 /// Global wrapper for the assistant service (email, calendar, reminders).
 pub struct AppAssistant(pub AssistantService);
 impl Global for AppAssistant {}
+
+/// Global wrapper for the cron-based task scheduler.
+///
+/// Wrapped in `Arc<Mutex<_>>` so the background tick driver thread can call
+/// `Scheduler::tick()` while the GPUI main thread retains read/write access
+/// for adding and removing jobs.
+pub struct AppScheduler(pub Arc<Mutex<Scheduler>>);
+impl Global for AppScheduler {}
 
 /// Global wrapper for the wallet store (blockchain accounts).
 pub struct AppWallets(pub WalletStore);

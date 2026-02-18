@@ -38,10 +38,12 @@ pub use ide::{
     Symbol, SymbolKind, WorkspaceInfo,
 };
 pub use messaging::{
-    Attachment, Channel, CrossChannelService, DiscordProvider, IncomingMessage, MatrixProvider,
-    MessagingHub, MessagingProvider, Platform, SentMessage, SlackProvider, TeamsProvider,
-    TelegramProvider, WebChatProvider,
+    Attachment, Channel, CrossChannelService, DiscordProvider, GoogleChatProvider, IncomingMessage,
+    MatrixProvider, MessagingHub, MessagingProvider, Platform, SentMessage, SignalProvider,
+    SlackProvider, TeamsProvider, TelegramProvider, WebChatProvider, WhatsAppProvider,
 };
+#[cfg(target_os = "macos")]
+pub use messaging::IMessageProvider;
 pub use microsoft::outlook_calendar::OutlookCalendarClient;
 pub use microsoft::outlook_email::OutlookEmailClient;
 pub use project_management::{

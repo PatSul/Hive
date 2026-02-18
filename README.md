@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.2-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.3-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-3%2C046-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-16-blue" alt="Crates" />
@@ -43,13 +43,13 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 
 ### Development Excellence
 - Multi-agent swarm (Queen + teams)
-- 11 AI providers with capability-aware routing
+- 10 AI providers with capability-aware routing
 - Git worktree isolation per team
 - Full Git Ops (commits, PRs, branches, gitflow, LFS)
 - Context engine (TF-IDF scoring + RAG)
 - Cost tracking & budget enforcement
 - Code review & testing automation
-- Skills Marketplace (43+ skills from 5 sources)
+- Skills Marketplace (15 built-in skills from 5 sources)
 - Autonomous skill acquisition (self-teaching)
 - Automation workflows (cron, event, webhook triggers)
 - Docker & Kubernetes orchestration
@@ -123,7 +123,7 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 
 ### AI Providers
 
-11 providers with **capability-aware routing** and fallback:
+10 providers with **capability-aware routing** and fallback:
 
 | Cloud | Local |
 |---|---|
@@ -224,7 +224,8 @@ The assistant uses the same AI infrastructure as the development platform — sa
 | **Approvals** | Multi-level workflows (Low / Medium / High / Critical). Submit, approve, reject with severity tracking. |
 | **Documents** | Generate CSV, DOCX, XLSX, HTML, Markdown, PDF, and PPTX from templates or AI. |
 | **Smart Home** | Philips Hue control — lighting scenes, routines, individual light states. |
-| **Plugins** | `AssistantPlugin` trait for community extensibility. |
+| **Plugins** | `AssistantPlugin` trait with `PluginRegistry`. First production plugin: `ReminderPlugin`. |
+| **Scheduler** | Background tick driver (60-second interval) for automated reminders and recurring tasks. Native OS thread with dedicated tokio runtime. |
 
 ---
 
@@ -291,7 +292,7 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 | Feature | Details |
 |---|---|
 | **Automation Workflows** | Multi-step workflows with triggers (manual, cron schedule, event, webhook) and 6 action types (run command, send message, call API, create task, send notification, execute skill). YAML-based definitions in `~/.hive/workflows/`. Visual drag-and-drop workflow builder in the UI. |
-| **Skills Marketplace** | Browse, install, remove, and toggle skills from 5 sources (ClawdHub, Anthropic, OpenAI, Google, Community). Create custom skills. Add remote skill sources. 43+ built-in skills including 9 integration skills (/slack, /jira, /notion, /db, /docker, /k8s, /deploy, /browse, /index-docs). Security scanning on install. |
+| **Skills Marketplace** | Browse, install, remove, and toggle skills from 5 sources (ClawdHub, Anthropic, OpenAI, Google, Community). Create custom skills. Add remote skill sources. 15 built-in skills including 9 integration skills (/slack, /jira, /notion, /db, /docker, /k8s, /deploy, /browse, /index-docs). Security scanning on install. |
 | **Autonomous Skill Creation** | When Hive encounters an unfamiliar domain, it searches existing skill sources first, then researches documentation and authors a new skill if nothing sufficient exists. See [Autonomous Skill Acquisition](#autonomous-skill-acquisition). |
 | **Personas** | Named agent personalities with custom system prompts, prompt overrides per task type, and configurable model preferences. |
 | **Auto-Commit** | Watches for staged changes and generates AI-powered commit messages. |
@@ -334,7 +335,7 @@ All integrations make **real API calls** to their respective services. Blockchai
 <table>
 <tr><td><strong>Google</strong></td><td>Gmail (REST API), Calendar, Contacts, Drive, Docs, Sheets, Tasks</td></tr>
 <tr><td><strong>Microsoft</strong></td><td>Outlook Email (Graph v1.0), Outlook Calendar</td></tr>
-<tr><td><strong>Messaging</strong></td><td>Slack (Web API), Discord, Teams, Telegram, Matrix, WebChat</td></tr>
+<tr><td><strong>Messaging</strong></td><td>Slack (Web API), Discord, Teams, Telegram, Matrix, WebChat, WhatsApp (Business Cloud API), Signal, Google Chat, iMessage (macOS)</td></tr>
 <tr><td><strong>Git Hosting</strong></td><td>GitHub (REST API), GitLab (REST API), Bitbucket (REST API v2.0)</td></tr>
 <tr><td><strong>Cloud Platforms</strong></td><td>AWS (EC2, S3, Lambda, CloudWatch), Azure (VMs, Blob, Functions, Monitor), GCP (Compute, Storage, Functions, Logging)</td></tr>
 <tr><td><strong>Databases</strong></td><td>PostgreSQL, MySQL, SQLite — query execution, schema introspection, connection pooling</td></tr>
@@ -398,7 +399,7 @@ hive/crates/
 │                      42 files · 26,256 lines
 ├── hive_core          Config, SecurityGateway, persistence (SQLite), Kanban, channels, scheduling
 │                      18 files · 9,808 lines
-├── hive_ai            11 AI providers, capability-aware router, complexity classifier, context engine, RAG
+├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine, RAG
 │                      41 files · 19,732 lines
 ├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (19 tools), skills,
 │                      personas, knowledge acquisition, competence detection, skill authoring
@@ -446,7 +447,7 @@ hive_app
 
 ---
 
-## UI — 20+ Panels
+## UI — 21 Panels
 
 All panels are wired to live backend data. No mock data in the production path.
 
@@ -604,7 +605,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.2 |
+| Version | 0.3.3 |
 | Crates | 16 |
 | Rust source files | 280 |
 | Lines of Rust | 150,285 |
@@ -618,6 +619,22 @@ Configure provider preferences, model routing rules, budget limits, and security
 ---
 
 ## Changelog
+
+### v0.3.3
+
+**Security Hardening + Messaging Expansion + Module Wiring + Site Overhaul**
+
+- **Security fixes**: Eliminated command injection in deploy trigger (now uses safe `Command::env()` API), hardened iMessage provider against AppleScript and SQL injection with input validation and comprehensive escaping, added multi-statement SQL injection guard on database queries, added CSP and security headers to website
+- **4 new messaging providers**: WhatsApp (Business Cloud API), Signal (CLI REST API), Google Chat (Workspace API), iMessage (macOS AppleScript + chat.db) — all with full MessagingProvider trait implementation and comprehensive test suites
+- **Module wiring**: Connected 11 previously unwired modules to the application — Guardian (AI output safety), HiveLoop, FleetLearning, RAG, SemanticSearch, Enterprise, Canvas, Webhooks, PhilipsHue smart home, ClawdTalk voice, AssistantPlugin system
+- **Scheduler tick driver**: Background OS thread with 60-second tokio interval timer drives scheduler and reminder service ticks
+- **Plugin system**: PluginRegistry with `with_defaults()` auto-loading ReminderPlugin — first production AssistantPlugin implementation
+- **Blockchain labeling**: Deploy functions now clearly labeled as simulation mode with SIM_ prefixed identifiers and `simulated: true` field
+- **Real ERC-20 bytecode**: Replaced placeholder with compiled Solidity 0.8.20 minimal ERC-20 contract
+- **Integration stub improvements**: WiringReport tracks handler wiring success/failure, stubs return `"status": "not_connected"` for better UX
+- **Code quality**: Fixed ~30 runtime unwrap() calls, added model-specific cost estimation table, benchmark staleness warning, proper error handling throughout
+- **Website performance**: Added loading.tsx skeletons, Suspense boundaries, dynamic imports for heavy components, honeycomb animation throttling (prefers-reduced-motion, IntersectionObserver, 30fps mobile), image dimension fixes, sizes props
+- **Website consistency**: Corrected all stats (15 skills, 21 panels, 10 providers), fixed copyright to Airglow LLC, absolute anchor paths, Fragment key fix, localStorage error handling, ESLint config, PWA manifest fields, apple-touch-icon PNG
 
 ### v0.3.2
 

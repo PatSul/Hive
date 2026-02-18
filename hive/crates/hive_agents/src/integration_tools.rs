@@ -34,6 +34,9 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
             if !query.trim_start().to_lowercase().starts_with("select") {
                 return Err("Only SELECT queries are allowed for safety".into());
             }
+            if query.contains(';') {
+                return Err("Semicolons are not allowed in queries — multi-statement execution is blocked for safety".into());
+            }
             Ok(json!({
                 "connection": args["connection"].as_str().unwrap_or("default"),
                 "query": query,
@@ -196,6 +199,9 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
             let query = args["query"].as_str().unwrap_or("").to_string();
             if !query.trim_start().to_lowercase().starts_with("select") {
                 return Err("Only SELECT queries are allowed for safety".into());
+            }
+            if query.contains(';') {
+                return Err("Semicolons are not allowed in queries — multi-statement execution is blocked for safety".into());
             }
             let svc = Arc::clone(&svc);
             block_on_async(async move {
@@ -389,59 +395,80 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         let environment = args["environment"].as_str().unwrap_or("staging").to_string();
         let branch = args["branch"].as_str().unwrap_or("main").to_string();
 
+        // Validate inputs: only allow safe characters to prevent any injection.
+        if !is_safe_deploy_param(&environment) {
+            return Err("Invalid environment: only alphanumeric characters, '.', '_', and '-' are allowed".into());
+        }
+        if !is_safe_deploy_param(&branch) {
+            return Err("Invalid branch: only alphanumeric characters, '.', '_', '-', and '/' are allowed".into());
+        }
+
         // Try common deployment dispatch mechanisms in order of preference:
         // 1. deploy.sh in current directory
         // 2. Makefile "deploy" target
         // 3. GitHub Actions via `gh workflow run`
-        let deploy_result = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "if [ -f deploy.sh ]; then \
-                    DEPLOY_ENV='{env}' DEPLOY_BRANCH='{branch}' bash deploy.sh 2>&1; \
-                elif [ -f Makefile ] && grep -q '^deploy:' Makefile 2>/dev/null; then \
-                    DEPLOY_ENV='{env}' DEPLOY_BRANCH='{branch}' make deploy 2>&1; \
-                elif command -v gh >/dev/null 2>&1; then \
-                    gh workflow run deploy.yml -f environment='{env}' -f branch='{branch}' 2>&1; \
-                else \
-                    echo '__NO_DEPLOY_MECHANISM__'; \
-                fi",
-                env = environment,
-                branch = branch,
-            ))
-            .output();
+        //
+        // Each mechanism is invoked directly without `sh -c` to avoid shell
+        // injection. Environment variables and arguments are passed via the
+        // safe `Command` builder API.
 
-        match deploy_result {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-                if stdout.contains("__NO_DEPLOY_MECHANISM__") {
-                    Ok(json!({
-                        "status": "no_deploy_mechanism",
-                        "environment": environment,
-                        "branch": branch,
-                        "note": "No deploy.sh, Makefile deploy target, or gh CLI found. Add a deploy.sh to your project root or configure a GitHub Actions deploy workflow."
-                    }))
-                } else if output.status.success() {
-                    Ok(json!({
-                        "status": "triggered",
-                        "environment": environment,
-                        "branch": branch,
-                        "output": if stdout.len() > 500 { stdout[..500].to_string() } else { stdout },
-                        "note": "Deployment initiated successfully."
-                    }))
-                } else {
-                    Ok(json!({
-                        "status": "failed",
-                        "environment": environment,
-                        "branch": branch,
-                        "error": if stderr.is_empty() { stdout } else { stderr },
-                        "exit_code": output.status.code()
-                    }))
-                }
-            }
-            Err(e) => Err(format!("Failed to execute deploy command: {e}")),
+        if std::path::Path::new("deploy.sh").exists() {
+            let deploy_result = std::process::Command::new("bash")
+                .arg("deploy.sh")
+                .env("DEPLOY_ENV", &environment)
+                .env("DEPLOY_BRANCH", &branch)
+                .output();
+            return format_deploy_output(deploy_result, &environment, &branch);
         }
+
+        if std::path::Path::new("Makefile").exists() {
+            // Check if the Makefile has a deploy target (safe: no user input in this command).
+            let has_deploy_target = std::process::Command::new("grep")
+                .arg("-q")
+                .arg("^deploy:")
+                .arg("Makefile")
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+
+            if has_deploy_target {
+                let deploy_result = std::process::Command::new("make")
+                    .arg("deploy")
+                    .env("DEPLOY_ENV", &environment)
+                    .env("DEPLOY_BRANCH", &branch)
+                    .output();
+                return format_deploy_output(deploy_result, &environment, &branch);
+            }
+        }
+
+        // Check if gh CLI is available (safe: no user input).
+        let gh_available = std::process::Command::new("gh")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        if gh_available {
+            let deploy_result = std::process::Command::new("gh")
+                .arg("workflow")
+                .arg("run")
+                .arg("deploy.yml")
+                .arg("-f")
+                .arg(format!("environment={}", environment))
+                .arg("-f")
+                .arg(format!("branch={}", branch))
+                .output();
+            return format_deploy_output(deploy_result, &environment, &branch);
+        }
+
+        Ok(json!({
+            "status": "no_deploy_mechanism",
+            "environment": environment,
+            "branch": branch,
+            "note": "No deploy.sh, Makefile deploy target, or gh CLI found. Add a deploy.sh to your project root or configure a GitHub Actions deploy workflow."
+        }))
     }) as ToolHandler));
 
     tools
@@ -469,11 +496,11 @@ pub struct IntegrationServices {
 fn send_message_tool() -> McpTool {
     McpTool {
         name: "send_message".into(),
-        description: "Send a message via Slack, Discord, or Teams".into(),
+        description: "Send a message via Slack, Discord, Teams, Telegram, Matrix, WebChat, WhatsApp, Signal, Google Chat, or iMessage".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "platform": { "type": "string", "enum": ["slack", "discord", "teams"] },
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] },
                 "channel": { "type": "string", "description": "Channel name or ID" },
                 "message": { "type": "string", "description": "Message content" }
             },
@@ -664,6 +691,47 @@ fn deploy_trigger_tool() -> McpTool {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Validate that a deploy parameter contains only safe characters.
+///
+/// Allows alphanumeric characters, '.', '_', '-', and '/' (for branch names
+/// like `feature/foo`). Rejects empty strings and anything else.
+fn is_safe_deploy_param(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+}
+
+/// Format the output of a deploy command into a JSON result.
+fn format_deploy_output(
+    result: std::io::Result<std::process::Output>,
+    environment: &str,
+    branch: &str,
+) -> Result<serde_json::Value, String> {
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+            if output.status.success() {
+                Ok(json!({
+                    "status": "triggered",
+                    "environment": environment,
+                    "branch": branch,
+                    "output": if stdout.len() > 500 { stdout[..500].to_string() } else { stdout },
+                    "note": "Deployment initiated successfully."
+                }))
+            } else {
+                Ok(json!({
+                    "status": "failed",
+                    "environment": environment,
+                    "branch": branch,
+                    "error": if stderr.is_empty() { stdout } else { stderr },
+                    "exit_code": output.status.code()
+                }))
+            }
+        }
+        Err(e) => Err(format!("Failed to execute deploy command: {e}")),
+    }
+}
 
 /// Create a stub handler that returns a note.
 fn stub(note: &'static str) -> ToolHandler {
