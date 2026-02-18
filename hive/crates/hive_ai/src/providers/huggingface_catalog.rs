@@ -133,6 +133,7 @@ pub async fn fetch_huggingface_models(api_key: &str) -> Result<Vec<ModelInfo>, S
                 input_price_per_mtok: input_price,
                 output_price_per_mtok: output_price,
                 capabilities: Default::default(),
+                release_date: None,
             }
         })
         .collect();
@@ -194,6 +195,7 @@ mod tests {
                 input_price_per_mtok: 0.0,
                 output_price_per_mtok: 0.0,
                 capabilities: Default::default(),
+                release_date: None,
             }];
             cache.fetched_at = Some(Instant::now());
         }

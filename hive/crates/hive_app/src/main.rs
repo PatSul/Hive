@@ -116,6 +116,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         google_api_key: config.google_api_key.clone(),
         groq_api_key: config.groq_api_key.clone(),
         huggingface_api_key: config.huggingface_api_key.clone(),
+        xai_api_key: config.xai_api_key.clone(),
         litellm_url: config.litellm_url.clone(),
         litellm_api_key: config.litellm_api_key.clone(),
         ollama_url: config.ollama_url.clone(),
@@ -197,12 +198,14 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         }
     }
 
-    // Privacy shield — default config.
-    let shield = std::sync::Arc::new(hive_shield::HiveShield::new(
-        hive_shield::ShieldConfig::default(),
-    ));
+    // Privacy shield — load from persisted config.
+    let shield = std::sync::Arc::new(hive_shield::HiveShield::new(config.shield.clone()));
     cx.set_global(AppShield(shield));
-    info!("HiveShield initialized");
+    info!(
+        "HiveShield initialized (enabled={}, rules={})",
+        config.shield_enabled,
+        config.shield.user_rules.len()
+    );
 
     // TTS service — build from config keys.
     let tts_config = TtsServiceConfig {

@@ -983,6 +983,7 @@ impl CapabilityRouter {
             crate::types::ProviderType::Ollama => ProviderType::Ollama,
             crate::types::ProviderType::LMStudio => ProviderType::LMStudio,
             crate::types::ProviderType::GenericLocal => ProviderType::GenericLocal,
+            crate::types::ProviderType::XAI => ProviderType::XAI,
         }
     }
 }
@@ -1047,6 +1048,7 @@ mod tests {
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: ModelCapabilities::default(),
+            release_date: None,
         }
     }
 

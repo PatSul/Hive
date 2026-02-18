@@ -194,6 +194,7 @@ impl AiProvider for OllamaProvider {
                 input_price_per_mtok: 0.0,
                 output_price_per_mtok: 0.0,
                 capabilities: Default::default(),
+                release_date: None,
             })
             .collect()
     }

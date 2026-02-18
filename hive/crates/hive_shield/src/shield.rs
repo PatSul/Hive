@@ -11,13 +11,42 @@ use crate::vulnerability::{Assessment, VulnerabilityAssessor};
 // Types
 // ---------------------------------------------------------------------------
 
+/// A user-defined blocking rule — matches a regex pattern against outgoing
+/// messages and blocks them if the pattern is found.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserRule {
+    /// Unique identifier (UUID v4).
+    pub id: String,
+    /// Human-readable label shown in the UI.
+    pub name: String,
+    /// Regex pattern to match against outgoing text.
+    pub pattern: String,
+    /// Whether this rule is currently active.
+    pub active: bool,
+}
+
+impl UserRule {
+    /// Create a new active user rule with a generated UUID.
+    pub fn new(name: impl Into<String>, pattern: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.into(),
+            pattern: pattern.into(),
+            active: true,
+        }
+    }
+}
+
 /// Configuration for the unified shield.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ShieldConfig {
     pub pii_config: PiiConfig,
     pub enable_secret_scan: bool,
     pub enable_vulnerability_check: bool,
+    pub enable_pii_detection: bool,
     pub access_policies: HashMap<String, AccessPolicy>,
+    pub user_rules: Vec<UserRule>,
 }
 
 impl Default for ShieldConfig {
@@ -26,7 +55,9 @@ impl Default for ShieldConfig {
             pii_config: PiiConfig::default(),
             enable_secret_scan: true,
             enable_vulnerability_check: true,
+            enable_pii_detection: true,
             access_policies: HashMap::new(),
+            user_rules: Vec::new(),
         }
     }
 }
@@ -138,6 +169,27 @@ impl HiveShield {
             };
         }
 
+        // 1b. Custom user rules.
+        for rule in &self.config.user_rules {
+            if !rule.active {
+                continue;
+            }
+            if let Ok(re) = regex::Regex::new(&rule.pattern) {
+                if re.is_match(text) {
+                    return ShieldResult {
+                        action: ShieldAction::Block(format!(
+                            "Blocked by custom rule: {}",
+                            rule.name
+                        )),
+                        pii_found: Vec::new(),
+                        secrets_found,
+                        assessment: None,
+                        processing_time_ms: start.elapsed().as_millis() as u64,
+                    };
+                }
+            }
+        }
+
         // 2. Vulnerability assessment.
         let assessment = if self.config.enable_vulnerability_check {
             Some(self.vulnerability_assessor.assess_prompt(text))
@@ -161,7 +213,11 @@ impl HiveShield {
             }
 
         // 3. PII detection.
-        let pii_found = self.pii_detector.detect(text);
+        let pii_found = if self.config.enable_pii_detection {
+            self.pii_detector.detect(text)
+        } else {
+            Vec::new()
+        };
         let contains_pii = !pii_found.is_empty();
         if contains_pii {
             self.pii_detections
@@ -315,7 +371,9 @@ mod tests {
             pii_config: PiiConfig::default(),
             enable_secret_scan: true,
             enable_vulnerability_check: true,
+            enable_pii_detection: true,
             access_policies: policies,
+            user_rules: Vec::new(),
         }
     }
 
@@ -392,5 +450,67 @@ mod tests {
         let result = shield.process_outgoing("Hello", "openai");
         // processing_time_ms should be non-negative (it is u64, always true).
         assert!(result.processing_time_ms < 10000); // sanity check
+    }
+
+    #[test]
+    fn user_rule_blocks_matching_text() {
+        let mut config = test_config();
+        config.user_rules.push(UserRule::new(
+            "Block company secrets",
+            r"(?i)project\s+phoenix",
+        ));
+        let shield = HiveShield::new(config);
+        let result = shield.process_outgoing("Tell me about Project Phoenix", "openai");
+        assert!(matches!(result.action, ShieldAction::Block(_)));
+        if let ShieldAction::Block(reason) = &result.action {
+            assert!(reason.contains("Block company secrets"));
+        }
+    }
+
+    #[test]
+    fn inactive_user_rule_does_not_block() {
+        let mut config = test_config();
+        let mut rule = UserRule::new("Inactive rule", r"(?i)project\s+phoenix");
+        rule.active = false;
+        config.user_rules.push(rule);
+        let shield = HiveShield::new(config);
+        let result = shield.process_outgoing("Tell me about Project Phoenix", "openai");
+        assert!(!matches!(result.action, ShieldAction::Block(_)));
+    }
+
+    #[test]
+    fn pii_detection_disabled_skips_detection() {
+        let mut config = test_config();
+        config.enable_pii_detection = false;
+        let shield = HiveShield::new(config);
+        let result = shield.process_outgoing("Contact alice@example.com about this.", "openai");
+        // With PII detection off, no PII should be found and message allowed.
+        assert!(result.pii_found.is_empty());
+        assert!(matches!(result.action, ShieldAction::Allow));
+    }
+
+    #[test]
+    fn shield_config_serde_round_trip() {
+        let mut config = test_config();
+        config.user_rules.push(UserRule::new("Test rule", r"secret\d+"));
+        config.enable_pii_detection = false;
+
+        let json = serde_json::to_string(&config).expect("serialize");
+        let parsed: ShieldConfig = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(parsed.enable_secret_scan, config.enable_secret_scan);
+        assert_eq!(parsed.enable_pii_detection, false);
+        assert_eq!(parsed.user_rules.len(), 1);
+        assert_eq!(parsed.user_rules[0].name, "Test rule");
+        assert!(parsed.user_rules[0].active);
+    }
+
+    #[test]
+    fn shield_config_default_deserializes_from_empty_json() {
+        let config: ShieldConfig = serde_json::from_str("{}").expect("deserialize");
+        assert!(config.enable_secret_scan);
+        assert!(config.enable_vulnerability_check);
+        assert!(config.enable_pii_detection);
+        assert!(config.user_rules.is_empty());
     }
 }

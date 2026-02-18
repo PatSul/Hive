@@ -7,7 +7,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement;
 
 use hive_core::channels::{ChannelMessage, ChannelStore, MessageAuthor};
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{AppTheme, HiveTheme};
 
 // ---------------------------------------------------------------------------
 // Events
@@ -104,8 +104,14 @@ impl ChannelsView {
             }
         }).detach();
 
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
         Self {
-            theme: HiveTheme::dark(),
+            theme,
             channels: Vec::new(),
             active_channel_id: None,
             messages: Vec::new(),
@@ -116,6 +122,12 @@ impl ChannelsView {
             create_channel_mode: false,
             new_channel_name: String::new(),
         }
+    }
+
+    /// Replace the cached theme and trigger a re-render.
+    pub fn set_theme(&mut self, theme: HiveTheme, cx: &mut Context<Self>) {
+        self.theme = theme;
+        cx.notify();
     }
 
     /// Refresh channel list from pre-extracted data (avoids borrow issues with

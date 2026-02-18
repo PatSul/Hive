@@ -8,7 +8,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use hive_ai::model_registry::MODEL_REGISTRY;
 use hive_ai::types::{ModelInfo, ModelTier, ProviderType};
 
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{AppTheme, HiveTheme};
 
 use crate::components::model_selector::FetchStatus;
 
@@ -116,8 +116,14 @@ impl ModelsBrowserView {
         )
         .detach();
 
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
         Self {
-            theme: HiveTheme::dark(),
+            theme,
             search_query: String::new(),
             search_input,
             active_provider_filter: None,
@@ -227,6 +233,12 @@ impl ModelsBrowserView {
             self.discovered_local_models = models;
             cx.notify();
         }
+    }
+
+    /// Replace the cached theme and trigger a re-render.
+    pub fn set_theme(&mut self, theme: HiveTheme, cx: &mut Context<Self>) {
+        self.theme = theme;
+        cx.notify();
     }
 
     /// Trigger live catalog fetches for all configured providers.
@@ -1653,6 +1665,8 @@ impl ModelsBrowserView {
         let mut tier_bg = tier_color;
         tier_bg.a = 0.15;
 
+        let age_label = model_age_label(&model.release_date);
+
         let ctx_k = model.context_window / 1000;
         let price = format!(
             "{}K ctx \u{00B7} ${:.2}/M in \u{00B7} ${:.2}/M out",
@@ -1719,6 +1733,15 @@ impl ModelsBrowserView {
                                         .rounded(theme.radius_full)
                                         .child("Local"),
                                 )
+                            })
+                            .when(age_label.is_some(), |el| {
+                                let label = age_label.clone().unwrap_or_default();
+                                el.child(
+                                    div()
+                                        .text_size(theme.font_size_xs)
+                                        .text_color(theme.text_muted)
+                                        .child(label),
+                                )
                             }),
                     )
                     .child(
@@ -1771,5 +1794,36 @@ fn tier_style(tier: ModelTier, theme: &HiveTheme) -> (Hsla, &'static str) {
         ModelTier::Budget => (theme.accent_green, "Budget"),
         ModelTier::Mid => (theme.accent_cyan, "Mid"),
         ModelTier::Premium => (theme.accent_pink, "Premium"),
+    }
+}
+
+/// Calculate a human-readable age string from an ISO 8601 release date.
+fn model_age_label(release_date: &Option<String>) -> Option<String> {
+    let date_str = release_date.as_deref()?;
+    let date = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()?;
+    let today = chrono::Utc::now().date_naive();
+    let days = (today - date).num_days();
+    if days < 0 {
+        return Some("unreleased".to_string());
+    }
+    if days == 0 {
+        return Some("today".to_string());
+    }
+    if days == 1 {
+        return Some("1 day old".to_string());
+    }
+    if days < 30 {
+        return Some(format!("{days}d old"));
+    }
+    let months = days / 30;
+    if months < 12 {
+        return Some(format!("{months}mo old"));
+    }
+    let years = months / 12;
+    let rem_months = months % 12;
+    if rem_months == 0 {
+        Some(format!("{years}y old"))
+    } else {
+        Some(format!("{years}y {rem_months}mo old"))
     }
 }

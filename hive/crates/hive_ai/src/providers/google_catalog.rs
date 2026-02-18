@@ -103,6 +103,7 @@ pub async fn fetch_google_models(api_key: &str) -> Result<Vec<ModelInfo>, String
                 input_price_per_mtok: 0.50,
                 output_price_per_mtok: 2.0,
                 capabilities: Default::default(),
+                release_date: None,
             }
         })
         .collect();
@@ -134,6 +135,7 @@ mod tests {
                 input_price_per_mtok: 0.5,
                 output_price_per_mtok: 2.0,
                 capabilities: Default::default(),
+                release_date: None,
             }];
             cache.fetched_at = Some(Instant::now());
         }

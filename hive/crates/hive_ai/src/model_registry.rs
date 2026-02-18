@@ -33,6 +33,9 @@ pub fn provider_capabilities(provider: ProviderType) -> HashSet<ModelCapability>
             .into_iter()
             .collect(),
         ProviderType::Groq => [ModelCapability::ToolUse].into_iter().collect(),
+        ProviderType::XAI => [ModelCapability::ToolUse, ModelCapability::StructuredOutput]
+            .into_iter()
+            .collect(),
         _ => HashSet::new(),
     }
 }
@@ -61,6 +64,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "claude-opus-4-5-20251101".into(),
@@ -78,6 +82,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "claude-opus-4-1-20250805".into(),
@@ -95,6 +100,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "claude-opus-4-20250514".into(),
@@ -112,6 +118,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "claude-sonnet-4-5-20250929".into(),
@@ -129,6 +136,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "claude-sonnet-4-20250514".into(),
@@ -145,6 +153,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: Some("2025-05-14".into()),
         },
         ModelInfo {
             id: "claude-haiku-4-5-20251001".into(),
@@ -161,6 +170,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // ---- OpenAI ----
         ModelInfo {
@@ -179,6 +189,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: Some("2024-05-13".into()),
         },
         ModelInfo {
             id: "gpt-4o-mini".into(),
@@ -195,6 +206,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: Some("2024-07-18".into()),
         },
         ModelInfo {
             id: "gpt-5".into(),
@@ -212,6 +224,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5-mini".into(),
@@ -228,6 +241,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5-nano".into(),
@@ -244,6 +258,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5.1".into(),
@@ -261,6 +276,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5.2".into(),
@@ -278,6 +294,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5.2-pro".into(),
@@ -296,6 +313,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // ---- OpenAI Codex ----
         // NOTE: gpt-5.3-codex and gpt-5.3-codex-spark are excluded — no public
@@ -317,6 +335,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5.1-codex".into(),
@@ -334,6 +353,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5.1-codex-mini".into(),
@@ -350,6 +370,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-5-codex".into(),
@@ -367,6 +388,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "codex-mini-latest".into(),
@@ -383,6 +405,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "o3".into(),
@@ -399,6 +422,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "o3-mini".into(),
@@ -414,6 +438,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: Some("2025-01-31".into()),
         },
         ModelInfo {
             id: "o4-mini".into(),
@@ -429,6 +454,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-4.1".into(),
@@ -446,6 +472,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gpt-4.1-mini".into(),
@@ -462,6 +489,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // ---- DeepSeek (via OpenRouter) ----
         ModelInfo {
@@ -474,6 +502,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.14,
             output_price_per_mtok: 0.28,
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
+            release_date: None,
         },
         ModelInfo {
             id: "deepseek/deepseek-r1".into(),
@@ -488,6 +517,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::ExtendedThinking,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // ---- OpenRouter Models ----
         // Meta Llama
@@ -501,6 +531,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.39,
             output_price_per_mtok: 0.39,
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
+            release_date: None,
         },
         // Mistral
         ModelInfo {
@@ -518,6 +549,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "mistralai/mistral-small-2503".into(),
@@ -529,6 +561,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.1,
             output_price_per_mtok: 0.3,
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::StructuredOutput]),
+            release_date: None,
         },
         // Google Gemini (via OpenRouter)
         ModelInfo {
@@ -547,6 +580,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "google/gemini-2.5-pro-preview".into(),
@@ -565,6 +599,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // Qwen
         ModelInfo {
@@ -577,6 +612,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.36,
             output_price_per_mtok: 0.36,
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
+            release_date: None,
         },
         // Anthropic via OpenRouter
         ModelInfo {
@@ -594,6 +630,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "anthropic/claude-haiku-4".into(),
@@ -609,6 +646,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // OpenAI via OpenRouter
         ModelInfo {
@@ -626,6 +664,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "openai/o3-mini".into(),
@@ -641,6 +680,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         // ---- Google Gemini (direct API) ----
         ModelInfo {
@@ -660,6 +700,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gemini-3-flash-preview".into(),
@@ -677,6 +718,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gemini-2.5-flash-lite".into(),
@@ -693,6 +735,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gemini-2.5-pro".into(),
@@ -711,6 +754,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gemini-2.5-flash".into(),
@@ -729,6 +773,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: None,
         },
         ModelInfo {
             id: "gemini-2.0-flash".into(),
@@ -746,6 +791,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
                 ModelCapability::StructuredOutput,
                 ModelCapability::LongContext,
             ]),
+            release_date: Some("2025-02-05".into()),
         },
         // ---- Groq ----
         ModelInfo {
@@ -758,6 +804,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.59,
             output_price_per_mtok: 0.79,
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
+            release_date: None,
         },
         ModelInfo {
             id: "llama-3.1-8b-instant".into(),
@@ -769,6 +816,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.05,
             output_price_per_mtok: 0.08,
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
+            release_date: None,
         },
         ModelInfo {
             id: "mixtral-8x7b-32768".into(),
@@ -780,6 +828,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.24,
             output_price_per_mtok: 0.24,
             capabilities: caps(&[ModelCapability::ToolUse]),
+            release_date: None,
         },
         ModelInfo {
             id: "gemma2-9b-it".into(),
@@ -791,6 +840,54 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.20,
             output_price_per_mtok: 0.20,
             capabilities: caps(&[]),
+            release_date: None,
+        },
+        // ---- xAI (Grok) ----
+        ModelInfo {
+            id: "grok-3".into(),
+            name: "Grok 3".into(),
+            provider: "xai".into(),
+            provider_type: ProviderType::XAI,
+            tier: ModelTier::Premium,
+            context_window: 131_072,
+            input_price_per_mtok: 3.00,
+            output_price_per_mtok: 15.00,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: Some("2025-02-17".into()),
+        },
+        ModelInfo {
+            id: "grok-3-mini".into(),
+            name: "Grok 3 Mini".into(),
+            provider: "xai".into(),
+            provider_type: ProviderType::XAI,
+            tier: ModelTier::Mid,
+            context_window: 131_072,
+            input_price_per_mtok: 0.30,
+            output_price_per_mtok: 0.50,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::LongContext,
+            ]),
+            release_date: Some("2025-02-17".into()),
+        },
+        ModelInfo {
+            id: "grok-2-1212".into(),
+            name: "Grok 2".into(),
+            provider: "xai".into(),
+            provider_type: ProviderType::XAI,
+            tier: ModelTier::Mid,
+            context_window: 131_072,
+            input_price_per_mtok: 2.00,
+            output_price_per_mtok: 10.00,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::LongContext,
+            ]),
+            release_date: Some("2024-12-12".into()),
         },
         // ---- Hugging Face ----
         ModelInfo {
@@ -803,6 +900,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: caps(&[ModelCapability::LongContext]),
+            release_date: None,
         },
         ModelInfo {
             id: "mistralai/Mixtral-8x7B-Instruct-v0.1".into(),
@@ -814,6 +912,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: caps(&[]),
+            release_date: None,
         },
         ModelInfo {
             id: "microsoft/Phi-3-mini-4k-instruct".into(),
@@ -825,6 +924,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: caps(&[]),
+            release_date: None,
         },
     ]
 });
@@ -987,6 +1087,10 @@ mod tests {
         let groq = models_for_provider(ProviderType::Groq);
         assert_eq!(groq.len(), 4);
         assert!(groq.iter().all(|m| m.provider_type == ProviderType::Groq));
+
+        let xai = models_for_provider(ProviderType::XAI);
+        assert_eq!(xai.len(), 3);
+        assert!(xai.iter().all(|m| m.provider_type == ProviderType::XAI));
 
         let hf = models_for_provider(ProviderType::HuggingFace);
         assert_eq!(hf.len(), 3);

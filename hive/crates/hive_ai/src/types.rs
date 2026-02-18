@@ -137,6 +137,10 @@ pub struct ModelInfo {
     pub output_price_per_mtok: f64,
     #[serde(default)]
     pub capabilities: ModelCapabilities,
+    /// Release date of the model (ISO 8601, e.g. "2025-01-15"). Used to show
+    /// model age in the Models Browser panel.
+    #[serde(default)]
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +165,7 @@ pub enum ProviderType {
     Ollama,
     LMStudio,
     GenericLocal,
+    XAI,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -176,6 +181,7 @@ impl std::fmt::Display for ProviderType {
             Self::Ollama => write!(f, "ollama"),
             Self::LMStudio => write!(f, "lmstudio"),
             Self::GenericLocal => write!(f, "generic_local"),
+            Self::XAI => write!(f, "xai"),
         }
     }
 }

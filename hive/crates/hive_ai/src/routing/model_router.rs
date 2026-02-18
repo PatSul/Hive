@@ -729,6 +729,7 @@ mod tests {
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: ModelCapabilities::default(),
+            release_date: None,
         }
     }
 

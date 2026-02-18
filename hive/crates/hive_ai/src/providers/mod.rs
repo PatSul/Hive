@@ -19,6 +19,8 @@ pub mod openai_catalog;
 pub(crate) mod openai_sse;
 pub mod openrouter;
 pub mod openrouter_catalog;
+pub mod xai;
+pub mod xai_catalog;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;

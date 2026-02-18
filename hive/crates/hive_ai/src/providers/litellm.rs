@@ -281,6 +281,7 @@ impl LiteLLMProvider {
                     input_price_per_mtok,
                     output_price_per_mtok,
                     capabilities: Default::default(),
+                    release_date: None,
                 }
             })
             .collect()

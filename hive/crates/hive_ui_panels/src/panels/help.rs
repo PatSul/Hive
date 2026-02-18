@@ -34,6 +34,7 @@ impl HelpPanel {
                     .child(render_connected_accounts_section(theme))
                     .child(render_assistant_section(theme))
                     .child(render_security_search_section(theme))
+                    .child(render_themes_section(theme))
                     .child(render_project_workflow(theme))
                     .child(render_keyboard_shortcuts(theme))
                     .child(render_features_overview(theme))
@@ -710,6 +711,47 @@ fn render_security_search_section(theme: &HiveTheme) -> AnyElement {
             "AES-256-GCM encryption with Argon2id key derivation for API keys and secrets",
             theme,
         ))
+        .child(feature_card(
+            "\u{1F4E4}",
+            "Settings Export / Import",
+            "Encrypted config backup (AES-256-GCM + Argon2id) exported to ~/.hive/exports/. \
+             Portable between machines for quick environment setup.",
+            theme,
+        ))
+        .into_any_element()
+}
+
+// ---------------------------------------------------------------------------
+// Section: Themes
+// ---------------------------------------------------------------------------
+
+fn render_themes_section(theme: &HiveTheme) -> AnyElement {
+    card(theme)
+        .child(section_title("\u{1F3A8}", "Themes", theme))
+        .child(section_desc(
+            "8 built-in themes with community ratings at hivecode.app.",
+            theme,
+        ))
+        .child(separator(theme))
+        .child(feature_card(
+            "\u{1F319}",
+            "Dark Themes",
+            "HiveCode Dark (default), Nord, Dracula, Monokai, One Dark, GitHub Dark, Solarized Dark",
+            theme,
+        ))
+        .child(feature_card(
+            "\u{2600}",
+            "Light Themes",
+            "HiveCode Light \u{2014} clean, high-contrast light mode",
+            theme,
+        ))
+        .child(feature_card(
+            "\u{2699}",
+            "Switching",
+            "Open Settings (Ctrl+,) and select a theme from the Appearance section. \
+             Browse community ratings and previews at hivecode.app.",
+            theme,
+        ))
         .into_any_element()
 }
 
@@ -902,6 +944,16 @@ fn render_features_overview(theme: &HiveTheme) -> AnyElement {
             "\u{1F6E1}",
             "HiveShield Security",
             "PII detection, secrets scanning, vulnerability assessment, access control",
+        ),
+        (
+            "\u{1F3A8}",
+            "8 Built-in Themes",
+            "HiveCode Dark/Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark",
+        ),
+        (
+            "\u{1F4E4}",
+            "Settings Export / Import",
+            "Encrypted config backup (AES-256-GCM + Argon2id), portable between machines",
         ),
         (
             "\u{1F310}",

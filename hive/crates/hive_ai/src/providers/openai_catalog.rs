@@ -94,6 +94,7 @@ pub async fn fetch_openai_models(api_key: &str) -> Result<Vec<ModelInfo>, String
                 input_price_per_mtok: 1.0,
                 output_price_per_mtok: 4.0,
                 capabilities: Default::default(),
+                release_date: None,
             }
         })
         .collect();
@@ -125,6 +126,7 @@ mod tests {
                 input_price_per_mtok: 1.0,
                 output_price_per_mtok: 4.0,
                 capabilities: Default::default(),
+                release_date: None,
             }];
             cache.fetched_at = Some(Instant::now());
         }

@@ -24,6 +24,7 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 parking_lot.workspace = true
 once_cell.workspace = true
+hive_shield = { path = "../hive_shield" }
 whoami = "1"
 hex = "0.4"
 url.workspace = true

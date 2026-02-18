@@ -6,7 +6,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use hive_ai::model_registry::MODEL_REGISTRY;
 use hive_ai::types::{ModelInfo, ModelTier, ProviderType};
 
-use hive_ui_core::{HiveTheme, SwitchToModels};
+use hive_ui_core::{AppTheme, HiveTheme, SwitchToModels};
 
 /// Max models to show per provider group before requiring expansion.
 const MAX_VISIBLE_PER_GROUP: usize = 8;
@@ -111,10 +111,16 @@ impl ModelSelectorView {
         )
         .detach();
 
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
         Self {
             current_model,
             is_open: false,
-            theme: HiveTheme::dark(),
+            theme,
             enabled_providers: HashSet::new(),
             search_query: String::new(),
             search_input,

@@ -10,7 +10,7 @@ use hive_agents::automation::{
     ActionType, Condition, TriggerType, Workflow, WorkflowStatus, WorkflowStep,
 };
 use hive_agents::personas::PersonaKind;
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{AppTheme, HiveTheme};
 
 // ---------------------------------------------------------------------------
 // Canvas data model
@@ -284,8 +284,14 @@ impl EventEmitter<WorkflowRunRequested> for WorkflowBuilderView {}
 
 impl WorkflowBuilderView {
     pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
+        let theme = if _cx.has_global::<AppTheme>() {
+            _cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
         Self {
-            theme: HiveTheme::dark(),
+            theme,
             canvas: WorkflowCanvasState::empty("New Workflow"),
             selected_node_id: None,
             dragging_node: None,
@@ -299,6 +305,12 @@ impl WorkflowBuilderView {
             active_workflow_id: None,
             is_dirty: false,
         }
+    }
+
+    /// Replace the cached theme and trigger a re-render.
+    pub fn set_theme(&mut self, theme: HiveTheme, cx: &mut Context<Self>) {
+        self.theme = theme;
+        cx.notify();
     }
 
     /// Refresh the workflow list from the automation service.

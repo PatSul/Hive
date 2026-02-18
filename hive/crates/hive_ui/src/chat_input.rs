@@ -4,7 +4,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{Icon, IconName};
 use std::path::PathBuf;
 
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{AppTheme, HiveTheme};
 
 // ---------------------------------------------------------------------------
 // Events
@@ -50,13 +50,19 @@ impl ChatInputView {
         cx.subscribe_in(&input_state, window, Self::on_input_event)
             .detach();
 
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
         Self {
             input_state,
             input_focus,
             attachments: Vec::new(),
             estimated_cost: None,
             is_sending: false,
-            theme: HiveTheme::dark(),
+            theme,
         }
     }
 
@@ -88,6 +94,12 @@ impl ChatInputView {
         self.input_state.update(cx, |state, cx| {
             state.set_placeholder(placeholder, window, cx);
         });
+        cx.notify();
+    }
+
+    /// Replace the cached theme and trigger a re-render.
+    pub fn set_theme(&mut self, theme: HiveTheme, cx: &mut Context<Self>) {
+        self.theme = theme;
         cx.notify();
     }
 

@@ -15,13 +15,13 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.3-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.5-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-3%2C046-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-16-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-0-brightgreen" alt="Warnings" />
   <img src="https://img.shields.io/badge/lines-150k%2B-informational" alt="Lines of Rust" />
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux-informational" alt="Windows | macOS (Apple Silicon) | Linux" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
   <img src="https://img.shields.io/badge/UI-GPUI-blueviolet" alt="GPUI" />
 </p>
 
@@ -449,7 +449,7 @@ hive_app
 
 ## UI — 21 Panels
 
-All panels are wired to live backend data. No mock data in the production path.
+All panels are wired to live backend data. No mock data in the production path. **8 built-in themes** (HiveCode Dark/Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark) with community voting and custom theme support via `~/.hive/themes/`.
 
 | Panel | Description | Data Source |
 |---|---|---|
@@ -500,6 +500,7 @@ Grab the latest release for your platform from [**GitHub Releases**](https://git
 | **Windows** (x64) | `hive-windows-x64.zip` | Windows 10/11, GPU with DirectX 12 |
 | **macOS** (Apple Silicon) | `hive-macos-arm64.tar.gz` | macOS 12+, Metal-capable GPU |
 | **Linux** (x64) | `hive-linux-x64.tar.gz` | Vulkan-capable GPU + drivers (see below) |
+| **Linux** (ARM64) | `hive-linux-arm64.tar.gz` | 64-bit ARM (RPi 5 not supported — no Vulkan GPU), Vulkan-capable GPU + drivers |
 
 **Windows:** Extract the zip, run `hive.exe`. No installer needed.
 
@@ -516,6 +517,8 @@ sudo dnf install mesa-vulkan-drivers vulkan-tools
 # Arch
 sudo pacman -S vulkan-icd-loader vulkan-tools
 ```
+
+> **Note on Raspberry Pi:** Hive requires a Vulkan-capable GPU for rendering. Raspberry Pi's VideoCore GPU does not support Vulkan, so Hive cannot run directly on RPi hardware. The ARM Linux build targets ARM servers and desktops with discrete/integrated GPUs that have Vulkan support (e.g., NVIDIA Jetson, Ampere Altra, AWS Graviton with GPU instances). A headless mode for RPi is planned for a future release.
 
 ### Option 2: Build from Source
 
@@ -605,7 +608,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.3 |
+| Version | 0.3.5 |
 | Crates | 16 |
 | Rust source files | 280 |
 | Lines of Rust | 150,285 |
@@ -619,6 +622,24 @@ Configure provider preferences, model routing rules, budget limits, and security
 ---
 
 ## Changelog
+
+### v0.3.5
+- Added xAI/Grok as 13th AI provider (OpenAI-compatible)
+- Interactive Privacy Shield controls: global toggle, per-rule toggles, custom blocking rules
+- Shield settings persist across restarts via HiveConfig
+- Model age display in Models Browser (days/months/years since release)
+- Dual licensing: AGPL-3.0 for app/agents, MIT for library crates
+- Removed old static site (replaced by Next.js marketing site)
+
+### v0.3.4
+
+**Theme System + Settings Security**
+
+- **8 built-in themes** with community ratings: HiveCode Dark, HiveCode Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark
+- **ThemeManager** with custom theme support — load and manage themes from `~/.hive/themes/`
+- **Settings export/import** with AES-256-GCM encryption + Argon2id key derivation for secure config portability
+- **Community theme voting** on hivecode.app via Vercel KV backend
+- **Theme switching** wired to all 21 panels
 
 ### v0.3.3
 

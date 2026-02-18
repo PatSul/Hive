@@ -30,6 +30,7 @@ pub enum ProviderType {
     Ollama,
     LMStudio,
     GenericLocal,
+    XAI,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -45,6 +46,7 @@ impl std::fmt::Display for ProviderType {
             Self::Ollama => "ollama",
             Self::LMStudio => "lmstudio",
             Self::GenericLocal => "generic_local",
+            Self::XAI => "xai",
         };
         f.write_str(s)
     }

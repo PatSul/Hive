@@ -118,6 +118,7 @@ pub async fn fetch_openrouter_models(api_key: &str) -> Result<Vec<ModelInfo>, St
                 input_price_per_mtok: input_price,
                 output_price_per_mtok: output_price,
                 capabilities: Default::default(),
+                release_date: None,
             })
         })
         .collect();
@@ -190,6 +191,7 @@ mod tests {
                 input_price_per_mtok: 0.5,
                 output_price_per_mtok: 1.0,
                 capabilities: Default::default(),
+                release_date: None,
             }];
             cache.fetched_at = Some(Instant::now());
         }

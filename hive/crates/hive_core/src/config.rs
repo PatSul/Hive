@@ -154,6 +154,30 @@ pub struct OAuthTokenData {
 }
 
 // ---------------------------------------------------------------------------
+// Portable config export/import
+// ---------------------------------------------------------------------------
+
+/// Magic bytes identifying a Hive config export file.
+const EXPORT_MAGIC: &[u8; 4] = b"HIVE";
+/// Current export format version.
+const EXPORT_VERSION: u8 = 1;
+
+/// Portable bundle of all user configuration, including secrets.
+/// Serialized to JSON then encrypted as a single blob for transfer between machines.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConfigPortable {
+    /// Non-secret config (note: API key fields will be empty due to #[serde(skip)]).
+    pub config: HiveConfig,
+    /// Decrypted API keys (provider name -> plaintext key).
+    pub api_keys: HashMap<String, String>,
+    /// OAuth tokens per platform.
+    pub oauth_tokens: HashMap<String, OAuthTokenData>,
+    /// Export metadata.
+    pub exported_at: String,
+    pub source_version: String,
+}
+
+// ---------------------------------------------------------------------------
 // Secure key storage file helpers
 // ---------------------------------------------------------------------------
 
@@ -167,6 +191,7 @@ const KEY_HUGGINGFACE: &str = "api_key_huggingface";
 const KEY_LITELLM: &str = "api_key_litellm";
 const KEY_ELEVENLABS: &str = "api_key_elevenlabs";
 const KEY_TELNYX: &str = "api_key_telnyx";
+const KEY_XAI: &str = "api_key_xai";
 
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
@@ -308,6 +333,15 @@ pub struct HiveConfig {
     // Connected accounts
     pub connected_accounts: Vec<ConnectedAccount>,
 
+    // Privacy Shield
+    pub shield_enabled: bool,
+    #[serde(default)]
+    pub shield: hive_shield::ShieldConfig,
+
+    // xAI / Grok
+    #[serde(skip)]
+    pub xai_api_key: Option<String>,
+
     // OAuth client IDs — user-provided per-platform
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,
@@ -362,6 +396,9 @@ impl Default for HiveConfig {
             slack_oauth_client_id: None,
             discord_oauth_client_id: None,
             telegram_oauth_client_id: None,
+            shield_enabled: true,
+            shield: hive_shield::ShieldConfig::default(),
+            xai_api_key: None,
         }
     }
 }
@@ -649,6 +686,7 @@ impl ConfigManager {
             config.litellm_api_key = get_secure_key(ss, &key_map, KEY_LITELLM);
             config.elevenlabs_api_key = get_secure_key(ss, &key_map, KEY_ELEVENLABS);
             config.telnyx_api_key = get_secure_key(ss, &key_map, KEY_TELNYX);
+            config.xai_api_key = get_secure_key(ss, &key_map, KEY_XAI);
         }
     }
 
@@ -681,6 +719,7 @@ impl ConfigManager {
             "litellm" => config.litellm_api_key.clone(),
             "elevenlabs" => config.elevenlabs_api_key.clone(),
             "telnyx" => config.telnyx_api_key.clone(),
+            "xai" => config.xai_api_key.clone(),
             _ => None,
         }
     }
@@ -700,6 +739,7 @@ impl ConfigManager {
                 "litellm" => config.litellm_api_key = key.clone(),
                 "elevenlabs" => config.elevenlabs_api_key = key.clone(),
                 "telnyx" => config.telnyx_api_key = key.clone(),
+                "xai" => config.xai_api_key = key.clone(),
                 _ => anyhow::bail!("Unknown provider: {provider}"),
             }
         }
@@ -729,6 +769,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_LITELLM, &config.litellm_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_ELEVENLABS, &config.elevenlabs_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_TELNYX, &config.telnyx_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_XAI, &config.xai_api_key)?;
         save_key_map(&self.keys_path, &key_map)
     }
 
@@ -786,6 +827,193 @@ impl ConfigManager {
                 .connected_accounts
                 .retain(|a| a.platform != platform);
         })
+    }
+
+    // -- Config export/import -----------------------------------------------
+
+    /// All provider key names used when collecting API keys for export.
+    const ALL_KEY_NAMES: &'static [(&'static str, &'static str)] = &[
+        ("anthropic", KEY_ANTHROPIC),
+        ("openai", KEY_OPENAI),
+        ("openrouter", KEY_OPENROUTER),
+        ("google", KEY_GOOGLE),
+        ("groq", KEY_GROQ),
+        ("huggingface", KEY_HUGGINGFACE),
+        ("litellm", KEY_LITELLM),
+        ("elevenlabs", KEY_ELEVENLABS),
+        ("telnyx", KEY_TELNYX),
+        ("xai", KEY_XAI),
+    ];
+
+    /// Export all configuration (including secrets) as a password-encrypted blob.
+    ///
+    /// The returned `Vec<u8>` has the format:
+    /// `[4B magic "HIVE"] [1B version] [16B salt] [12B nonce] [AES-256-GCM ciphertext]`
+    ///
+    /// The ciphertext is the AES-256-GCM encryption of the JSON-serialized
+    /// [`ConfigPortable`], with the encryption key derived from `password`
+    /// via Argon2id.
+    pub fn export_config(&self, password: &str) -> Result<Vec<u8>> {
+        use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+        use argon2::{Algorithm, Argon2, Params, Version};
+
+        // 1. Clone current config
+        let config = self.get();
+
+        // 2. Collect all decrypted API keys
+        let mut api_keys = HashMap::new();
+        if let Some(ss) = &self.secure_storage {
+            let key_map = load_key_map(&self.keys_path);
+            for &(provider, key_name) in Self::ALL_KEY_NAMES {
+                if let Some(plaintext) = get_secure_key(ss, &key_map, key_name) {
+                    api_keys.insert(provider.to_string(), plaintext);
+                }
+            }
+        }
+
+        // 3. Collect OAuth tokens for all platforms
+        let mut oauth_tokens = HashMap::new();
+        for platform in AccountPlatform::ALL {
+            if let Some(token_data) = self.get_oauth_token(platform) {
+                oauth_tokens.insert(
+                    platform.label().to_lowercase(),
+                    token_data,
+                );
+            }
+        }
+
+        // 4. Build and serialize the portable bundle
+        let portable = ConfigPortable {
+            config,
+            api_keys,
+            oauth_tokens,
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            source_version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        let json = serde_json::to_string(&portable)
+            .context("Failed to serialize config for export")?;
+
+        // 5. Generate random salt and nonce
+        let salt: [u8; 16] = rand::random();
+        let nonce_bytes: [u8; 12] = rand::random();
+
+        // 6. Derive encryption key with Argon2id
+        let params = Params::new(19_456, 2, 1, Some(32))
+            .map_err(|e| anyhow::anyhow!("Invalid Argon2 params: {e}"))?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        let mut key_bytes = [0u8; 32];
+        argon2
+            .hash_password_into(password.as_bytes(), &salt, &mut key_bytes)
+            .map_err(|e| anyhow::anyhow!("Argon2 key derivation failed: {e}"))?;
+
+        // 7. Encrypt with AES-256-GCM
+        let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+        let cipher = Aes256Gcm::new(key);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher
+            .encrypt(nonce, json.as_bytes())
+            .map_err(|e| anyhow::anyhow!("AES-256-GCM encryption failed: {e}"))?;
+
+        // 8. Assemble output: [magic][version][salt][nonce][ciphertext]
+        let mut output = Vec::with_capacity(4 + 1 + 16 + 12 + ciphertext.len());
+        output.extend_from_slice(EXPORT_MAGIC);
+        output.push(EXPORT_VERSION);
+        output.extend_from_slice(&salt);
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
+
+        Ok(output)
+    }
+
+    /// Import configuration from a password-encrypted export blob.
+    ///
+    /// Decrypts the blob, replaces the current config, and re-encrypts all
+    /// API keys and OAuth tokens with the local `SecureStorage`.
+    pub fn import_config(&self, data: &[u8], password: &str) -> Result<()> {
+        use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+        use argon2::{Algorithm, Argon2, Params, Version};
+
+        const HEADER_LEN: usize = 4 + 1 + 16 + 12; // magic + version + salt + nonce
+
+        // 1. Validate minimum length
+        if data.len() < HEADER_LEN {
+            anyhow::bail!("Import data too short: expected at least {HEADER_LEN} bytes, got {}", data.len());
+        }
+
+        // 2. Validate magic bytes
+        if &data[0..4] != EXPORT_MAGIC {
+            anyhow::bail!("Invalid export file: bad magic bytes");
+        }
+
+        // 3. Validate version
+        let version = data[4];
+        if version != EXPORT_VERSION {
+            anyhow::bail!("Unsupported export version: {version} (expected {EXPORT_VERSION})");
+        }
+
+        // 4. Extract salt, nonce, ciphertext
+        let salt = &data[5..21];
+        let nonce_bytes = &data[21..33];
+        let ciphertext = &data[33..];
+
+        // 5. Derive key from password + salt (same Argon2id params as export)
+        let params = Params::new(19_456, 2, 1, Some(32))
+            .map_err(|e| anyhow::anyhow!("Invalid Argon2 params: {e}"))?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        let mut key_bytes = [0u8; 32];
+        argon2
+            .hash_password_into(password.as_bytes(), salt, &mut key_bytes)
+            .map_err(|e| anyhow::anyhow!("Argon2 key derivation failed: {e}"))?;
+
+        // 6. Decrypt with AES-256-GCM
+        let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+        let cipher = Aes256Gcm::new(key);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|_| anyhow::anyhow!("Decryption failed: wrong password or corrupted data"))?;
+
+        // 7. Deserialize ConfigPortable from JSON
+        let portable: ConfigPortable = serde_json::from_slice(&plaintext)
+            .context("Failed to deserialize imported config")?;
+
+        // 8. Replace current config (non-secret fields)
+        self.update(|config| {
+            *config = portable.config;
+        })?;
+
+        // 9. Re-encrypt each API key with local SecureStorage and save
+        let Some(ss) = &self.secure_storage else {
+            anyhow::bail!("SecureStorage unavailable; cannot import API keys");
+        };
+        let mut key_map = load_key_map(&self.keys_path);
+        for &(provider, key_name) in Self::ALL_KEY_NAMES {
+            if let Some(plaintext_key) = portable.api_keys.get(provider) {
+                set_secure_key(ss, &mut key_map, key_name, &Some(plaintext_key.clone()))?;
+            }
+        }
+        save_key_map(&self.keys_path, &key_map)?;
+
+        // 10. Import OAuth tokens via set_oauth_token
+        for platform in AccountPlatform::ALL {
+            let label = platform.label().to_lowercase();
+            if let Some(token_data) = portable.oauth_tokens.get(&label) {
+                self.set_oauth_token(platform, token_data)?;
+            }
+        }
+
+        // 11. Re-populate in-memory API keys from the newly saved key store
+        {
+            let mut config = self.config.write();
+            Self::populate_keys_from_storage(
+                &mut config,
+                &self.keys_path,
+                &self.secure_storage,
+            );
+        }
+
+        info!("Config imported successfully");
+        Ok(())
     }
 
     fn oauth_key(platform: AccountPlatform) -> &'static str {
@@ -1194,5 +1422,135 @@ mod tests {
         assert_eq!(config.ollama_url, "http://localhost:11434");
         assert_eq!(config.theme, "dark");
         assert_eq!(config.font_size, 14);
+    }
+
+    // -----------------------------------------------------------------------
+    // 9. Config export/import
+    // -----------------------------------------------------------------------
+
+    /// Build a minimal ConfigManager for testing export/import, bypassing
+    /// the file watcher and real `~/.hive/` directories.
+    fn test_config_manager(
+        config_path: &PathBuf,
+        keys_path: &PathBuf,
+    ) -> ConfigManager {
+        let ss = test_secure_storage(keys_path);
+
+        // Write a default config.json so the path exists
+        let config = HiveConfig::default();
+        config.save_to_path(config_path).unwrap();
+
+        ConfigManager {
+            config: Arc::new(RwLock::new(config)),
+            secure_storage: Some(ss),
+            keys_path: keys_path.clone(),
+            _watcher: None,
+        }
+    }
+
+    #[test]
+    fn test_export_import_roundtrip() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        // Set some API keys
+        mgr.set_api_key("anthropic", Some("sk-ant-export-test".into())).unwrap();
+        mgr.set_api_key("openai", Some("sk-openai-export".into())).unwrap();
+        mgr.set_api_key("groq", Some("gsk-groq-export".into())).unwrap();
+
+        // Set a non-default config value
+        mgr.update(|c| {
+            c.theme = "light".into();
+            c.daily_budget_usd = 42.0;
+        }).unwrap();
+
+        // Export
+        let password = "strong-test-password-123";
+        let blob = mgr.export_config(password).unwrap();
+
+        // Verify header
+        assert_eq!(&blob[0..4], b"HIVE");
+        assert_eq!(blob[4], 1);
+        assert!(blob.len() > 33); // header + some ciphertext
+
+        // Import into a fresh manager
+        let (_tmp2, config_path2, keys_path2) = make_temp_config_dir();
+        let mgr2 = test_config_manager(&config_path2, &keys_path2);
+
+        mgr2.import_config(&blob, password).unwrap();
+
+        // Verify config fields
+        let imported = mgr2.get();
+        assert_eq!(imported.theme, "light");
+        assert_eq!(imported.daily_budget_usd, 42.0);
+
+        // Verify API keys survived the round-trip
+        assert_eq!(
+            mgr2.get_api_key("anthropic").as_deref(),
+            Some("sk-ant-export-test"),
+        );
+        assert_eq!(
+            mgr2.get_api_key("openai").as_deref(),
+            Some("sk-openai-export"),
+        );
+        assert_eq!(
+            mgr2.get_api_key("groq").as_deref(),
+            Some("gsk-groq-export"),
+        );
+        // Keys not set should remain None
+        assert!(mgr2.get_api_key("huggingface").is_none());
+    }
+
+    #[test]
+    fn test_import_wrong_password() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        mgr.set_api_key("anthropic", Some("secret".into())).unwrap();
+
+        let blob = mgr.export_config("correct").unwrap();
+
+        let (_tmp2, config_path2, keys_path2) = make_temp_config_dir();
+        let mgr2 = test_config_manager(&config_path2, &keys_path2);
+
+        let result = mgr2.import_config(&blob, "wrong");
+        assert!(result.is_err(), "Import with wrong password should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Decryption failed"),
+            "Error should mention decryption failure, got: {err_msg}",
+        );
+    }
+
+    #[test]
+    fn test_import_corrupted_data() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        // Random bytes that aren't a valid export
+        let garbage: Vec<u8> = (0..100).map(|i| (i * 37 % 256) as u8).collect();
+        let result = mgr.import_config(&garbage, "any-password");
+        assert!(result.is_err(), "Import of garbage data should fail");
+    }
+
+    #[test]
+    fn test_import_truncated_header() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        // Too short to contain the full header
+        let short = b"HIV";
+        let result = mgr.import_config(short, "password");
+        assert!(result.is_err(), "Import of truncated data should fail");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("too short"),
+            "Error should mention data being too short, got: {err_msg}",
+        );
+
+        // Exactly the magic but nothing else
+        let just_magic = b"HIVE";
+        let result2 = mgr.import_config(just_magic, "password");
+        assert!(result2.is_err());
     }
 }

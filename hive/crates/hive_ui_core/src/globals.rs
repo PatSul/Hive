@@ -14,6 +14,7 @@ use hive_agents::personas::PersonaRegistry;
 use hive_agents::skill_marketplace::SkillMarketplace;
 use hive_agents::skills::SkillsRegistry;
 use hive_agents::specs::SpecManager;
+use crate::theme::HiveTheme;
 use hive_ai::service::AiService;
 use hive_ai::tts::service::TtsService;
 use hive_assistant::AssistantService;
@@ -194,3 +195,10 @@ impl Global for AppDocsIndexer {}
 /// Global wrapper for the auto-update service (version check, binary replacement).
 pub struct AppUpdater(pub UpdateService);
 impl Global for AppUpdater {}
+
+/// Global wrapper for the active application theme.
+///
+/// Set during workspace initialization from the config-driven theme resolution.
+/// Updated when the user switches themes via the Settings panel.
+pub struct AppTheme(pub HiveTheme);
+impl Global for AppTheme {}

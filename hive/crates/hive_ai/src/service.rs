@@ -15,6 +15,7 @@ use crate::providers::anthropic::AnthropicProvider;
 use crate::providers::gemini::GeminiProvider;
 use crate::providers::generic_local::GenericLocalProvider;
 use crate::providers::groq::GroqProvider;
+use crate::providers::xai::XaiProvider;
 use crate::providers::huggingface::HuggingFaceProvider;
 use crate::providers::litellm::LiteLLMProvider;
 use crate::providers::lmstudio::LMStudioProvider;
@@ -40,6 +41,7 @@ pub struct AiServiceConfig {
     pub google_api_key: Option<String>,
     pub groq_api_key: Option<String>,
     pub huggingface_api_key: Option<String>,
+    pub xai_api_key: Option<String>,
     pub litellm_url: Option<String>,
     pub litellm_api_key: Option<String>,
     pub ollama_url: String,
@@ -120,6 +122,12 @@ impl AiService {
                     Arc::new(HuggingFaceProvider::new(key.clone())),
                 );
                 info!("HuggingFace provider registered");
+            }
+            if let Some(ref key) = config.xai_api_key
+                && !key.is_empty()
+            {
+                providers.insert(ProviderType::XAI, Arc::new(XaiProvider::new(key.clone())));
+                info!("xAI (Grok) provider registered");
             }
         }
 
@@ -558,6 +566,7 @@ fn map_router_provider(rp: crate::routing::ProviderType) -> ProviderType {
         crate::routing::ProviderType::LMStudio => ProviderType::LMStudio,
         crate::routing::ProviderType::Google => ProviderType::Google,
         crate::routing::ProviderType::GenericLocal => ProviderType::GenericLocal,
+        crate::routing::ProviderType::XAI => ProviderType::XAI,
     }
 }
 
@@ -573,6 +582,7 @@ fn map_to_router_provider(pt: ProviderType) -> crate::routing::ProviderType {
         ProviderType::Ollama => crate::routing::ProviderType::Ollama,
         ProviderType::LMStudio => crate::routing::ProviderType::LMStudio,
         ProviderType::GenericLocal => crate::routing::ProviderType::GenericLocal,
+        ProviderType::XAI => crate::routing::ProviderType::XAI,
     }
 }
 

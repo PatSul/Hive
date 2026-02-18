@@ -80,6 +80,8 @@ actions!(
         TokenLaunchDeploy,
         // Settings panel
         SettingsSave,
+        ExportConfig,
+        ImportConfig,
         // Monitor panel
         MonitorRefresh,
         // Agents panel
@@ -312,6 +314,17 @@ pub struct SkillsRemove {
 #[action(namespace = hive_workspace, no_json)]
 pub struct SkillsToggle {
     pub skill_id: String,
+}
+
+/// Switch the active theme by name.
+///
+/// Dispatched from the Settings theme picker. The workspace handler resolves
+/// the name against built-in and custom themes and updates `self.theme` plus
+/// the `AppTheme` global.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ThemeChanged {
+    pub theme_name: String,
 }
 
 /// Create a new custom skill from the Create tab form.

@@ -332,6 +332,7 @@ async fn probe_ollama(
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: Default::default(),
+            release_date: None,
         })
         .collect();
 
@@ -400,6 +401,7 @@ async fn probe_openai_compat(
             input_price_per_mtok: 0.0,
             output_price_per_mtok: 0.0,
             capabilities: Default::default(),
+            release_date: None,
         })
         .collect();
 
@@ -544,6 +546,7 @@ mod tests {
                         input_price_per_mtok: 0.0,
                         output_price_per_mtok: 0.0,
                         capabilities: Default::default(),
+                        release_date: None,
                     }],
                 },
                 DiscoveredProvider {
@@ -562,6 +565,7 @@ mod tests {
                         input_price_per_mtok: 0.0,
                         output_price_per_mtok: 0.0,
                         capabilities: Default::default(),
+                        release_date: None,
                     }],
                 },
                 DiscoveredProvider {

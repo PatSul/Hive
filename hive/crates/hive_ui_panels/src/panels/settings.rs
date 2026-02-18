@@ -8,8 +8,10 @@ use gpui_component::{Icon, IconName};
 use hive_ai::types::ProviderType;
 
 use crate::components::model_selector::{ModelSelected, ModelSelectorView};
+use hive_core::theme_manager::ThemeManager;
 use hive_ui_core::AppConfig;
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{AppTheme, HiveTheme, ThemeChanged};
+use hive_ui_core::{ExportConfig, ImportConfig};
 
 // ---------------------------------------------------------------------------
 // Actions
@@ -261,6 +263,10 @@ pub struct SettingsView {
     slack_client_id_input: Entity<InputState>,
     discord_client_id_input: Entity<InputState>,
     telegram_client_id_input: Entity<InputState>,
+
+    // Theme picker
+    selected_theme: String,
+    available_themes: Vec<String>,
 }
 
 impl EventEmitter<SettingsSaved> for SettingsView {}
@@ -483,8 +489,29 @@ impl SettingsView {
         cx.subscribe_in(&model_selector, window, Self::on_model_selected)
             .detach();
 
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
+        // Build available theme list from built-in + custom.
+        let mut available_themes: Vec<String> = ThemeManager::builtin_themes()
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
+        if let Ok(mgr) = ThemeManager::new() {
+            for t in mgr.list_custom_themes() {
+                if !available_themes.iter().any(|n| n.to_lowercase() == t.name.to_lowercase()) {
+                    available_themes.push(t.name.clone());
+                }
+            }
+        }
+
+        let selected_theme = cfg.theme.clone();
+
         let view = Self {
-            theme: HiveTheme::dark(),
+            theme,
             anthropic_key_input,
             openai_key_input,
             openrouter_key_input,
@@ -526,12 +553,27 @@ impl SettingsView {
             slack_client_id_input,
             discord_client_id_input,
             telegram_client_id_input,
+            selected_theme,
+            available_themes,
         };
 
         // Initialize model selector with current provider availability
         view.sync_enabled_providers(cx);
 
         view
+    }
+
+    /// Replace the cached theme and trigger a re-render.
+    pub fn set_theme(&mut self, theme: HiveTheme, cx: &mut Context<Self>) {
+        self.theme = theme;
+        cx.notify();
+    }
+
+    /// Update the selected theme name (called from the workspace after
+    /// ThemeChanged resolves). Keeps the picker highlight in sync.
+    pub fn set_selected_theme(&mut self, name: String, cx: &mut Context<Self>) {
+        self.selected_theme = name;
+        cx.notify();
     }
 
     /// Called for every InputEvent from any subscribed input.
@@ -980,7 +1022,8 @@ impl Render for SettingsView {
                                     .child(self.render_budget_section(cx))
                                     .child(self.render_voice_tts_section(cx))
                                     .child(self.render_connected_accounts_section(cx))
-                                    .child(self.render_general_section(cx)),
+                                    .child(self.render_general_section(cx))
+                                    .child(self.render_import_export_section(cx)),
                             ),
                     ),
             )
@@ -1436,12 +1479,80 @@ impl SettingsView {
     fn render_general_section(&self, _cx: &Context<Self>) -> AnyElement {
         let theme = &self.theme;
 
+        // Build theme picker buttons.
+        let selected = self.selected_theme.to_lowercase();
+        let theme_buttons: Vec<AnyElement> = self
+            .available_themes
+            .iter()
+            .map(|name| {
+                let is_active = name.to_lowercase() == selected
+                    || (selected == "dark" && name == "HiveCode Dark")
+                    || (selected == "light" && name == "HiveCode Light");
+                let label = name.clone();
+                let action_name = name.clone();
+                div()
+                    .id(SharedString::from(format!("theme-btn-{}", name)))
+                    .cursor_pointer()
+                    .px(theme.space_3)
+                    .py(theme.space_2)
+                    .rounded(theme.radius_sm)
+                    .text_size(theme.font_size_sm)
+                    .text_color(if is_active {
+                        theme.text_on_accent
+                    } else {
+                        theme.text_primary
+                    })
+                    .bg(if is_active {
+                        theme.accent_aqua
+                    } else {
+                        theme.bg_tertiary
+                    })
+                    .hover(|s| {
+                        s.bg(if is_active {
+                            theme.accent_cyan
+                        } else {
+                            theme.bg_secondary
+                        })
+                    })
+                    .on_mouse_down(MouseButton::Left, move |_ev, _window, cx| {
+                        cx.dispatch_action(&ThemeChanged {
+                            theme_name: action_name.clone(),
+                        });
+                    })
+                    .child(label)
+                    .into_any_element()
+            })
+            .collect();
+
         card(theme)
             .child(section_title("\u{2699}", "General", theme))
             .child(section_desc(
                 "Application preferences and display settings.",
                 theme,
             ))
+            .child(separator(theme))
+            // Theme picker
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(theme.space_2)
+                    .child(
+                        div()
+                            .text_size(theme.font_size_sm)
+                            .text_color(theme.text_secondary)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Theme"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap(theme.space_2)
+                            .children(theme_buttons),
+                    ),
+            )
             .child(separator(theme))
             .child(switch_row(
                 "Auto Update",
@@ -1457,6 +1568,80 @@ impl SettingsView {
                 SettingsToggleNotifications,
                 theme,
             ))
+            .into_any_element()
+    }
+
+    fn render_import_export_section(&self, _cx: &Context<Self>) -> AnyElement {
+        let theme = &self.theme;
+
+        card(theme)
+            .child(section_title("\u{1F4E6}", "Import & Export", theme))
+            .child(section_desc(
+                "Export your settings, API keys, and OAuth tokens as an encrypted backup. Import a previously exported backup to restore.",
+                theme,
+            ))
+            .child(separator(theme))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(theme.space_3)
+                    .child(
+                        div()
+                            .id("settings-export-btn")
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .px(theme.space_3)
+                            .py(theme.space_2)
+                            .rounded(theme.radius_sm)
+                            .bg(theme.bg_surface)
+                            .border_1()
+                            .border_color(theme.border)
+                            .text_size(theme.font_size_sm)
+                            .text_color(theme.accent_cyan)
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme.bg_tertiary))
+                            .child(Icon::new(IconName::ArrowDown).size_3p5().text_color(theme.accent_cyan))
+                            .child("Export Settings")
+                            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                                cx.dispatch_action(&ExportConfig);
+                            }),
+                    )
+                    .child(
+                        div()
+                            .id("settings-import-btn")
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .px(theme.space_3)
+                            .py(theme.space_2)
+                            .rounded(theme.radius_sm)
+                            .bg(theme.bg_surface)
+                            .border_1()
+                            .border_color(theme.border)
+                            .text_size(theme.font_size_sm)
+                            .text_color(theme.accent_yellow)
+                            .cursor_pointer()
+                            .hover(|s| s.bg(theme.bg_tertiary))
+                            .child(Icon::new(IconName::ArrowUp).size_3p5().text_color(theme.accent_yellow))
+                            .child("Import Settings")
+                            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                                cx.dispatch_action(&ImportConfig);
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .px(theme.space_3)
+                    .py(theme.space_2)
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_primary)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child("Exported files are encrypted with a password you provide. Keep the password safe -- it cannot be recovered."),
+            )
             .into_any_element()
     }
 }

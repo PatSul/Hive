@@ -13,6 +13,7 @@ use hive_ai::types::{ChatRequest, ToolDefinition as AiToolDefinition};
 use hive_core::config::HiveConfig;
 use hive_core::notifications::{AppNotification, NotificationType};
 use hive_core::session::SessionState;
+use hive_core::theme_manager::ThemeManager;
 use hive_assistant::ReminderTrigger;
 
 use crate::chat_input::{ChatInputView, SubmitMessage};
@@ -21,7 +22,8 @@ use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppLearning,
-    AppMarketplace, AppNotifications, AppPersonas, AppSecurity, AppShield, AppSpecs, AppUpdater,
+    AppMarketplace, AppNotifications, AppPersonas, AppSecurity, AppShield, AppSpecs, AppTheme,
+    AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
 };
@@ -51,13 +53,14 @@ pub use hive_ui_core::{
     SkillsCreate, SkillsAddSource, SkillsRemoveSource, SkillsSetTab, SkillsSetSearch,
     SkillsSetCategory,
     RoutingAddRule, TokenLaunchDeploy, TokenLaunchSetStep, TokenLaunchSelectChain,
-    SettingsSave, MonitorRefresh, AgentsReloadWorkflows, AgentsRunWorkflow,
+    SettingsSave, ExportConfig, ImportConfig,
+    MonitorRefresh, AgentsReloadWorkflows, AgentsRunWorkflow,
     SwitchToWorkflows, SwitchToChannels,
     WorkflowBuilderSave, WorkflowBuilderRun, WorkflowBuilderDeleteNode,
     WorkflowBuilderLoadWorkflow, ChannelSelect,
     AccountConnect, AccountDisconnect, AccountRefresh,
     AccountConnectPlatform, AccountDisconnectPlatform,
-    TriggerAppUpdate,
+    TriggerAppUpdate, ThemeChanged,
 };
 use hive_ui_panels::panels::chat::{DisplayMessage, ToolCallDisplay};
 use hive_ui_panels::panels::{
@@ -76,7 +79,7 @@ use hive_ui_panels::panels::{
     review::{AiCommitState, BranchEntry, GitOpsTab, LfsFileEntry, PrForm, PrSummary, ReviewData, ReviewPanel},
     routing::{RoutingData, RoutingPanel},
     settings::{SettingsSaved, SettingsView},
-    shield::{ShieldPanel, ShieldPanelData},
+    shield::{ShieldConfigChanged, ShieldPanelData, ShieldView},
     skills::{SkillsData, SkillsPanel},
     specs::{SpecPanelData, SpecsPanel},
     token_launch::{TokenLaunchData, TokenLaunchPanel},
@@ -130,6 +133,7 @@ pub struct HiveWorkspace {
     chat_input: Entity<ChatInputView>,
     chat_service: Entity<ChatService>,
     settings_view: Entity<SettingsView>,
+    shield_view: Entity<ShieldView>,
     models_browser_view: Entity<ModelsBrowserView>,
     workflow_builder_view: Entity<WorkflowBuilderView>,
     channels_view: Entity<ChannelsView>,
@@ -305,6 +309,19 @@ impl HiveWorkspace {
         )
         .detach();
 
+        // Create the interactive shield view entity.
+        let shield_view = cx.new(|cx| ShieldView::new(window, cx));
+
+        // When shield config changes, persist to AppConfig and rebuild the shield.
+        cx.subscribe_in(
+            &shield_view,
+            window,
+            |this, _view, _event: &ShieldConfigChanged, _window, cx| {
+                this.handle_shield_config_save(cx);
+            },
+        )
+        .detach();
+
         // Create the model browser view entity.
         let project_models = if cx.has_global::<AppConfig>() {
             cx.global::<AppConfig>().0.get().project_models.clone()
@@ -329,6 +346,9 @@ impl HiveWorkspace {
             }
             if cfg.google_api_key.is_some() {
                 providers.insert(hive_ai::types::ProviderType::Google);
+            }
+            if cfg.xai_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::XAI);
             }
             if cfg.groq_api_key.is_some() {
                 providers.insert(hive_ai::types::ProviderType::Groq);
@@ -466,8 +486,23 @@ impl HiveWorkspace {
         let learning_data = LearningPanelData::empty();
         let assistant_data = AssistantPanelData::empty();
 
+        // Resolve the theme from config.  "dark" / "light" map to built-in
+        // constructors; everything else is looked up by name in the
+        // ThemeManager built-in catalog, falling back to dark.
+        let theme = {
+            let theme_name = if cx.has_global::<AppConfig>() {
+                cx.global::<AppConfig>().0.get().theme.clone()
+            } else {
+                "dark".to_string()
+            };
+            Self::resolve_theme_by_name(&theme_name)
+        };
+
+        // Publish the theme as a global so child views can read it.
+        cx.set_global(AppTheme(theme.clone()));
+
         Self {
-            theme: HiveTheme::dark(),
+            theme,
             sidebar,
             status_bar,
             recent_workspace_roots,
@@ -476,6 +511,7 @@ impl HiveWorkspace {
             chat_input,
             chat_service,
             settings_view,
+            shield_view,
             models_browser_view,
             workflow_builder_view,
             channels_view,
@@ -503,6 +539,38 @@ impl HiveWorkspace {
             discovery_scan_pending: false,
             discovery_done_flag: None,
             last_window_size: session.window_size,
+        }
+    }
+
+    /// Resolve a `HiveTheme` from a theme name string.
+    ///
+    /// * `"dark"` / `"light"` map to the built-in constructors.
+    /// * Any other value is matched (case-insensitive) against the
+    ///   `ThemeManager::builtin_themes()` catalog and custom themes on disk.
+    /// * Falls back to `HiveTheme::dark()` if no match is found.
+    fn resolve_theme_by_name(name: &str) -> HiveTheme {
+        let lower = name.to_lowercase();
+        match lower.as_str() {
+            "dark" | "hivecode dark" => HiveTheme::dark(),
+            "light" | "hivecode light" => HiveTheme::light(),
+            _ => {
+                // Search built-in themes first.
+                for def in ThemeManager::builtin_themes() {
+                    if def.name.to_lowercase() == lower {
+                        return HiveTheme::from_definition(&def);
+                    }
+                }
+                // Try loading from custom themes on disk.
+                if let Ok(mgr) = ThemeManager::new() {
+                    for def in mgr.list_custom_themes() {
+                        if def.name.to_lowercase() == lower {
+                            return HiveTheme::from_definition(&def);
+                        }
+                    }
+                }
+                // Fallback
+                HiveTheme::dark()
+            }
         }
     }
 
@@ -718,13 +786,49 @@ impl HiveWorkspace {
         };
     }
 
-    fn refresh_shield_data(&mut self, cx: &App) {
+    fn refresh_shield_data(&mut self, cx: &mut Context<Self>) {
         if cx.has_global::<AppShield>() {
             let shield = &cx.global::<AppShield>().0;
             self.shield_data.enabled = true;
             self.shield_data.pii_detections = shield.pii_detection_count();
             self.shield_data.secrets_blocked = shield.secrets_blocked_count();
             self.shield_data.threats_caught = shield.threats_caught_count();
+        }
+        // Populate interactive toggle states from config.
+        if cx.has_global::<AppConfig>() {
+            let cfg = cx.global::<AppConfig>().0.get();
+            self.shield_data.shield_enabled = cfg.shield_enabled;
+            self.shield_data.secret_scan_enabled = cfg.shield.enable_secret_scan;
+            self.shield_data.vulnerability_check_enabled = cfg.shield.enable_vulnerability_check;
+            self.shield_data.pii_detection_enabled = cfg.shield.enable_pii_detection;
+            self.shield_data.user_rules = cfg.shield.user_rules.clone();
+        }
+        // Push data to the ShieldView entity.
+        self.shield_view.update(cx, |view, _cx| {
+            view.update_from_data(&self.shield_data);
+        });
+    }
+
+    /// Handle shield config changes from the ShieldView panel.
+    fn handle_shield_config_save(&mut self, cx: &mut Context<Self>) {
+        let snapshot = self.shield_view.read(cx).collect_shield_config();
+
+        if cx.has_global::<AppConfig>() {
+            let _ = cx.global::<AppConfig>().0.update(|cfg| {
+                cfg.shield_enabled = snapshot.shield_enabled;
+                cfg.shield.enable_secret_scan = snapshot.secret_scan_enabled;
+                cfg.shield.enable_vulnerability_check = snapshot.vulnerability_check_enabled;
+                cfg.shield.enable_pii_detection = snapshot.pii_detection_enabled;
+                cfg.shield.user_rules = snapshot.user_rules.clone();
+            });
+        }
+
+        // Rebuild the live HiveShield with the new config.
+        if cx.has_global::<AppConfig>() {
+            let cfg = cx.global::<AppConfig>().0.get();
+            let new_shield =
+                std::sync::Arc::new(hive_shield::HiveShield::new(cfg.shield.clone()));
+            cx.set_global(AppShield(new_shield));
         }
     }
 
@@ -1547,7 +1651,14 @@ impl HiveWorkspace {
         let model = self.chat_service.read(cx).current_model().to_string();
 
         // Shield: scan outgoing text before sending to AI.
-        let send_text = if cx.has_global::<AppShield>() {
+        // Check if the shield is enabled in config.
+        let shield_enabled = if cx.has_global::<AppConfig>() {
+            cx.global::<AppConfig>().0.get().shield_enabled
+        } else {
+            true // default to enabled if no config
+        };
+
+        let send_text = if shield_enabled && cx.has_global::<AppShield>() {
             let shield = &cx.global::<AppShield>().0;
             let result = shield.process_outgoing(&text, &model);
             match result.action {
@@ -1963,7 +2074,7 @@ impl HiveWorkspace {
             }
             Panel::Specs => SpecsPanel::render(&self.specs_data, theme).into_any_element(),
             Panel::Agents => AgentsPanel::render(&self.agents_data, theme).into_any_element(),
-            Panel::Shield => ShieldPanel::render(&self.shield_data, theme).into_any_element(),
+            Panel::Shield => self.shield_view.clone().into_any_element(),
             Panel::Learning => LearningPanel::render(&self.learning_data, theme).into_any_element(),
             Panel::Assistant => {
                 AssistantPanel::render(&self.assistant_data, theme).into_any_element()
@@ -5053,6 +5164,229 @@ impl HiveWorkspace {
         // The action still dispatches to the view which emits the event.
     }
 
+    /// Handle the `ThemeChanged` action: resolve the new theme by name,
+    /// update `self.theme`, persist to config, refresh the `AppTheme` global,
+    /// and propagate the theme to child views.
+    fn handle_theme_changed(
+        &mut self,
+        action: &ThemeChanged,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_theme = Self::resolve_theme_by_name(&action.theme_name);
+        self.theme = new_theme.clone();
+
+        // Update the global so child views can read the new theme.
+        cx.set_global(AppTheme(new_theme.clone()));
+
+        // Persist the theme name to config.
+        if cx.has_global::<AppConfig>() {
+            let config_mgr = &cx.global::<AppConfig>().0;
+            if let Err(e) = config_mgr.update(|cfg| {
+                cfg.theme = action.theme_name.clone();
+            }) {
+                error!("Failed to persist theme to config: {e}");
+            }
+        }
+
+        // Push the updated theme to sub-views that cache their own copy.
+        let theme_name_for_settings = action.theme_name.clone();
+        self.settings_view.update(cx, |view, cx| {
+            view.set_theme(new_theme.clone(), cx);
+            view.set_selected_theme(theme_name_for_settings, cx);
+        });
+        self.chat_input.update(cx, |view, cx| {
+            view.set_theme(new_theme.clone(), cx);
+        });
+        self.models_browser_view.update(cx, |view, cx| {
+            view.set_theme(new_theme.clone(), cx);
+        });
+        self.channels_view.update(cx, |view, cx| {
+            view.set_theme(new_theme.clone(), cx);
+        });
+        self.workflow_builder_view.update(cx, |view, cx| {
+            view.set_theme(new_theme.clone(), cx);
+        });
+
+        info!("Theme changed to: {}", action.theme_name);
+        cx.notify();
+    }
+
+    fn handle_export_config(
+        &mut self,
+        _action: &ExportConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppConfig>() {
+            warn!("ExportConfig: no AppConfig available");
+            return;
+        }
+
+        // Password dialog will be wired in a future iteration; for now we use
+        // a fixed passphrase so exports are portable between machines.
+        let password = "hive-export-default";
+
+        let blob = match cx.global::<AppConfig>().0.export_config(password) {
+            Ok(b) => b,
+            Err(e) => {
+                error!("ExportConfig: export failed: {e}");
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Config Export",
+                    format!("Failed to export config: {e}"),
+                );
+                return;
+            }
+        };
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let export_dir = HiveConfig::base_dir()
+            .map(|d| d.join("exports"))
+            .unwrap_or_else(|_| PathBuf::from(".hive/exports"));
+        let export_path = export_dir.join(format!("hive-config-{timestamp}.enc"));
+
+        let result = (|| -> anyhow::Result<()> {
+            std::fs::create_dir_all(&export_dir)?;
+            std::fs::write(&export_path, &blob)?;
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => {
+                let len = blob.len();
+                info!(
+                    "ExportConfig: wrote {len} bytes to {}",
+                    export_path.display()
+                );
+                self.push_notification(
+                    cx,
+                    NotificationType::Success,
+                    "Config Export",
+                    format!("Exported to {}", export_path.display()),
+                );
+            }
+            Err(e) => {
+                error!("ExportConfig: failed to write file: {e}");
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Config Export",
+                    format!("Failed to write export file: {e}"),
+                );
+            }
+        }
+    }
+
+    fn handle_import_config(
+        &mut self,
+        _action: &ImportConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppConfig>() {
+            warn!("ImportConfig: no AppConfig available");
+            return;
+        }
+
+        // Locate the most recent .enc export in ~/.hive/exports/
+        let export_dir = match HiveConfig::base_dir().map(|d| d.join("exports")) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("ImportConfig: cannot resolve exports dir: {e}");
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Config Import",
+                    format!("Cannot resolve exports directory: {e}"),
+                );
+                return;
+            }
+        };
+
+        let latest_file = std::fs::read_dir(&export_dir)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .map_or(false, |ext| ext == "enc")
+                    })
+                    .filter(|e| {
+                        e.file_name()
+                            .to_string_lossy()
+                            .starts_with("hive-config-")
+                    })
+                    .max_by_key(|e| {
+                        e.metadata()
+                            .and_then(|m| m.modified())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                    })
+                    .map(|e| e.path())
+            });
+
+        let import_path = match latest_file {
+            Some(p) => p,
+            None => {
+                warn!("ImportConfig: no export files found in {}", export_dir.display());
+                self.push_notification(
+                    cx,
+                    NotificationType::Warning,
+                    "Config Import",
+                    format!(
+                        "No export files found. Place a .enc export in {}",
+                        export_dir.display()
+                    ),
+                );
+                return;
+            }
+        };
+
+        let data = match std::fs::read(&import_path) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("ImportConfig: failed to read {}: {e}", import_path.display());
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Config Import",
+                    format!("Failed to read {}: {e}", import_path.display()),
+                );
+                return;
+            }
+        };
+
+        // Must match the password used during export.
+        let password = "hive-export-default";
+
+        match cx.global::<AppConfig>().0.import_config(&data, password) {
+            Ok(()) => {
+                info!(
+                    "ImportConfig: successfully imported from {}",
+                    import_path.display()
+                );
+                self.push_notification(
+                    cx,
+                    NotificationType::Success,
+                    "Config Import",
+                    format!("Imported config from {}", import_path.display()),
+                );
+            }
+            Err(e) => {
+                error!("ImportConfig: import failed: {e}");
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Config Import",
+                    format!("Import failed: {e}"),
+                );
+            }
+        }
+    }
+
     /// Called when `SettingsView` emits `SettingsSaved`. Reads all values from
     /// the view and persists them to `AppConfig`.
     /// Push API keys + enabled providers to the models browser view.
@@ -6181,6 +6515,10 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_token_launch_deploy))
             // Settings
             .on_action(cx.listener(Self::handle_settings_save))
+            .on_action(cx.listener(Self::handle_export_config))
+            .on_action(cx.listener(Self::handle_import_config))
+            // Theme
+            .on_action(cx.listener(Self::handle_theme_changed))
             // Monitor
             .on_action(cx.listener(Self::handle_monitor_refresh))
             // Agents

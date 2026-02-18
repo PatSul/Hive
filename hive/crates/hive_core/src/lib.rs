@@ -37,6 +37,8 @@ pub mod secure_storage;
 pub mod security;
 /// Session state persistence for crash recovery and workspace restoration.
 pub mod session;
+/// Theme data model, built-in themes, and file management (`~/.hive/themes/`).
+pub mod theme_manager;
 /// Auto-update service — checks GitHub for newer releases and installs updates.
 pub mod updater;
 
@@ -67,4 +69,5 @@ pub use secure_storage::SecureStorage;
 pub use security::SecurityGateway;
 pub use session::SessionState;
 pub use channels::{AgentChannel, ChannelMessage, ChannelStore, ChannelThread, MessageAuthor};
+pub use theme_manager::{ThemeColors, ThemeDefinition, ThemeFonts, ThemeManager};
 pub use updater::{UpdateInfo, UpdateService};

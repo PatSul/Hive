@@ -91,6 +91,7 @@ pub async fn fetch_anthropic_models(api_key: &str) -> Result<Vec<ModelInfo>, Str
                 input_price_per_mtok: 3.0,
                 output_price_per_mtok: 15.0,
                 capabilities: Default::default(),
+                release_date: None,
             }
         })
         .collect();
@@ -122,6 +123,7 @@ mod tests {
                 input_price_per_mtok: 3.0,
                 output_price_per_mtok: 15.0,
                 capabilities: Default::default(),
+                release_date: None,
             }];
             cache.fetched_at = Some(Instant::now());
         }
