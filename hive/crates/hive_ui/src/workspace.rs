@@ -5402,6 +5402,7 @@ impl HiveWorkspace {
         let anthropic_key = config.anthropic_api_key.clone();
         let google_key = config.google_api_key.clone();
         let groq_key = config.groq_api_key.clone();
+        let xai_key = config.xai_api_key.clone();
         let hf_key = config.huggingface_api_key.clone();
 
         if or_key.is_some() {
@@ -5419,6 +5420,9 @@ impl HiveWorkspace {
         if groq_key.is_some() {
             providers.insert(hive_ai::types::ProviderType::Groq);
         }
+        if xai_key.is_some() {
+            providers.insert(hive_ai::types::ProviderType::XAI);
+        }
         if hf_key.is_some() {
             providers.insert(hive_ai::types::ProviderType::HuggingFace);
         }
@@ -5430,6 +5434,7 @@ impl HiveWorkspace {
             browser.set_anthropic_api_key(anthropic_key, cx);
             browser.set_google_api_key(google_key, cx);
             browser.set_groq_api_key(groq_key, cx);
+            browser.set_xai_api_key(xai_key, cx);
             browser.set_huggingface_api_key(hf_key, cx);
         });
     }
@@ -5532,6 +5537,7 @@ impl HiveWorkspace {
                 ("openrouter", &snapshot.openrouter_key),
                 ("google", &snapshot.google_key),
                 ("groq", &snapshot.groq_key),
+                ("xai", &snapshot.xai_key),
                 ("huggingface", &snapshot.huggingface_key),
                 ("litellm", &snapshot.litellm_key),
                 ("elevenlabs", &snapshot.elevenlabs_key),

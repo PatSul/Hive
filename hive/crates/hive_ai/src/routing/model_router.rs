@@ -105,6 +105,11 @@ static MODEL_MAPPINGS: &[ModelMapping] = &[
         prefix: "mistralai/",
         provider: ProviderType::OpenRouter,
     },
+    // xAI / Grok models
+    ModelMapping {
+        prefix: "grok-",
+        provider: ProviderType::XAI,
+    },
     // Groq models
     ModelMapping {
         prefix: "groq/",
@@ -478,6 +483,7 @@ fn infer_tier(model_id: &str) -> ModelTier {
         || lower.contains("o3")
         || lower.contains("gemini-1.5-pro")
         || lower.contains("gemini-2")
+        || lower.contains("grok-3")
     {
         // gpt-4o-mini is Mid, not Premium
         if lower.contains("mini") {
@@ -491,6 +497,7 @@ fn infer_tier(model_id: &str) -> ModelTier {
         || lower.contains("mini")
         || lower.contains("flash")
         || lower.contains("gemini-1.5-flash")
+        || lower.contains("grok-2")
     {
         return ModelTier::Mid;
     }

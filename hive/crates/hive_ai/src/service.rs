@@ -602,6 +602,7 @@ mod tests {
             openrouter_api_key: None,
             google_api_key: None,
             groq_api_key: None,
+            xai_api_key: None,
             huggingface_api_key: None,
             litellm_url: None,
             litellm_api_key: None,

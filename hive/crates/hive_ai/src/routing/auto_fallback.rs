@@ -289,6 +289,7 @@ impl AutoFallbackManager {
             ProviderType::OpenRouter,
             ProviderType::Google,
             ProviderType::Groq,
+            ProviderType::XAI,
             ProviderType::LiteLLM,
             ProviderType::HuggingFace,
             ProviderType::Ollama,

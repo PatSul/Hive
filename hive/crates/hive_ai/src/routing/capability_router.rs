@@ -458,6 +458,51 @@ static KNOWN_MODEL_STRENGTHS: Lazy<Vec<ModelStrengths>> = Lazy::new(|| {
             agentic_score: 0.55,
         },
         // -----------------------------------------------------------------
+        // xAI / Grok
+        // -----------------------------------------------------------------
+        ModelStrengths {
+            model_pattern: "grok-3".into(),
+            coding_score: 0.90,
+            reasoning_score: 0.88,
+            creative_writing_score: 0.85,
+            math_score: 0.88,
+            instruction_following: 0.90,
+            multilingual_score: 0.82,
+            long_context_score: 0.85,
+            speed_score: 0.72,
+            tool_use_score: 0.82,
+            vision_score: 0.0,
+            agentic_score: 0.70,
+        },
+        ModelStrengths {
+            model_pattern: "grok-3-mini".into(),
+            coding_score: 0.82,
+            reasoning_score: 0.84,
+            creative_writing_score: 0.78,
+            math_score: 0.84,
+            instruction_following: 0.85,
+            multilingual_score: 0.78,
+            long_context_score: 0.82,
+            speed_score: 0.88,
+            tool_use_score: 0.75,
+            vision_score: 0.0,
+            agentic_score: 0.58,
+        },
+        ModelStrengths {
+            model_pattern: "grok-2".into(),
+            coding_score: 0.80,
+            reasoning_score: 0.78,
+            creative_writing_score: 0.80,
+            math_score: 0.76,
+            instruction_following: 0.82,
+            multilingual_score: 0.78,
+            long_context_score: 0.80,
+            speed_score: 0.80,
+            tool_use_score: 0.72,
+            vision_score: 0.0,
+            agentic_score: 0.55,
+        },
+        // -----------------------------------------------------------------
         // Mistral
         // -----------------------------------------------------------------
         ModelStrengths {

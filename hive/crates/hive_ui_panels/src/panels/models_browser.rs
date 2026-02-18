@@ -80,6 +80,10 @@ pub struct ModelsBrowserView {
     hf_fetch_status: FetchStatus,
     huggingface_api_key: Option<String>,
 
+    fetched_xai_models: Vec<ModelInfo>,
+    xai_fetch_status: FetchStatus,
+    xai_api_key: Option<String>,
+
     // Local models
     discovered_local_models: Vec<ModelInfo>,
 
@@ -147,6 +151,9 @@ impl ModelsBrowserView {
             fetched_hf_models: Vec::new(),
             hf_fetch_status: FetchStatus::Idle,
             huggingface_api_key: None,
+            fetched_xai_models: Vec::new(),
+            xai_fetch_status: FetchStatus::Idle,
+            xai_api_key: None,
             discovered_local_models: Vec::new(),
             collapsed_providers: HashSet::new(),
             expanded_providers: HashSet::new(),
@@ -224,6 +231,16 @@ impl ModelsBrowserView {
         if changed {
             self.fetched_hf_models.clear();
             self.hf_fetch_status = FetchStatus::Idle;
+            cx.notify();
+        }
+    }
+
+    pub fn set_xai_api_key(&mut self, key: Option<String>, cx: &mut Context<Self>) {
+        let changed = self.xai_api_key != key;
+        self.xai_api_key = key;
+        if changed {
+            self.fetched_xai_models.clear();
+            self.xai_fetch_status = FetchStatus::Idle;
             cx.notify();
         }
     }

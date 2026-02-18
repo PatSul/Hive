@@ -52,6 +52,7 @@ pub struct SettingsData {
     pub has_openrouter_key: bool,
     pub has_google_key: bool,
     pub has_groq_key: bool,
+    pub has_xai_key: bool,
     pub has_huggingface_key: bool,
     pub has_litellm_key: bool,
     pub ollama_url: String,
@@ -87,6 +88,7 @@ impl Default for SettingsData {
             has_openrouter_key: false,
             has_google_key: false,
             has_groq_key: false,
+            has_xai_key: false,
             has_huggingface_key: false,
             has_litellm_key: false,
             ollama_url: "http://localhost:11434".into(),
@@ -131,6 +133,7 @@ impl SettingsData {
                 .is_some_and(|k| !k.is_empty()),
             has_google_key: cfg.google_api_key.as_ref().is_some_and(|k| !k.is_empty()),
             has_groq_key: cfg.groq_api_key.as_ref().is_some_and(|k| !k.is_empty()),
+            has_xai_key: cfg.xai_api_key.as_ref().is_some_and(|k| !k.is_empty()),
             has_huggingface_key: cfg
                 .huggingface_api_key
                 .as_ref()
@@ -174,6 +177,7 @@ impl SettingsData {
             self.has_openrouter_key,
             self.has_google_key,
             self.has_groq_key,
+            self.has_xai_key,
             self.has_huggingface_key,
         ]
         .iter()
@@ -207,6 +211,7 @@ pub struct SettingsView {
     openrouter_key_input: Entity<InputState>,
     google_key_input: Entity<InputState>,
     groq_key_input: Entity<InputState>,
+    xai_key_input: Entity<InputState>,
     huggingface_key_input: Entity<InputState>,
 
     // LiteLLM inputs
@@ -248,6 +253,7 @@ pub struct SettingsView {
     had_openrouter_key: bool,
     had_google_key: bool,
     had_groq_key: bool,
+    had_xai_key: bool,
     had_huggingface_key: bool,
     had_litellm_key: bool,
     had_elevenlabs_key: bool,
@@ -291,6 +297,7 @@ impl SettingsView {
             .is_some_and(|k| !k.is_empty());
         let had_google = cfg.google_api_key.as_ref().is_some_and(|k| !k.is_empty());
         let had_groq = cfg.groq_api_key.as_ref().is_some_and(|k| !k.is_empty());
+        let had_xai = cfg.xai_api_key.as_ref().is_some_and(|k| !k.is_empty());
         let had_huggingface = cfg
             .huggingface_api_key
             .as_ref()
@@ -327,10 +334,15 @@ impl SettingsView {
             state
         });
 
-        // Groq + HuggingFace key inputs
+        // Groq + xAI + HuggingFace key inputs
         let groq_key_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_placeholder(key_placeholder(had_groq), window, cx);
+            state
+        });
+        let xai_key_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder(key_placeholder(had_xai), window, cx);
             state
         });
         let huggingface_key_input = cx.new(|cx| {
@@ -463,6 +475,7 @@ impl SettingsView {
             &openrouter_key_input,
             &google_key_input,
             &groq_key_input,
+            &xai_key_input,
             &huggingface_key_input,
             &litellm_key_input,
             &litellm_url_input,
@@ -517,6 +530,7 @@ impl SettingsView {
             openrouter_key_input,
             google_key_input,
             groq_key_input,
+            xai_key_input,
             huggingface_key_input,
             litellm_key_input,
             litellm_url_input,
@@ -542,6 +556,7 @@ impl SettingsView {
             had_openrouter_key: had_openrouter,
             had_google_key: had_google,
             had_groq_key: had_groq,
+            had_xai_key: had_xai,
             had_huggingface_key: had_huggingface,
             had_litellm_key: had_litellm,
             had_elevenlabs_key: had_elevenlabs,
@@ -616,6 +631,7 @@ impl SettingsView {
         let openrouter_val = self.openrouter_key_input.read(cx).value().to_string();
         let google_val = self.google_key_input.read(cx).value().to_string();
         let groq_val = self.groq_key_input.read(cx).value().to_string();
+        let xai_val = self.xai_key_input.read(cx).value().to_string();
         let huggingface_val = self.huggingface_key_input.read(cx).value().to_string();
         let litellm_val = self.litellm_key_input.read(cx).value().to_string();
 
@@ -629,6 +645,7 @@ impl SettingsView {
             openrouter_key: non_empty_trimmed(&openrouter_val),
             google_key: non_empty_trimmed(&google_val),
             groq_key: non_empty_trimmed(&groq_val),
+            xai_key: non_empty_trimmed(&xai_val),
             huggingface_key: non_empty_trimmed(&huggingface_val),
             litellm_key: non_empty_trimmed(&litellm_val),
             elevenlabs_key: non_empty_trimmed(&elevenlabs_val),
@@ -704,6 +721,7 @@ impl SettingsView {
             self.key_is_set(self.had_openrouter_key, &self.openrouter_key_input, cx);
         let google_set = self.key_is_set(self.had_google_key, &self.google_key_input, cx);
         let groq_set = self.key_is_set(self.had_groq_key, &self.groq_key_input, cx);
+        let xai_set = self.key_is_set(self.had_xai_key, &self.xai_key_input, cx);
         let huggingface_set =
             self.key_is_set(self.had_huggingface_key, &self.huggingface_key_input, cx);
 
@@ -722,6 +740,9 @@ impl SettingsView {
         }
         if groq_set {
             providers.insert(ProviderType::Groq);
+        }
+        if xai_set {
+            providers.insert(ProviderType::XAI);
         }
         if huggingface_set {
             providers.insert(ProviderType::HuggingFace);
@@ -811,6 +832,7 @@ pub struct SettingsSnapshot {
     pub openrouter_key: Option<String>,
     pub google_key: Option<String>,
     pub groq_key: Option<String>,
+    pub xai_key: Option<String>,
     pub huggingface_key: Option<String>,
     pub litellm_key: Option<String>,
     pub elevenlabs_key: Option<String>,
@@ -872,6 +894,7 @@ impl Render for SettingsView {
             self.key_is_set(self.had_openrouter_key, &self.openrouter_key_input, cx);
         let google_set = self.key_is_set(self.had_google_key, &self.google_key_input, cx);
         let groq_set = self.key_is_set(self.had_groq_key, &self.groq_key_input, cx);
+        let xai_set = self.key_is_set(self.had_xai_key, &self.xai_key_input, cx);
         let huggingface_set =
             self.key_is_set(self.had_huggingface_key, &self.huggingface_key_input, cx);
         let key_count = [
@@ -880,6 +903,7 @@ impl Render for SettingsView {
             openrouter_set,
             google_set,
             groq_set,
+            xai_set,
             huggingface_set,
         ]
         .iter()
@@ -1004,6 +1028,8 @@ impl Render for SettingsView {
                                         &self.google_key_input,
                                         groq_set,
                                         &self.groq_key_input,
+                                        xai_set,
+                                        &self.xai_key_input,
                                         huggingface_set,
                                         &self.huggingface_key_input,
                                         theme,
@@ -1739,6 +1765,8 @@ fn render_api_keys_section(
     google_input: &Entity<InputState>,
     groq_set: bool,
     groq_input: &Entity<InputState>,
+    xai_set: bool,
+    xai_input: &Entity<InputState>,
     huggingface_set: bool,
     huggingface_input: &Entity<InputState>,
     theme: &HiveTheme,
@@ -1763,7 +1791,7 @@ fn render_api_keys_section(
                         } else {
                             theme.accent_red
                         })
-                        .child(format!("{}/6 configured", key_count)),
+                        .child(format!("{}/7 configured", key_count)),
                 ),
         )
         .child(section_desc(
@@ -1776,6 +1804,7 @@ fn render_api_keys_section(
         .child(api_key_row("OpenRouter API Key", openrouter_set, openrouter_input, theme))
         .child(api_key_row("Google API Key", google_set, google_input, theme))
         .child(api_key_row("Groq API Key", groq_set, groq_input, theme))
+        .child(api_key_row("xAI API Key", xai_set, xai_input, theme))
         .child(api_key_row("Hugging Face API Key", huggingface_set, huggingface_input, theme))
         .into_any_element()
 }

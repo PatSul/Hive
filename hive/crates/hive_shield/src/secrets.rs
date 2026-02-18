@@ -357,7 +357,7 @@ mod tests {
         let s = scanner();
         let fake_key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
         let text = format!("{fake_key}\npostgres://u:p@h:5432/db");
-        let result = s.scan(text);
+        let result = s.scan(&text);
         assert_eq!(result.files_scanned, 1);
         assert!(result.matches.len() >= 2);
         assert!(result.risk_level >= RiskLevel::High);
@@ -368,7 +368,7 @@ mod tests {
         let s = scanner();
         let fake_key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
         let text = format!("line1\nline2\n{fake_key}\nline4");
-        let matches = s.scan_text(text);
+        let matches = s.scan_text(&text);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].line, 3);
     }
