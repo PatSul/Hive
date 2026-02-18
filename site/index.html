@@ -614,7 +614,7 @@ footer a:hover { text-decoration: underline; }
   });
 
   function animate() {
-    time += 0.008;
+    time += 0.015;
     ctx.clearRect(0, 0, w, h);
 
     for (let row = -1; row < rows; row++) {
@@ -623,43 +623,47 @@ footer a:hover { text-decoration: underline; }
         const cx = col * HEX_W + (isOddRow ? HEX_W / 2 : 0);
         const cy = row * HEX_H;
 
-        // Multiple overlapping sine waves for undulating effect
-        const wave1 = Math.sin(cx * 0.008 + time * 1.2) * 0.5;
-        const wave2 = Math.sin(cy * 0.006 - time * 0.9) * 0.5;
-        const wave3 = Math.sin((cx + cy) * 0.004 + time * 0.7) * 0.4;
-        const wave4 = Math.sin(cx * 0.012 - cy * 0.008 + time * 1.5) * 0.3;
-        const combined = (wave1 + wave2 + wave3 + wave4) / 1.7;
+        // Multiple overlapping sine waves for undulating, wave-like motion
+        const wave1 = Math.sin(cx * 0.01 + time * 1.4);
+        const wave2 = Math.sin(cy * 0.008 - time * 1.1);
+        const wave3 = Math.sin((cx + cy) * 0.005 + time * 0.8) * 0.8;
+        const wave4 = Math.sin(cx * 0.015 - cy * 0.01 + time * 1.8) * 0.6;
+        // Diagonal sweep wave for dramatic rolling effect
+        const wave5 = Math.sin((cx * 0.7 + cy * 0.7) * 0.006 + time * 1.0) * 0.7;
+        const combined = (wave1 + wave2 + wave3 + wave4 + wave5) / 4.1;
 
         // Normalize to 0-1
         const intensity = (combined + 1) * 0.5;
+        // Sharpen the peaks for more contrast between bright and dim hexes
+        const shaped = intensity * intensity;
 
         // Mouse proximity glow
         const dx = cx - mouseX;
         const dy = cy - mouseY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const mouseGlow = Math.max(0, 1 - dist / 200) * 0.5;
+        const mouseGlow = Math.max(0, 1 - dist / 250) * 0.7;
 
-        // Combined alpha
-        const alpha = 0.03 + intensity * 0.12 + mouseGlow;
+        // Combined alpha — much more visible now
+        const alpha = 0.08 + shaped * 0.55 + mouseGlow;
 
-        // Slight scale pulse
-        const scale = 0.92 + intensity * 0.08 + mouseGlow * 0.1;
+        // Scale pulse — hexagons breathe with the wave
+        const scale = 0.88 + shaped * 0.14 + mouseGlow * 0.12;
         const r = HEX_RADIUS * scale;
 
-        // Color shifts with the wave
-        const hue = 38 + intensity * 8; // amber range 38-46
-        const sat = 80 + intensity * 20;
-        const lum = 35 + intensity * 20 + mouseGlow * 15;
+        // Color shifts: dark amber to bright gold at peaks
+        const hue = 33 + shaped * 12; // amber-gold range
+        const sat = 85 + shaped * 15;
+        const lum = 25 + shaped * 35 + mouseGlow * 20;
 
         drawHex(cx, cy, r);
 
-        // Fill
-        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lum}%, ${alpha * 0.4})`;
+        // Fill — visible glow on bright hexes
+        ctx.fillStyle = `hsla(${hue}, ${sat}%, ${lum}%, ${alpha * 0.35})`;
         ctx.fill();
 
-        // Stroke
-        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${lum}%, ${alpha})`;
-        ctx.lineWidth = 1;
+        // Stroke — the honeycomb grid lines
+        ctx.strokeStyle = `hsla(${hue}, ${sat}%, ${lum}%, ${alpha * 0.85})`;
+        ctx.lineWidth = shaped > 0.5 ? 1.5 : 1;
         ctx.stroke();
       }
     }
