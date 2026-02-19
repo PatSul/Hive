@@ -68,3 +68,4 @@ pub use kubernetes::{
 };
 pub use smart_home::PhilipsHueClient;
 pub use webhooks::{Webhook, WebhookRegistry};
+pub use clawdtalk::{ClawdTalkClient, ClawdTalkConfig, BridgeState, InboundMessage, OutboundMessage};

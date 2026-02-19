@@ -70,23 +70,6 @@ fn shell_program() -> (&'static str, Vec<&'static str>) {
     }
 }
 
-/// Name of the shell program for the current platform (useful in tests).
-#[allow(dead_code)]
-#[cfg(windows)]
-fn expected_shell_name() -> &'static str {
-    "cmd.exe"
-}
-
-#[allow(dead_code)]
-#[cfg(unix)]
-fn expected_shell_name() -> &'static str {
-    if Path::new("/bin/bash").exists() {
-        "/bin/bash"
-    } else {
-        "/bin/sh"
-    }
-}
-
 impl InteractiveShell {
     /// Default terminal dimensions when none are specified.
     const DEFAULT_COLS: u16 = 80;
@@ -319,6 +302,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- Platform helpers ----------------------------------------------------
+
+    /// Name of the shell program for the current platform (useful in tests).
+    #[cfg(windows)]
+    fn expected_shell_name() -> &'static str {
+        "cmd.exe"
+    }
+
+    #[cfg(unix)]
+    fn expected_shell_name() -> &'static str {
+        if Path::new("/bin/bash").exists() {
+            "/bin/bash"
+        } else {
+            "/bin/sh"
+        }
+    }
 
     // -- Construction --------------------------------------------------------
 

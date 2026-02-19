@@ -933,17 +933,6 @@ impl TransportHandle {
         }
     }
 
-    #[allow(dead_code)]
-    async fn send_notification(
-        &mut self,
-        notification: &JsonRpcNotification,
-    ) -> anyhow::Result<()> {
-        match self {
-            Self::Stdio(t) => t.send_notification(notification).await,
-            Self::Sse(t) => t.send_notification(notification).await,
-        }
-    }
-
     async fn read_response(&mut self, expected_id: u64) -> anyhow::Result<JsonRpcResponse> {
         match self {
             Self::Stdio(t) => t.read_response(expected_id).await,

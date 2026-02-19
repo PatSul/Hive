@@ -1,6 +1,6 @@
 use gpui_component::IconName;
 
-/// The 21 navigable panels in the application.
+/// The 22 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
@@ -22,12 +22,13 @@ pub enum Panel {
     Shield,
     Assistant,
     TokenLaunch,
+    Network,
     Settings,
     Help,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 21] = [
+    pub const ALL: [Panel; 22] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
@@ -47,6 +48,7 @@ impl Panel {
         Panel::Shield,
         Panel::Assistant,
         Panel::TokenLaunch,
+        Panel::Network,
         Panel::Settings,
         Panel::Help,
     ];
@@ -72,6 +74,7 @@ impl Panel {
             Self::Shield => "Shield",
             Self::Assistant => "Assistant",
             Self::TokenLaunch => "Launch",
+            Self::Network => "Network",
             Self::Settings => "Settings",
             Self::Help => "Help",
         }
@@ -108,6 +111,7 @@ impl Panel {
             Self::Shield => IconName::EyeOff,
             Self::Assistant => IconName::Bell,
             Self::TokenLaunch => IconName::Globe,
+            Self::Network => IconName::Globe,
             Self::Settings => IconName::Settings,
             Self::Help => IconName::Info,
         }
@@ -138,6 +142,7 @@ impl Panel {
             "Shield" => Self::Shield,
             "Assistant" => Self::Assistant,
             "TokenLaunch" => Self::TokenLaunch,
+            "Network" => Self::Network,
             "Settings" => Self::Settings,
             "Help" => Self::Help,
             _ => Self::Chat,
@@ -166,13 +171,14 @@ impl Panel {
             Self::Shield => "Shield",
             Self::Assistant => "Assistant",
             Self::TokenLaunch => "TokenLaunch",
+            Self::Network => "Network",
             Self::Settings => "Settings",
             Self::Help => "Help",
         }
     }
 }
 
-/// Sidebar component with 21 navigation icon buttons.
+/// Sidebar component with 22 navigation icon buttons.
 pub struct Sidebar {
     pub active_panel: Panel,
 }

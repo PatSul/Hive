@@ -15,6 +15,9 @@ use hive_agents::skill_marketplace::SkillMarketplace;
 use hive_agents::skills::SkillsRegistry;
 use hive_agents::specs::SpecManager;
 use crate::theme::HiveTheme;
+use hive_ai::context_engine::ContextEngine;
+use hive_ai::rag::RagService;
+use hive_ai::semantic_search::SemanticSearchService;
 use hive_ai::service::AiService;
 use hive_ai::tts::service::TtsService;
 use hive_assistant::AssistantService;
@@ -196,9 +199,25 @@ impl Global for AppDocsIndexer {}
 pub struct AppUpdater(pub UpdateService);
 impl Global for AppUpdater {}
 
+/// Global wrapper for fleet learning (cross-instance pattern detection).
+pub struct AppFleetLearning(pub Arc<Mutex<hive_ai::FleetLearningService>>);
+impl Global for AppFleetLearning {}
+
 /// Global wrapper for the active application theme.
 ///
 /// Set during workspace initialization from the config-driven theme resolution.
 /// Updated when the user switches themes via the Settings panel.
 pub struct AppTheme(pub HiveTheme);
 impl Global for AppTheme {}
+
+/// Global wrapper for RAG service (document indexing + retrieval).
+pub struct AppRagService(pub Arc<Mutex<RagService>>);
+impl Global for AppRagService {}
+
+/// Global wrapper for semantic search service.
+pub struct AppSemanticSearch(pub Arc<Mutex<SemanticSearchService>>);
+impl Global for AppSemanticSearch {}
+
+/// Global wrapper for context curation engine.
+pub struct AppContextEngine(pub Arc<Mutex<ContextEngine>>);
+impl Global for AppContextEngine {}

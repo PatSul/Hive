@@ -17,4 +17,5 @@ pub use docker::{
     VolumeMount,
 };
 pub use executor::{CommandExecutor, CommandOutput};
+pub use local_ai::{OllamaManager, OllamaModelInfo, PullProgress};
 pub use shell::{InteractiveShell, ShellOutput};

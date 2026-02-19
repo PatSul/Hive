@@ -74,6 +74,17 @@ pub struct RecentAction {
     pub action_type: String,
 }
 
+/// A pending approval awaiting human sign-off.
+#[derive(Debug, Clone, Default)]
+pub struct PendingApproval {
+    pub id: String,
+    pub action: String,
+    pub resource: String,
+    pub level: String,
+    pub requested_by: String,
+    pub created_at: String,
+}
+
 /// All data needed to render the assistant panel.
 #[derive(Debug, Clone)]
 pub struct AssistantPanelData {
@@ -81,6 +92,7 @@ pub struct AssistantPanelData {
     pub events: Vec<UpcomingEvent>,
     pub email_groups: Vec<EmailGroup>,
     pub reminders: Vec<ActiveReminder>,
+    pub approvals: Vec<PendingApproval>,
     pub research: Vec<ResearchProgress>,
     pub recent_actions: Vec<RecentAction>,
 }
@@ -92,6 +104,7 @@ impl AssistantPanelData {
             events: Vec::new(),
             email_groups: Vec::new(),
             reminders: Vec::new(),
+            approvals: Vec::new(),
             research: Vec::new(),
             recent_actions: Vec::new(),
         }
@@ -159,6 +172,14 @@ impl AssistantPanelData {
                     is_overdue: true,
                 },
             ],
+            approvals: vec![PendingApproval {
+                id: "apr-sample-1".into(),
+                action: "deploy".into(),
+                resource: "prod-server".into(),
+                level: "High".into(),
+                requested_by: "ci-bot".into(),
+                created_at: "2026-02-10T09:00:00Z".into(),
+            }],
             research: vec![ResearchProgress {
                 topic: "Rust async patterns".into(),
                 status: "Gathering sources".into(),
@@ -201,6 +222,7 @@ impl AssistantPanel {
             .child(render_events_section(&data.events, theme))
             .child(render_email_section(&data.email_groups, theme))
             .child(render_reminders_section(&data.reminders, theme))
+            .child(render_approvals_section(&data.approvals, theme))
             .child(render_research_section(&data.research, theme))
             .child(render_recent_actions(&data.recent_actions, theme))
     }
@@ -648,6 +670,94 @@ fn render_reminders_section(reminders: &[ActiveReminder], theme: &HiveTheme) -> 
                             .text_size(theme.font_size_xs)
                             .text_color(due_color)
                             .child(reminder.due.clone()),
+                    ),
+            );
+        }
+    }
+
+    section.into_any_element()
+}
+
+// ---------------------------------------------------------------------------
+// Pending approvals
+// ---------------------------------------------------------------------------
+
+fn render_approvals_section(approvals: &[PendingApproval], theme: &HiveTheme) -> AnyElement {
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .child(section_title("Pending Approvals", theme));
+
+    if approvals.is_empty() {
+        section = section.child(empty_state("No pending approvals", theme));
+    } else {
+        for approval in approvals {
+            let level_color = match approval.level.as_str() {
+                "Critical" => theme.accent_red,
+                "High" => theme.accent_yellow,
+                "Medium" => theme.accent_cyan,
+                _ => theme.text_secondary,
+            };
+
+            section = section.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .p(theme.space_2)
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_surface)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(theme.text_primary)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(approval.action.clone()),
+                            )
+                            .child(
+                                div()
+                                    .px(theme.space_1)
+                                    .py(px(1.0))
+                                    .rounded(theme.radius_sm)
+                                    .bg(theme.bg_tertiary)
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(level_color)
+                                    .child(approval.level.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_secondary)
+                            .child(format!("Resource: {}", approval.resource)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .child(format!("Requested by: {}", approval.requested_by)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .child(approval.created_at.clone()),
+                            ),
                     ),
             );
         }

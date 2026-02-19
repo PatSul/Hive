@@ -22,8 +22,8 @@ use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppLearning,
-    AppMarketplace, AppNotifications, AppPersonas, AppSecurity, AppShield, AppSpecs, AppTheme,
-    AppUpdater,
+    AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppRagService, AppSecurity,
+    AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
 };
@@ -33,7 +33,7 @@ pub use hive_ui_core::{
     SwitchToChat, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
     SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
-    SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToHelp,
+    SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToHelp,
     OpenWorkspaceDirectory,
     FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
     FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
@@ -54,11 +54,10 @@ pub use hive_ui_core::{
     SkillsSetCategory,
     RoutingAddRule, TokenLaunchDeploy, TokenLaunchSetStep, TokenLaunchSelectChain,
     SettingsSave, ExportConfig, ImportConfig,
-    MonitorRefresh, AgentsReloadWorkflows, AgentsRunWorkflow,
+    MonitorRefresh, NetworkRefresh, AgentsReloadWorkflows, AgentsRunWorkflow,
     SwitchToWorkflows, SwitchToChannels,
     WorkflowBuilderSave, WorkflowBuilderRun, WorkflowBuilderDeleteNode,
     WorkflowBuilderLoadWorkflow, ChannelSelect,
-    AccountConnect, AccountDisconnect, AccountRefresh,
     AccountConnectPlatform, AccountDisconnectPlatform,
     TriggerAppUpdate, ThemeChanged,
 };
@@ -76,6 +75,7 @@ use hive_ui_panels::panels::{
     logs::{LogsData, LogsPanel},
     models_browser::{ModelsBrowserView, ProjectModelsChanged},
     monitor::{MonitorData, MonitorPanel, SystemResources},
+    network::{NetworkPanel, NetworkPeerData},
     review::{AiCommitState, BranchEntry, GitOpsTab, LfsFileEntry, PrForm, PrSummary, ReviewData, ReviewPanel},
     routing::{RoutingData, RoutingPanel},
     settings::{SettingsSaved, SettingsView},
@@ -156,6 +156,7 @@ pub struct HiveWorkspace {
     shield_data: ShieldPanelData,
     learning_data: LearningPanelData,
     assistant_data: AssistantPanelData,
+    network_peer_data: NetworkPeerData,
     /// In-flight stream spawn task (kept alive to prevent cancellation).
     _stream_task: Option<Task<()>>,
     /// Tracks whether session state needs to be persisted. Avoids writing
@@ -531,6 +532,7 @@ impl HiveWorkspace {
             shield_data,
             learning_data,
             assistant_data,
+            network_peer_data: NetworkPeerData::default(),
             _stream_task: None,
             session_dirty: false,
             last_saved_conversation_id: session.active_conversation_id.clone(),
@@ -1285,7 +1287,7 @@ impl HiveWorkspace {
     }
 
     fn refresh_assistant_data(&mut self, cx: &App) {
-        use hive_ui_panels::panels::assistant::{ActiveReminder, BriefingSummary};
+        use hive_ui_panels::panels::assistant::{ActiveReminder, BriefingSummary, PendingApproval};
 
         if cx.has_global::<AppAssistant>() {
             let svc = &cx.global::<AppAssistant>().0;
@@ -1317,12 +1319,32 @@ impl HiveWorkspace {
                     is_overdue: matches!(&r.trigger, ReminderTrigger::At(at) if *at <= Utc::now()),
                 })
                 .collect();
+
+            if let Ok(pending) = svc.approval_service.list_pending() {
+                self.assistant_data.approvals = pending
+                    .iter()
+                    .map(|a| PendingApproval {
+                        id: a.id.clone(),
+                        action: a.action.clone(),
+                        resource: a.resource.clone(),
+                        level: format!("{:?}", a.level),
+                        requested_by: a.requested_by.clone(),
+                        created_at: a.created_at.clone(),
+                    })
+                    .collect();
+            }
         }
     }
 
     /// Kick off background async fetches to populate the assistant panel with
     /// real data from connected accounts (Gmail, Calendar, GitHub, etc.).
+    ///
+    /// Routes Gmail and Calendar fetches through `hive_assistant`'s
+    /// `EmailService` / `CalendarService` so the logic lives in one place
+    /// rather than duplicating the `hive_integrations` calls here.
     fn refresh_assistant_connected_data(&mut self, cx: &mut Context<Self>) {
+        use hive_assistant::calendar::CalendarService;
+        use hive_assistant::email::EmailService;
         use hive_core::config::AccountPlatform;
         use hive_ui_panels::panels::assistant::{
             EmailGroup, EmailPreview, UpcomingEvent,
@@ -1351,6 +1373,43 @@ impl HiveWorkspace {
             return;
         }
 
+        // Keep the global AssistantService in sync with the latest tokens.
+        if cx.has_global::<AppAssistant>() {
+            let svc = &mut cx.global_mut::<AppAssistant>().0;
+            for (platform, token) in &tokens {
+                match platform {
+                    AccountPlatform::Google => {
+                        svc.set_gmail_token(token.clone());
+                        svc.set_google_calendar_token(token.clone());
+                    }
+                    AccountPlatform::Microsoft => {
+                        svc.set_outlook_token(token.clone());
+                        svc.set_outlook_calendar_token(token.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Build lightweight service instances with current tokens for the
+        // background thread.  These are cheap to create and avoid sending the
+        // full AssistantService (which holds a database handle) across threads.
+        let mut gmail_token: Option<String> = None;
+        let mut outlook_token: Option<String> = None;
+        let mut github_tokens: Vec<String> = Vec::new();
+
+        for (platform, token) in &tokens {
+            match platform {
+                AccountPlatform::Google => gmail_token = Some(token.clone()),
+                AccountPlatform::Microsoft => outlook_token = Some(token.clone()),
+                AccountPlatform::GitHub => github_tokens.push(token.clone()),
+                _ => {}
+            }
+        }
+
+        let email_svc = EmailService::with_tokens(gmail_token.clone(), outlook_token.clone());
+        let calendar_svc = CalendarService::with_tokens(gmail_token, outlook_token);
+
         // Spawn background thread with tokio runtime for async fetches
         let (tx, rx) = std::sync::mpsc::channel::<AssistantFetchResult>();
 
@@ -1363,99 +1422,84 @@ impl HiveWorkspace {
                 }
             };
 
-            for (platform, token) in &tokens {
-                match platform {
-                    AccountPlatform::Google => {
-                        // Fetch Gmail
-                        let gmail = hive_integrations::GmailClient::new(token);
-                        if let Ok(messages) = rt.block_on(gmail.search_emails("is:unread", 5)) {
-                            let previews: Vec<EmailPreviewData> = messages
-                                .iter()
-                                .map(|m| EmailPreviewData {
-                                    from: m.from.clone(),
-                                    subject: m.subject.clone(),
-                                    snippet: m.snippet.clone(),
-                                    time: m.date.clone(),
-                                    important: m.labels.iter().any(|x| x == "IMPORTANT"),
-                                })
-                                .collect();
-                            let _ = tx.send(AssistantFetchResult::Emails {
-                                provider: "Gmail".into(),
-                                previews,
-                            });
-                        }
+            // Enter the runtime so that EmailService/CalendarService can
+            // obtain a tokio Handle via Handle::try_current().
+            let _guard = rt.enter();
 
-                        // Fetch Google Calendar
-                        let cal = hive_integrations::GoogleCalendarClient::new(token);
-                        let now = chrono::Utc::now();
-                        let time_min = now.to_rfc3339();
-                        let time_max = (now + chrono::Duration::days(1)).to_rfc3339();
-                        if let Ok(events) =
-                            rt.block_on(cal.list_events("primary", Some(&time_min), Some(&time_max), Some(10)))
-                        {
-                            let upcoming: Vec<EventData> = events
-                                .items
-                                .iter()
-                                .map(|e| EventData {
-                                    title: e.summary.clone().unwrap_or_default(),
-                                    time: e
-                                        .start
-                                        .as_ref()
-                                        .and_then(|s| s.date_time.clone())
-                                        .unwrap_or_else(|| "All day".into()),
-                                    location: e.location.clone(),
-                                })
-                                .collect();
-                            let _ = tx.send(AssistantFetchResult::Events(upcoming));
-                        }
-                    }
-                    AccountPlatform::Microsoft => {
-                        let outlook = hive_integrations::OutlookEmailClient::new(token);
-                        if let Ok(messages) = rt.block_on(outlook.list_messages("inbox", 5)) {
-                            let previews: Vec<EmailPreviewData> = messages
-                                .iter()
-                                .map(|m| EmailPreviewData {
-                                    from: m
-                                        .from
-                                        .as_ref()
-                                        .map(|a| {
-                                            a.name
-                                                .clone()
-                                                .unwrap_or_else(|| a.address.clone())
-                                        })
-                                        .unwrap_or_default(),
-                                    subject: m.subject.clone(),
-                                    snippet: m.body_preview.clone(),
-                                    time: m.received_at.clone().unwrap_or_default(),
-                                    important: false,
-                                })
-                                .collect();
-                            let _ = tx.send(AssistantFetchResult::Emails {
-                                provider: "Outlook".into(),
-                                previews,
-                            });
-                        }
-                    }
-                    AccountPlatform::GitHub => {
-                        let client = match hive_integrations::GitHubClient::new(token.clone()) {
-                            Ok(c) => c,
-                            Err(_) => continue,
-                        };
-                        if let Ok(repos) = rt.block_on(client.list_repos())
-                            && let Some(arr) = repos.as_array()
-                        {
-                            let descriptions: Vec<String> = arr
-                                .iter()
-                                .take(5)
-                                .filter_map(|r| {
-                                    let name = r.get("full_name")?.as_str()?;
-                                    Some(format!("Activity on {name}"))
-                                })
-                                .collect();
-                            let _ = tx.send(AssistantFetchResult::RecentActions(descriptions));
-                        }
-                    }
-                    _ => {}
+            // --- Gmail (via EmailService) ---
+            if let Ok(emails) = email_svc.fetch_gmail_inbox() {
+                if !emails.is_empty() {
+                    let previews: Vec<EmailPreviewData> = emails
+                        .iter()
+                        .map(|e| EmailPreviewData {
+                            from: e.from.clone(),
+                            subject: e.subject.clone(),
+                            snippet: e.body.chars().take(120).collect(),
+                            time: e.timestamp.clone(),
+                            important: e.important,
+                        })
+                        .collect();
+                    let _ = tx.send(AssistantFetchResult::Emails {
+                        provider: "Gmail".into(),
+                        previews,
+                    });
+                }
+            }
+
+            // --- Google Calendar + Outlook Calendar (via CalendarService) ---
+            if let Ok(events) = calendar_svc.today_events() {
+                if !events.is_empty() {
+                    let upcoming: Vec<EventData> = events
+                        .iter()
+                        .map(|e| EventData {
+                            title: e.title.clone(),
+                            time: e.start.clone(),
+                            location: e.location.clone(),
+                        })
+                        .collect();
+                    let _ = tx.send(AssistantFetchResult::Events(upcoming));
+                }
+            }
+
+            // --- Outlook email (via EmailService) ---
+            if let Ok(emails) = email_svc.fetch_outlook_inbox() {
+                if !emails.is_empty() {
+                    let previews: Vec<EmailPreviewData> = emails
+                        .iter()
+                        .map(|e| EmailPreviewData {
+                            from: e.from.clone(),
+                            subject: e.subject.clone(),
+                            snippet: e.body.chars().take(120).collect(),
+                            time: e.timestamp.clone(),
+                            important: e.important,
+                        })
+                        .collect();
+                    let _ = tx.send(AssistantFetchResult::Emails {
+                        provider: "Outlook".into(),
+                        previews,
+                    });
+                }
+            }
+
+            // --- GitHub (still via hive_integrations directly -- not part of
+            //     AssistantService) ---
+            for token in &github_tokens {
+                let client = match hive_integrations::GitHubClient::new(token.clone()) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                if let Ok(repos) = rt.block_on(client.list_repos())
+                    && let Some(arr) = repos.as_array()
+                {
+                    let descriptions: Vec<String> = arr
+                        .iter()
+                        .take(5)
+                        .filter_map(|r| {
+                            let name = r.get("full_name")?.as_str()?;
+                            Some(format!("Activity on {name}"))
+                        })
+                        .collect();
+                    let _ = tx.send(AssistantFetchResult::RecentActions(descriptions));
                 }
             }
         });
@@ -1683,6 +1727,9 @@ impl HiveWorkspace {
             text
         };
 
+        // Save the user text for RAG query before it is consumed by send_message.
+        let user_query_text = send_text.clone();
+
         // 1. Record user message + create placeholder assistant message.
         self.chat_service.update(cx, |svc, cx| {
             svc.send_message(send_text, &model, cx);
@@ -1690,6 +1737,47 @@ impl HiveWorkspace {
 
         // 2. Build the AI wire-format messages.
         let ai_messages = self.chat_service.read(cx).build_ai_messages();
+
+        // 2b. Query RAG for relevant context and inject into messages.
+        let ai_messages = if cx.has_global::<AppRagService>() {
+            if let Ok(rag_svc) = cx.global::<AppRagService>().0.lock() {
+                let rag_query = hive_ai::RagQuery {
+                    query: user_query_text,
+                    max_results: 10,
+                    min_similarity: 0.1,
+                };
+                let query_result = rag_svc.query(&rag_query);
+                if let Ok(result) = query_result {
+                    if !result.context.is_empty() {
+                        let mut augmented = ai_messages.clone();
+                        let insert_idx = augmented
+                            .iter()
+                            .position(|m| m.role != hive_ai::types::MessageRole::System)
+                            .unwrap_or(0);
+                        augmented.insert(
+                            insert_idx,
+                            hive_ai::types::ChatMessage {
+                                role: hive_ai::types::MessageRole::System,
+                                content: format!("# Retrieved Context\n\n{}", result.context),
+                                timestamp: chrono::Utc::now(),
+                                tool_call_id: None,
+                                tool_calls: None,
+                            },
+                        );
+                        info!("RAG: injected {} chunks into messages", result.chunks.len());
+                        augmented
+                    } else {
+                        ai_messages
+                    }
+                } else {
+                    ai_messages
+                }
+            } else {
+                ai_messages
+            }
+        } else {
+            ai_messages
+        };
 
         // 3. Build tool definitions from the built-in tool registry.
         let agent_defs = hive_agents::tool_use::builtin_tool_definitions();
@@ -2081,6 +2169,9 @@ impl HiveWorkspace {
             }
             Panel::Settings => self.settings_view.clone().into_any_element(),
             Panel::Help => HelpPanel::render(theme).into_any_element(),
+            Panel::Network => {
+                NetworkPanel::render(&self.network_peer_data, theme).into_any_element()
+            }
         }
     }
 
@@ -2195,6 +2286,9 @@ impl HiveWorkspace {
             }
             Panel::Monitor => {
                 self.refresh_monitor_data(cx);
+            }
+            Panel::Network => {
+                self.refresh_network_peer_data(cx);
             }
             Panel::Logs => {
                 self.refresh_logs_data(cx);
@@ -2426,6 +2520,40 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Help, cx);
+    }
+
+    fn handle_switch_to_network(
+        &mut self,
+        _action: &SwitchToNetwork,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::Network, cx);
+    }
+
+    // -- Network panel handlers ----------------------------------------------
+
+    fn handle_network_refresh(
+        &mut self,
+        _action: &NetworkRefresh,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Network: refresh");
+        self.refresh_network_peer_data(cx);
+        cx.notify();
+    }
+
+    /// Populate the network panel with peer data from the AppNetwork global.
+    fn refresh_network_peer_data(&mut self, cx: &App) {
+        if !cx.has_global::<AppNetwork>() {
+            return;
+        }
+        let node = &cx.global::<AppNetwork>().0;
+        self.network_peer_data.our_peer_id = node.peer_id().to_string();
+        // HiveNode::peers() is async; peer list populated via future async
+        // wiring. For now the panel shows the peer ID and empty-state.
+        self.network_peer_data.peers.clear();
     }
 
     // -- Agents panel handlers -----------------------------------------------
@@ -5560,6 +5688,14 @@ impl HiveWorkspace {
             self.status_bar.privacy_mode = snapshot.privacy_mode;
         }
 
+        // Update live TTS service config so toggle changes take effect immediately.
+        if cx.has_global::<AppTts>() {
+            cx.global::<AppTts>().0.update_config(|cfg| {
+                cfg.enabled = snapshot.tts_enabled;
+                cfg.auto_speak = snapshot.tts_auto_speak;
+            });
+        }
+
         // Re-push API keys to the models browser so new/changed keys take effect
         // immediately without requiring the user to switch away and back.
         self.push_keys_to_models_browser(cx);
@@ -6441,6 +6577,8 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_assistant))
             .on_action(cx.listener(Self::handle_switch_to_settings))
             .on_action(cx.listener(Self::handle_switch_to_help))
+            .on_action(cx.listener(Self::handle_switch_to_network))
+            .on_action(cx.listener(Self::handle_network_refresh))
             .on_action(cx.listener(Self::handle_open_workspace_directory))
             // -- Panel action handlers -----------------------------------
             // Files
@@ -6656,7 +6794,7 @@ impl HiveWorkspace {
                     ))
                     .child(render_sidebar_section(
                         "Observe",
-                        &[Panel::Monitor, Panel::Logs, Panel::Costs, Panel::Shield],
+                        &[Panel::Monitor, Panel::Logs, Panel::Costs, Panel::Shield, Panel::Network],
                         active,
                         theme,
                         cx,

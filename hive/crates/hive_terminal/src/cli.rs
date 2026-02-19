@@ -390,7 +390,7 @@ impl CliService {
 
     fn check_disk_space(&self) -> DoctorCheck {
         // Check available disk space on the Hive data directory or current dir.
-        let check_path = hive_core::config::HiveConfig::base_dir()
+        let _check_path = hive_core::config::HiveConfig::base_dir()
             .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 
         #[cfg(unix)]

@@ -120,6 +120,11 @@ pub fn start_tick_driver(
                             "Tick driver: reminder triggered: id={}, title={}",
                             reminder.reminder_id, reminder.title
                         );
+                        // Show OS toast notification
+                        crate::reminders::os_notifications::show_toast(
+                            "Reminder",
+                            &reminder.title,
+                        );
                     }
                 }
             });

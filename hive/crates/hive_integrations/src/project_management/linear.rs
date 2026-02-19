@@ -212,7 +212,6 @@ struct LinearComment {
 
 /// Linear GraphQL API client.
 pub struct LinearClient {
-    api_key: String,
     base_url: String,
     client: Client,
 }
@@ -242,7 +241,6 @@ impl LinearClient {
             .context("failed to build HTTP client for Linear")?;
 
         Ok(Self {
-            api_key: api_key.to_string(),
             base_url,
             client,
         })
@@ -253,10 +251,6 @@ impl LinearClient {
         &self.base_url
     }
 
-    /// Return the stored API key.
-    pub fn api_key(&self) -> &str {
-        &self.api_key
-    }
 
     /// Execute a GraphQL query and parse the typed response.
     async fn graphql<T: serde::de::DeserializeOwned>(
@@ -953,12 +947,6 @@ mod tests {
         let client =
             LinearClient::with_base_url("lin_key", "https://api.linear.app/graphql/").unwrap();
         assert_eq!(client.base_url(), "https://api.linear.app/graphql");
-    }
-
-    #[test]
-    fn test_api_key_stored() {
-        let client = make_client();
-        assert_eq!(client.api_key(), "lin_test_key_123");
     }
 
     #[test]

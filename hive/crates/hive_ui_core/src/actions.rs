@@ -84,6 +84,8 @@ actions!(
         ImportConfig,
         // Monitor panel
         MonitorRefresh,
+        // Network panel
+        NetworkRefresh,
         // Agents panel
         AgentsReloadWorkflows,
         // Panel switch — new panels
@@ -93,10 +95,6 @@ actions!(
         WorkflowBuilderSave,
         WorkflowBuilderRun,
         WorkflowBuilderDeleteNode,
-        // Connected accounts
-        AccountConnect,
-        AccountDisconnect,
-        AccountRefresh,
         // Auto-update
         TriggerAppUpdate,
     ]

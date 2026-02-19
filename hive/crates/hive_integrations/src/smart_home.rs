@@ -36,10 +36,6 @@ pub struct HueScene {
 /// lights, scenes, and query bridge state.
 pub struct PhilipsHueClient {
     client: Client,
-    #[allow(dead_code)]
-    bridge_ip: String,
-    #[allow(dead_code)]
-    api_key: String,
     base_url: String,
 }
 
@@ -49,18 +45,14 @@ impl PhilipsHueClient {
         let base_url = format!("http://{}/api/{}", bridge_ip, api_key);
         Self {
             client: Client::new(),
-            bridge_ip: bridge_ip.to_string(),
-            api_key: api_key.to_string(),
             base_url,
         }
     }
 
     /// Create a new client with a fully custom base URL (useful for tests).
-    pub fn with_base_url(bridge_ip: &str, api_key: &str, base_url: &str) -> Self {
+    pub fn with_base_url(_bridge_ip: &str, _api_key: &str, base_url: &str) -> Self {
         Self {
             client: Client::new(),
-            bridge_ip: bridge_ip.to_string(),
-            api_key: api_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
         }
     }

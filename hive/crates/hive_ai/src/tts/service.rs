@@ -181,6 +181,24 @@ impl TtsService {
         self.synthesize(cfg.default_provider, &request).await
     }
 
+    /// Speak text if both TTS and auto-speak are enabled.
+    /// Use this for automatic TTS on AI responses.
+    pub async fn speak_auto(&self, text: &str) -> Result<AudioData, TtsError> {
+        let cfg = self.config.read().clone();
+        if !cfg.enabled {
+            return Err(TtsError::Other("TTS is disabled".into()));
+        }
+        if !cfg.auto_speak {
+            return Err(TtsError::Other("Auto-speak is disabled".into()));
+        }
+        let voice_id = cfg
+            .default_voice_id
+            .clone()
+            .unwrap_or_else(|| "default".into());
+        let request = TtsRequest::new(text, voice_id).with_speed(cfg.speed);
+        self.synthesize(cfg.default_provider, &request).await
+    }
+
     /// Synthesize speech with a specific provider.
     pub async fn synthesize(
         &self,
@@ -348,6 +366,30 @@ mod tests {
         };
         let svc = TtsService::new(config);
         let result = svc.speak("hello").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn speak_auto_returns_error_when_disabled() {
+        let config = TtsServiceConfig {
+            enabled: false,
+            auto_speak: true,
+            ..Default::default()
+        };
+        let svc = TtsService::new(config);
+        let result = svc.speak_auto("hello").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn speak_auto_returns_error_when_auto_speak_off() {
+        let config = TtsServiceConfig {
+            enabled: true,
+            auto_speak: false,
+            ..Default::default()
+        };
+        let svc = TtsService::new(config);
+        let result = svc.speak_auto("hello").await;
         assert!(result.is_err());
     }
 

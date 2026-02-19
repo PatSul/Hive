@@ -20,11 +20,12 @@ use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
     AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
-    AppChannels, AppCli, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppGcp, AppGitLab,
-    AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace,
-    AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas, AppProjectManagement,
-    AppRpcConfig, AppScheduler, AppSecurity, AppShield, AppSkills, AppSpecs, AppTts, AppUpdater,
-    AppWallets,
+    AppChannels, AppCli, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning,
+    AppGcp, AppGitLab, AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning,
+    AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
+    AppContextEngine, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
+    AppSecurity, AppSemanticSearch, AppShield, AppSkills, AppSpecs,
+    AppTts, AppUpdater, AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
@@ -223,6 +224,37 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     let tts = std::sync::Arc::new(hive_ai::TtsService::new(tts_config));
     cx.set_global(AppTts(tts));
     info!("TTS service initialized");
+
+    // RAG Service — document indexing + TF-IDF retrieval for context injection.
+    let rag_service = hive_ai::RagService::new(50, 10);
+    cx.set_global(AppRagService(std::sync::Arc::new(std::sync::Mutex::new(rag_service))));
+    info!("RagService initialized");
+
+    // Semantic Search Service — file-content search with relevance scoring.
+    let semantic_search = hive_ai::SemanticSearchService::new(1000);
+    cx.set_global(AppSemanticSearch(std::sync::Arc::new(std::sync::Mutex::new(semantic_search))));
+    info!("SemanticSearchService initialized");
+
+    // Context Engine — smart context curation with TF-IDF + heuristic boosts.
+    let context_engine = hive_ai::ContextEngine::new();
+    cx.set_global(AppContextEngine(std::sync::Arc::new(std::sync::Mutex::new(context_engine))));
+    info!("ContextEngine initialized");
+
+    // Fleet Learning — cross-instance pattern detection.
+    let fleet_db_path = HiveConfig::base_dir()
+        .map(|d| d.join("fleet_learning.db"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("fleet_learning.db"));
+    let fleet = match hive_ai::FleetLearningService::with_db(&fleet_db_path.to_string_lossy()) {
+        Ok(service) => {
+            info!("FleetLearningService initialized (SQLite-backed)");
+            service
+        }
+        Err(e) => {
+            warn!("FleetLearningService DB open failed, using in-memory: {e}");
+            hive_ai::FleetLearningService::new()
+        }
+    };
+    cx.set_global(AppFleetLearning(std::sync::Arc::new(std::sync::Mutex::new(fleet))));
 
     // Skills registry — built-in /commands.
     cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::new()));
@@ -499,7 +531,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                     .build()
                     .expect("P2P tokio runtime");
                 rt.block_on(async {
-                    let mut node = hive_network::HiveNode::with_defaults(&node_name);
+                    let node = hive_network::HiveNode::with_defaults(&node_name);
                     // Replace the default config with the loaded one.
                     let identity = node.identity().clone();
                     let mut node = hive_network::HiveNode::new(identity, net_config);

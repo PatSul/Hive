@@ -130,6 +130,51 @@ impl AssistantService {
     pub fn tick_reminders(&self) -> Vec<TriggeredReminder> {
         self.reminder_service.tick().unwrap_or_default()
     }
+
+    // ----- Token management (convenience pass-throughs) ----------------------
+
+    /// Set the Gmail OAuth token on the email sub-service.
+    pub fn set_gmail_token(&mut self, token: String) {
+        self.email_service.set_gmail_token(token);
+    }
+
+    /// Set the Outlook OAuth token on the email sub-service.
+    pub fn set_outlook_token(&mut self, token: String) {
+        self.email_service.set_outlook_token(token);
+    }
+
+    /// Set the Google Calendar OAuth token on the calendar sub-service.
+    pub fn set_google_calendar_token(&mut self, token: String) {
+        self.calendar_service.set_google_token(token);
+    }
+
+    /// Set the Outlook Calendar OAuth token on the calendar sub-service.
+    pub fn set_outlook_calendar_token(&mut self, token: String) {
+        self.calendar_service.set_outlook_token(token);
+    }
+
+    // ----- Data fetching (convenience pass-throughs) -------------------------
+
+    /// Fetch Gmail inbox emails via the email sub-service.
+    ///
+    /// Requires a tokio runtime to be active (e.g. via `rt.enter()`).
+    pub fn fetch_gmail_emails(&self) -> Result<Vec<UnifiedEmail>, String> {
+        self.email_service.fetch_gmail_inbox()
+    }
+
+    /// Fetch Outlook inbox emails via the email sub-service.
+    ///
+    /// Requires a tokio runtime to be active (e.g. via `rt.enter()`).
+    pub fn fetch_outlook_emails(&self) -> Result<Vec<UnifiedEmail>, String> {
+        self.email_service.fetch_outlook_inbox()
+    }
+
+    /// Fetch today's calendar events from all configured providers.
+    ///
+    /// Requires a tokio runtime to be active (e.g. via `rt.enter()`).
+    pub fn fetch_today_events(&self) -> Result<Vec<UnifiedEvent>, String> {
+        self.calendar_service.today_events()
+    }
 }
 
 // ---------------------------------------------------------------------------
