@@ -315,10 +315,60 @@ impl AiProvider for OpenAIProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        crate::model_registry::models_for_provider(ProviderType::OpenAI)
+        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::OpenAI)
             .into_iter()
             .cloned()
-            .collect()
+            .collect();
+
+        let key = match self.require_key() {
+            Ok(k) => k,
+            Err(_) => return static_models,
+        };
+
+        #[derive(serde::Deserialize)]
+        struct OpenAiModelsData {
+            data: Option<Vec<OpenAiModelObj>>,
+        }
+        #[derive(serde::Deserialize)]
+        struct OpenAiModelObj {
+            id: String,
+        }
+
+        let url = format!("{}/models", self.base_url);
+        if let Ok(resp) = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {key}"))
+            .send()
+            .await
+        {
+            if let Ok(parsed) = resp.json::<OpenAiModelsData>().await {
+                if let Some(data) = parsed.data {
+                    let static_ids: std::collections::HashSet<_> =
+                        static_models.iter().map(|m| m.id.clone()).collect();
+                    for api_model in data {
+                        if !static_ids.contains(&api_model.id) {
+                            static_models.push(ModelInfo {
+                                id: api_model.id.clone(),
+                                name: api_model.id.clone(),
+                                provider: "openai".into(),
+                                provider_type: ProviderType::OpenAI,
+                                tier: crate::types::ModelTier::Mid,
+                                context_window: 128_000,
+                                input_price_per_mtok: 0.0,
+                                output_price_per_mtok: 0.0,
+                                capabilities: crate::types::ModelCapabilities::new(&[
+                                    crate::types::ModelCapability::ToolUse,
+                                ]),
+                                release_date: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        static_models
     }
 
     /// Non-streaming chat completion.

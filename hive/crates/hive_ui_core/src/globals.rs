@@ -20,6 +20,9 @@ use hive_ai::rag::RagService;
 use hive_ai::semantic_search::SemanticSearchService;
 use hive_ai::service::AiService;
 use hive_ai::tts::service::TtsService;
+use hive_agents::collective_memory::CollectiveMemory;
+use hive_agents::standup::StandupService;
+use hive_agents::competence_detection::CompetenceDetector;
 use hive_assistant::AssistantService;
 use hive_blockchain::rpc_config::RpcConfigStore;
 use hive_blockchain::wallet_store::WalletStore;
@@ -221,3 +224,15 @@ impl Global for AppSemanticSearch {}
 /// Global wrapper for context curation engine.
 pub struct AppContextEngine(pub Arc<Mutex<ContextEngine>>);
 impl Global for AppContextEngine {}
+
+/// Global wrapper for collective memory.
+pub struct AppCollectiveMemory(pub Arc<Mutex<CollectiveMemory>>);
+impl Global for AppCollectiveMemory {}
+
+/// Global wrapper for standup service.
+pub struct AppStandupService(pub Arc<Mutex<StandupService>>);
+impl Global for AppStandupService {}
+
+/// Global wrapper for competence detector.
+pub struct AppCompetenceDetector(pub Arc<Mutex<CompetenceDetector>>);
+impl Global for AppCompetenceDetector {}

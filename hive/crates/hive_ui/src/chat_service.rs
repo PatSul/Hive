@@ -771,6 +771,21 @@ impl ChatService {
         let last_msg = self.messages.last();
         let cost = last_msg.and_then(|m| m.cost);
         let tokens = last_msg.and_then(|m| m.tokens);
+        let content = last_msg.map(|m| m.content.clone());
+
+        // TTS Auto-Speak
+        if let Some(text) = content {
+            if cx.has_global::<crate::AppConfig>() && cx.has_global::<crate::AppTts>() {
+                let config = cx.global::<crate::AppConfig>().0.get();
+                if config.tts_auto_speak {
+                    let tts = cx.global::<crate::AppTts>().0.clone();
+                    cx.spawn(|_this: gpui::WeakEntity<Self>, _app: &mut gpui::AsyncApp| async move {
+                        let _ = tts.speak_auto(&text).await;
+                    })
+                    .detach();
+                }
+            }
+        }
 
         cx.emit(StreamCompleted {
             model: model.to_string(),

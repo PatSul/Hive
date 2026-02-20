@@ -31,6 +31,8 @@ struct GeminiChatRequest {
     /// When streaming, ask the API to include usage in the final chunk.
     #[serde(skip_serializing_if = "Option::is_none")]
     stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,6 +110,31 @@ impl GeminiProvider {
 
     /// Build the JSON request body.
     fn build_body(&self, request: &ChatRequest, stream: bool) -> GeminiChatRequest {
+        let mut tools = Vec::new();
+
+        // Convert standard tools
+        if let Some(req_tools) = &request.tools {
+            for t in req_tools {
+                tools.push(serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.input_schema
+                    }
+                }));
+            }
+        }
+
+        // Auto-inject Gemini Agentic tools (Google Search Grounding & Code Execution) for advanced models
+        if request.model.contains("gemini-2.") || request.model.contains("gemini-3") || request.model.contains("gemini-4") {
+            tools.push(serde_json::json!({ "type": "google_search" }));
+            // Code execution might be via "code_execution" or "code_interpreter" depending on adapter matching
+            tools.push(serde_json::json!({ "type": "code_execution" }));
+        }
+
+        let tools_opt = if tools.is_empty() { None } else { Some(tools) };
+
         GeminiChatRequest {
             model: request.model.clone(),
             messages: Self::convert_messages(&request.messages, request.system_prompt.as_deref()),
@@ -115,12 +142,11 @@ impl GeminiProvider {
             max_tokens: Some(request.max_tokens),
             temperature: request.temperature,
             stream_options: if stream {
-                Some(StreamOptions {
-                    include_usage: true,
-                })
+                Some(StreamOptions { include_usage: true })
             } else {
                 None
             },
+            tools: tools_opt,
         }
     }
 
@@ -186,10 +212,58 @@ impl AiProvider for GeminiProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        crate::model_registry::models_for_provider(ProviderType::Google)
+        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::Google)
             .into_iter()
             .cloned()
-            .collect()
+            .collect();
+
+        let key = match self.require_key() {
+            Ok(k) => k,
+            Err(_) => return static_models,
+        };
+
+        #[derive(serde::Deserialize)]
+        struct GeminiModelsData {
+            models: Option<Vec<GeminiModelObj>>,
+        }
+        #[derive(serde::Deserialize)]
+        struct GeminiModelObj {
+            name: String,
+            #[serde(rename = "displayName")]
+            display_name: Option<String>,
+        }
+
+        let url = format!("https://generativelanguage.googleapis.com/v1beta/models?key={key}");
+        if let Ok(resp) = self.client.get(&url).send().await {
+            if let Ok(parsed) = resp.json::<GeminiModelsData>().await {
+                if let Some(models) = parsed.models {
+                    let static_ids: std::collections::HashSet<_> =
+                        static_models.iter().map(|m| m.id.clone()).collect();
+                    for m in models {
+                        let id = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+                        // Only add Gemini models (ignore older text-bison etc unless explicitly static)
+                        if !static_ids.contains(&id) && id.starts_with("gemini") {
+                            static_models.push(ModelInfo {
+                                id: id.clone(),
+                                name: m.display_name.unwrap_or(id.clone()),
+                                provider: "google".into(),
+                                provider_type: ProviderType::Google,
+                                tier: crate::types::ModelTier::Mid,
+                                context_window: 1_048_576, // Generous default for modern Gemini
+                                input_price_per_mtok: 0.0,
+                                output_price_per_mtok: 0.0,
+                                capabilities: crate::types::ModelCapabilities::new(&[
+                                    crate::types::ModelCapability::ToolUse,
+                                ]),
+                                release_date: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        static_models
     }
 
     /// Non-streaming chat completion.

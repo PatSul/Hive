@@ -211,10 +211,84 @@ impl AiProvider for OpenRouterProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        crate::model_registry::models_for_provider(ProviderType::OpenRouter)
+        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::OpenRouter)
             .into_iter()
             .cloned()
-            .collect()
+            .collect();
+
+        let key = match self.require_key() {
+            Ok(k) => k,
+            Err(_) => return static_models,
+        };
+
+        #[derive(serde::Deserialize)]
+        struct OrModelsData {
+            data: Option<Vec<OrModelObj>>,
+        }
+        #[derive(serde::Deserialize)]
+        struct OrModelObj {
+            id: String,
+            name: Option<String>,
+            context_length: Option<u32>,
+            pricing: Option<OrPricing>,
+        }
+        #[derive(serde::Deserialize)]
+        struct OrPricing {
+            prompt: Option<String>,
+            completion: Option<String>,
+        }
+
+        let url = format!("{}/models", self.base_url);
+        if let Ok(resp) = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {key}"))
+            .header("HTTP-Referer", HTTP_REFERER)
+            .header("X-Title", X_TITLE)
+            .send()
+            .await
+        {
+            if let Ok(parsed) = resp.json::<OrModelsData>().await {
+                if let Some(data) = parsed.data {
+                    let static_ids: std::collections::HashSet<_> =
+                        static_models.iter().map(|m| m.id.clone()).collect();
+                    for api_model in data {
+                        if !static_ids.contains(&api_model.id) {
+                            let input_price = api_model
+                                .pricing
+                                .as_ref()
+                                .and_then(|p| p.prompt.clone())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0)
+                                * 1_000_000.0;
+                            let output_price = api_model
+                                .pricing
+                                .as_ref()
+                                .and_then(|p| p.completion.clone())
+                                .and_then(|s| s.parse::<f64>().ok())
+                                .unwrap_or(0.0)
+                                * 1_000_000.0;
+                            static_models.push(ModelInfo {
+                                id: api_model.id.clone(),
+                                name: api_model.name.unwrap_or(api_model.id.clone()),
+                                provider: "openrouter".into(),
+                                provider_type: ProviderType::OpenRouter,
+                                tier: crate::types::ModelTier::Mid,
+                                context_window: api_model.context_length.unwrap_or(128_000),
+                                input_price_per_mtok: input_price,
+                                output_price_per_mtok: output_price,
+                                capabilities: crate::types::ModelCapabilities::new(&[
+                                    crate::types::ModelCapability::ToolUse,
+                                ]),
+                                release_date: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        static_models
     }
 
     /// Non-streaming chat completion.

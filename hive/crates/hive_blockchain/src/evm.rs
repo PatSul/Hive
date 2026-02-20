@@ -33,6 +33,53 @@ pub struct DeployResult {
     pub gas_used: u64,
 }
 
+/// Infrastructure for an unsigned EVM transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnsignedEvmTransaction {
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub to: Option<String>,
+    pub value: String, // hex
+    pub data: String, // hex for bytecode/calldata
+    pub gas_limit: u64,
+    pub max_fee_per_gas: String,
+    pub max_priority_fee_per_gas: String,
+}
+
+/// Simulated signed transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedEvmTransaction {
+    pub raw: String,
+    pub hash: String,
+}
+
+/// Build an unsigned ERC-20 deploy transaction
+pub fn build_erc20_deploy_tx(params: &TokenDeployParams, nonce: u64, gas_price: u128) -> UnsignedEvmTransaction {
+    UnsignedEvmTransaction {
+        chain_id: params.chain.chain_id(),
+        nonce,
+        to: None, 
+        value: "0x0".to_string(),
+        data: crate::erc20_bytecode::get_erc20_contract().bytecode,
+        gas_limit: 1_500_000,
+        max_fee_per_gas: format!("0x{:x}", gas_price),
+        max_priority_fee_per_gas: format!("0x{:x}", gas_price),
+    }
+}
+
+/// Simulate signing an EVM transaction
+pub fn sign_evm_tx_simulated(tx: &UnsignedEvmTransaction, _private_key: &[u8]) -> SignedEvmTransaction {
+    let mut hasher = DefaultHasher::new();
+    tx.chain_id.hash(&mut hasher);
+    tx.nonce.hash(&mut hasher);
+    let hash_val = hasher.finish();
+    let tx_hash = format!("0x{hash_val:016x}{hash_val:016x}{hash_val:016x}{hash_val:016x}");
+    SignedEvmTransaction {
+        raw: format!("0xSIMULATED_SIGNED_{:x}", hash_val),
+        hash: tx_hash,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // RPC helpers
 // ---------------------------------------------------------------------------
@@ -167,15 +214,13 @@ pub async fn deploy_token(params: TokenDeployParams, _private_key: &[u8]) -> Res
 
     const DEPLOY_GAS: u64 = 1_500_000;
 
-    // Build a deterministic placeholder tx hash from config fields.
+    // Build a deterministic placeholder tx hash from config fields (for address).
     let mut hasher = DefaultHasher::new();
     params.name.hash(&mut hasher);
     params.symbol.hash(&mut hasher);
     params.chain.label().hash(&mut hasher);
     let hash_val = hasher.finish();
-    let tx_hash = format!("0x{hash_val:016x}{hash_val:016x}{hash_val:016x}{hash_val:016x}");
-    let contract_address =
-        format!("0x{:040x}", hash_val as u128);
+    let contract_address = format!("0x{:040x}", hash_val as u128);
 
     // Attempt to fetch the real gas price for cost estimation.
     let url = rpc_url(params.chain);
@@ -189,6 +234,12 @@ pub async fn deploy_token(params: TokenDeployParams, _private_key: &[u8]) -> Res
         }
         Err(_) => 20_000_000_000, // 20 gwei fallback
     };
+
+    // Integrate transaction building infrastructure
+    let tx = build_erc20_deploy_tx(&params, 0, gas_price);
+    let signed_tx = sign_evm_tx_simulated(&tx, _private_key);
+
+    let tx_hash = signed_tx.hash;
 
     let cost_wei = gas_price * DEPLOY_GAS as u128;
     let cost_eth = cost_wei as f64 / 1e18;

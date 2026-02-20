@@ -20,11 +20,11 @@ use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
     AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
-    AppChannels, AppCli, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning,
-    AppGcp, AppGitLab, AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning,
-    AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
+    AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppDatabase,
+    AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppIde, AppIntegrationDb,
+    AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
     AppContextEngine, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
-    AppSecurity, AppSemanticSearch, AppShield, AppSkills, AppSpecs,
+    AppSecurity, AppSemanticSearch, AppShield, AppSkills, AppSpecs, AppStandupService,
     AppTts, AppUpdater, AppWallets,
 };
 use hive_ui::workspace::{
@@ -255,6 +255,25 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         }
     };
     cx.set_global(AppFleetLearning(std::sync::Arc::new(std::sync::Mutex::new(fleet))));
+
+    // Collective Memory
+    let collective_db_path = HiveConfig::base_dir()
+        .map(|d| d.join("collective_memory.db"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("collective_memory.db"));
+    let memory = hive_agents::collective_memory::CollectiveMemory::open(&collective_db_path.to_string_lossy())
+        .unwrap_or_else(|_| hive_agents::collective_memory::CollectiveMemory::in_memory().unwrap());
+    cx.set_global(AppCollectiveMemory(std::sync::Arc::new(std::sync::Mutex::new(memory))));
+    info!("CollectiveMemory initialized");
+
+    // Standup Service
+    let standup = hive_agents::standup::StandupService::new();
+    cx.set_global(AppStandupService(std::sync::Arc::new(std::sync::Mutex::new(standup))));
+    info!("StandupService initialized");
+
+    // Competence Detector
+    let competence = hive_agents::competence_detection::CompetenceDetector::with_defaults();
+    cx.set_global(AppCompetenceDetector(std::sync::Arc::new(std::sync::Mutex::new(competence))));
+    info!("CompetenceDetector initialized");
 
     // Skills registry — built-in /commands.
     cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::new()));

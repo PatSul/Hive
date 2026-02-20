@@ -120,6 +120,12 @@ impl WalletStore {
         self.wallets.get(id)
     }
 
+    /// Decrypt the private key for a specific wallet entry.
+    pub fn decrypt_wallet_key(&self, id: &str, password: &str) -> Result<Vec<u8>> {
+        let wallet = self.get_wallet(id).ok_or_else(|| anyhow::anyhow!("wallet not found: {id}"))?;
+        decrypt_key(&wallet.encrypted_key, password).context("failed to decrypt wallet key")
+    }
+
     /// Number of wallets in the store.
     pub fn len(&self) -> usize {
         self.wallets.len()

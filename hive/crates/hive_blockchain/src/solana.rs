@@ -34,6 +34,41 @@ pub struct SplDeployResult {
     pub tx_signature: String,
 }
 
+/// Infrastructure for an unsigned Solana transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnsignedSolanaTransaction {
+    pub recent_blockhash: String,
+    pub instructions: Vec<String>, // Placeholder for instruction data
+    pub fee_payer: String,
+}
+
+/// Simulated signed transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedSolanaTransaction {
+    pub raw: String,
+    pub signatures: Vec<String>,
+}
+
+pub fn build_spl_deploy_tx(_params: &SplTokenParams, payer: &str, blockhash: &str) -> UnsignedSolanaTransaction {
+    UnsignedSolanaTransaction {
+        recent_blockhash: blockhash.to_string(),
+        instructions: vec!["CreateAccount".to_string(), "InitializeMint".to_string()],
+        fee_payer: payer.to_string(),
+    }
+}
+
+pub fn sign_solana_tx_simulated(tx: &UnsignedSolanaTransaction, _private_key: &[u8]) -> SignedSolanaTransaction {
+    let mut hasher = DefaultHasher::new();
+    tx.recent_blockhash.hash(&mut hasher);
+    tx.fee_payer.hash(&mut hasher);
+    let hash_val = hasher.finish();
+    let sig = format!("SimTx{hash_val:016x}{hash_val:016x}");
+    SignedSolanaTransaction {
+        raw: format!("SIMULATED_SIGNED_{:x}", hash_val),
+        signatures: vec![sig],
+    }
+}
+
 // ---------------------------------------------------------------------------
 // RPC helpers
 // ---------------------------------------------------------------------------
@@ -164,7 +199,12 @@ pub async fn create_spl_token(
     // Base58-like placeholder (not real base58 encoding, but deterministic
     // and visually recognisable as a simulation artifact).
     let mint_address = format!("SimMint{hash_val:016x}");
-    let tx_signature = format!("SimTx{hash_val:016x}{hash_val:016x}");
+
+    // Integrate transaction building infrastructure
+    let tx = build_spl_deploy_tx(&params, "SimPayer", "SimBlockhash");
+    let signed_tx = sign_solana_tx_simulated(&tx, _private_key);
+
+    let tx_signature = signed_tx.signatures.first().cloned().unwrap_or_else(|| "SimTx".to_string());
 
     info!(
         name = %params.name,

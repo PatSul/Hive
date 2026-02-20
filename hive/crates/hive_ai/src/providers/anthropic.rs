@@ -339,10 +339,61 @@ impl AiProvider for AnthropicProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        crate::model_registry::models_for_provider(ProviderType::Anthropic)
+        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::Anthropic)
             .into_iter()
             .cloned()
-            .collect()
+            .collect();
+
+        if self.api_key.is_empty() {
+            return static_models;
+        }
+
+        #[derive(serde::Deserialize)]
+        struct AnthropicModelsData {
+            data: Option<Vec<AnthropicModelObj>>,
+        }
+        #[derive(serde::Deserialize)]
+        struct AnthropicModelObj {
+            id: String,
+            display_name: Option<String>,
+        }
+
+        let url = "https://api.anthropic.com/v1/models";
+        if let Ok(resp) = self
+            .client
+            .get(url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .send()
+            .await
+        {
+            if let Ok(parsed) = resp.json::<AnthropicModelsData>().await {
+                if let Some(data) = parsed.data {
+                    let static_ids: std::collections::HashSet<_> =
+                        static_models.iter().map(|m| m.id.clone()).collect();
+                    for api_model in data {
+                        if !static_ids.contains(&api_model.id) {
+                            static_models.push(ModelInfo {
+                                id: api_model.id.clone(),
+                                name: api_model.display_name.unwrap_or(api_model.id.clone()),
+                                provider: "anthropic".into(),
+                                provider_type: ProviderType::Anthropic,
+                                tier: crate::types::ModelTier::Mid,
+                                context_window: 200_000,
+                                input_price_per_mtok: 0.0,
+                                output_price_per_mtok: 0.0,
+                                capabilities: crate::types::ModelCapabilities::new(&[
+                                    crate::types::ModelCapability::ToolUse,
+                                ]),
+                                release_date: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        static_models
     }
 
     /// Non-streaming completion via the Anthropic Messages API.
@@ -354,6 +405,8 @@ impl AiProvider for AnthropicProvider {
             .post(API_BASE)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            // Enable agentic capabilities if Claude models support them natively.
+            .header("anthropic-beta", "computer-use-2024-10-22, prompt-caching-2024-09-02, agentic-teams-2025-01-20")
             .header("content-type", "application/json")
             .json(&body)
             .send()
@@ -451,6 +504,7 @@ impl AiProvider for AnthropicProvider {
             .post(API_BASE)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("anthropic-beta", "computer-use-2024-10-22, prompt-caching-2024-09-02, agentic-teams-2025-01-20")
             .header("content-type", "application/json")
             .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS * 5))
             .json(&body)
