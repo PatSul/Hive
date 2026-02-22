@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.5-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.9-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-3%2C046-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-16-blue" alt="Crates" />
@@ -123,7 +123,7 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 
 ### AI Providers
 
-10 providers with **capability-aware routing** and fallback:
+11 providers with **capability-aware routing** and fallback:
 
 | Cloud | Local |
 |---|---|
@@ -133,8 +133,9 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 | OpenRouter (100+ models) | LiteLLM proxy |
 | Groq (fast inference) | |
 | HuggingFace | |
+| Venice AI | |
 
-Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding.
+Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding. Venice API key can be configured in the Settings panel.
 
 ### Streaming
 
@@ -608,7 +609,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.5 |
+| Version | 0.3.9 |
 | Crates | 16 |
 | Rust source files | 280 |
 | Lines of Rust | 150,285 |
@@ -622,6 +623,14 @@ Configure provider preferences, model routing rules, budget limits, and security
 ---
 
 ## Changelog
+
+### v0.3.9
+
+**Venice AI + Headless Mode + Dynamic Agent Scripting**
+
+- **Venice AI Integration** — Venice is now fully integrated as an AI provider alongside OpenAI, Anthropic, Gemini, etc. Models are securely wired into the backend capability router. Enter your Venice API key in the Settings panel to start using it immediately.
+- **Headless / Background Mode** — The app natively supports running without spawning the main GUI. Pass the `--tray` argument at launch to suppress the main window, allowing Hive to run silently in the background or purely from the system tray.
+- **Dynamic Agent Scripting (run_python tool)** — When an agent decides to write and run a Python script, the `run_python` tool spins up an ephemeral Docker container (`python:3.11-slim`) locked down with `--network none` for strict isolation. If Docker isn't installed or fails to launch, the MCP server automatically falls back to executing the script via the native Python binary (`python -c`). All tests passing in the `hive_agents` crate.
 
 ### v0.3.5
 - Added xAI/Grok as 13th AI provider (OpenAI-compatible)
