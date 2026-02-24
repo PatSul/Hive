@@ -508,6 +508,7 @@ impl KnowledgeAcquisitionAgent {
                     .to_string(),
             ),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let url_response = executor.execute(&url_request).await?;
@@ -584,6 +585,7 @@ impl KnowledgeAcquisitionAgent {
                     .to_string(),
             ),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let synth_response = executor.execute(&synth_request).await?;

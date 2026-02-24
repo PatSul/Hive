@@ -33,8 +33,10 @@ struct AnthropicRequest {
     model: String,
     max_tokens: u32,
     messages: Vec<AnthropicMessage>,
+    /// System prompt — either a plain string or an array of content blocks
+    /// (the array form is required for prompt caching).
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     stream: bool,
@@ -47,6 +49,14 @@ struct AnthropicTool {
     name: String,
     description: String,
     input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    control_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +96,10 @@ struct ContentBlock {
 struct ApiUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
 }
 
 // -- SSE streaming types --
@@ -192,13 +206,27 @@ impl AnthropicProvider {
             .collect();
 
         // Use explicit system_prompt if provided, otherwise combine system messages.
-        let system = if let Some(ref sys) = request.system_prompt {
+        let system_text = if let Some(ref sys) = request.system_prompt {
             Some(sys.clone())
         } else if !system_from_messages.is_empty() {
             Some(system_from_messages.join("\n\n"))
         } else {
             None
         };
+
+        // Format system prompt: use content block array with cache_control when
+        // caching is enabled, otherwise a plain string.
+        let system = system_text.map(|text| {
+            if request.cache_system_prompt {
+                serde_json::json!([{
+                    "type": "text",
+                    "text": text,
+                    "cache_control": {"type": "ephemeral"}
+                }])
+            } else {
+                serde_json::Value::String(text)
+            }
+        });
 
         // Build conversation messages (non-system only).
         let messages: Vec<AnthropicMessage> = request
@@ -259,12 +287,26 @@ impl AnthropicProvider {
             .collect();
 
         // Convert tool definitions to Anthropic format.
+        // When caching is enabled, add cache_control to the last tool definition
+        // (Anthropic caches everything up to the breakpoint).
         let tools = request.tools.as_ref().map(|defs| {
+            let len = defs.len();
             defs.iter()
-                .map(|t| AnthropicTool {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
-                    input_schema: t.input_schema.clone(),
+                .enumerate()
+                .map(|(i, t)| {
+                    let cache_control = if request.cache_system_prompt && i == len - 1 {
+                        Some(CacheControl {
+                            control_type: "ephemeral".into(),
+                        })
+                    } else {
+                        None
+                    };
+                    AnthropicTool {
+                        name: t.name.clone(),
+                        description: t.description.clone(),
+                        input_schema: t.input_schema.clone(),
+                        cache_control,
+                    }
                 })
                 .collect()
         });
@@ -470,6 +512,8 @@ impl AiProvider for AnthropicProvider {
                 prompt_tokens: data.usage.input_tokens,
                 completion_tokens: data.usage.output_tokens,
                 total_tokens: data.usage.input_tokens + data.usage.output_tokens,
+                cache_creation_input_tokens: data.usage.cache_creation_input_tokens,
+                cache_read_input_tokens: data.usage.cache_read_input_tokens,
             },
             finish_reason: stop_reason,
             thinking: if thinking_content.is_empty() {
@@ -582,7 +626,9 @@ impl AiProvider for AnthropicProvider {
                         prompt_tokens: state.input_tokens,
                         completion_tokens: state.output_tokens,
                         total_tokens: state.input_tokens + state.output_tokens,
-                    }),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            }),
                     tool_calls: None,
                     stop_reason: None,
                 })
@@ -752,7 +798,9 @@ async fn process_sse_event(
                     prompt_tokens: state.input_tokens,
                     completion_tokens: state.output_tokens,
                     total_tokens: state.input_tokens + state.output_tokens,
-                }),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            }),
                 tool_calls,
                 stop_reason,
             };
@@ -818,6 +866,7 @@ mod tests {
             temperature: None,
             system_prompt: Some("You are helpful.".into()),
             tools: None,
+            cache_system_prompt: false,
         }
     }
 
@@ -832,7 +881,7 @@ mod tests {
         assert_eq!(body.model, "claude-sonnet-4-20250514");
         assert_eq!(body.max_tokens, 1024);
         assert!(!body.stream);
-        assert_eq!(body.system, Some("You are helpful.".into()));
+        assert_eq!(body.system, Some(serde_json::Value::String("You are helpful.".into())));
         assert_eq!(body.messages.len(), 1);
         assert_eq!(body.messages[0].role, "user");
         assert_eq!(
@@ -863,11 +912,12 @@ mod tests {
             temperature: Some(0.7),
             system_prompt: None,
             tools: None,
+            cache_system_prompt: false,
         };
         let body = provider.build_request(&req, false);
 
         // System message should be extracted, not in messages array.
-        assert_eq!(body.system, Some("Be concise.".into()));
+        assert_eq!(body.system, Some(serde_json::Value::String("Be concise.".into())));
         assert_eq!(body.messages.len(), 1);
         assert_eq!(body.messages[0].role, "user");
         assert_eq!(
@@ -890,11 +940,12 @@ mod tests {
             temperature: None,
             system_prompt: Some("Explicit system prompt.".into()),
             tools: None,
+            cache_system_prompt: false,
         };
         let body = provider.build_request(&req, false);
 
         // Explicit system_prompt takes precedence.
-        assert_eq!(body.system, Some("Explicit system prompt.".into()));
+        assert_eq!(body.system, Some(serde_json::Value::String("Explicit system prompt.".into())));
     }
 
     #[test]
@@ -907,6 +958,7 @@ mod tests {
             temperature: None,
             system_prompt: None,
             tools: None,
+            cache_system_prompt: false,
         };
         let body = provider.build_request(&req, false);
 

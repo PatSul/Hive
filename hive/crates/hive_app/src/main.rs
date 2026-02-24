@@ -118,6 +118,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         groq_api_key: config.groq_api_key.clone(),
         huggingface_api_key: config.huggingface_api_key.clone(),
         xai_api_key: config.xai_api_key.clone(),
+        mistral_api_key: config.mistral_api_key.clone(),
         litellm_url: config.litellm_url.clone(),
         litellm_api_key: config.litellm_api_key.clone(),
         ollama_url: config.ollama_url.clone(),

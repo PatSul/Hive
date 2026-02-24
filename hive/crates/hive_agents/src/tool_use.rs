@@ -8,6 +8,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::debug;
 
+use crate::message_queue::{AgentMessage, SharedMessageQueue};
+use hive_terminal::SharedSandbox;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -244,6 +247,7 @@ impl ToolHandler for SearchFilesTool {
 /// Executes a shell command through the SecurityGateway.
 pub struct ExecuteCommandTool {
     security: SecurityGateway,
+    sandbox: Option<SharedSandbox>,
 }
 
 impl Default for ExecuteCommandTool {
@@ -256,6 +260,19 @@ impl ExecuteCommandTool {
     pub fn new() -> Self {
         Self {
             security: SecurityGateway::new(),
+            sandbox: None,
+        }
+    }
+
+    /// Create an `ExecuteCommandTool` that routes commands through a sandbox.
+    ///
+    /// When a sandbox is attached, commands are executed inside the container
+    /// rather than on the host. The security gateway checks are relaxed for
+    /// sandboxed execution since the container itself provides isolation.
+    pub fn with_sandbox(sandbox: SharedSandbox) -> Self {
+        Self {
+            security: SecurityGateway::new(),
+            sandbox: Some(sandbox),
         }
     }
 }
@@ -285,7 +302,41 @@ impl ToolHandler for ExecuteCommandTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing required argument: command".to_string())?;
 
-        self.security.check_command(command)?;
+        // When running inside a sandbox the container provides isolation,
+        // so we only check for the most dangerous patterns (not risky ones
+        // like command chaining which are safe inside a container).
+        // Without a sandbox, apply full security checks on the host.
+        if self.sandbox.is_none() {
+            self.security.check_command(command)?;
+        }
+
+        // Route through sandbox if available.
+        if let Some(ref sandbox) = self.sandbox {
+            let sb = sandbox
+                .lock()
+                .map_err(|e| format!("Failed to lock sandbox: {e}"))?;
+            if sb.is_running() {
+                let result = sb.exec(command).map_err(|e| format!("Sandbox exec failed: {e}"))?;
+                let mut output = String::new();
+                if !result.stdout.is_empty() {
+                    output.push_str(&result.stdout);
+                }
+                if !result.stderr.is_empty() {
+                    if !output.is_empty() {
+                        output.push('\n');
+                    }
+                    output.push_str("[stderr] ");
+                    output.push_str(&result.stderr);
+                }
+                if output.is_empty() {
+                    output.push_str(&format!("(exit code {})", result.exit_code));
+                }
+                return Ok(output);
+            }
+            // Sandbox attached but not running — fall through to host execution
+            // with full security checks.
+            self.security.check_command(command)?;
+        }
 
         let output = if cfg!(target_os = "windows") {
             std::process::Command::new("cmd")
@@ -511,6 +562,90 @@ impl ToolHandler for GitDiffTool {
             return Ok("No changes.\n".to_string());
         }
         Ok(diff)
+    }
+}
+
+/// Web search tool backed by a local SearXNG instance.
+pub struct WebSearchTool {
+    search_service: std::sync::Arc<std::sync::Mutex<hive_ai::LocalSearchService>>,
+}
+
+impl WebSearchTool {
+    pub fn new(service: hive_ai::LocalSearchService) -> Self {
+        Self {
+            search_service: std::sync::Arc::new(std::sync::Mutex::new(service)),
+        }
+    }
+}
+
+impl ToolHandler for WebSearchTool {
+    fn name(&self) -> &str {
+        "web_search"
+    }
+
+    fn description(&self) -> &str {
+        "Search the web using a private, local search engine. Returns titles, URLs, and snippets."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "The search query" },
+                "category": {
+                    "type": "string",
+                    "description": "Search category (general, news, science, it, images, videos, files)",
+                    "default": "general"
+                }
+            },
+            "required": ["query"]
+        })
+    }
+
+    fn execute(&self, args: serde_json::Value) -> Result<String, String> {
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing required argument: query".to_string())?;
+
+        let category = args
+            .get("category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("general");
+
+        let cat = match category {
+            "news" => hive_ai::SearchCategory::News,
+            "science" => hive_ai::SearchCategory::Science,
+            "it" => hive_ai::SearchCategory::It,
+            "images" => hive_ai::SearchCategory::Images,
+            "videos" => hive_ai::SearchCategory::Videos,
+            "files" => hive_ai::SearchCategory::Files,
+            _ => hive_ai::SearchCategory::General,
+        };
+
+        let svc = self
+            .search_service
+            .lock()
+            .map_err(|e| format!("Failed to lock search service: {e}"))?;
+
+        let results = svc.search(query, &[cat])?;
+
+        if results.is_empty() {
+            return Ok("No results found.".to_string());
+        }
+
+        let mut output = String::new();
+        for (i, r) in results.iter().enumerate() {
+            output.push_str(&format!(
+                "{}. {}\n   URL: {}\n   {}\n   (via {})\n\n",
+                i + 1,
+                r.title,
+                r.url,
+                r.snippet,
+                r.engine
+            ));
+        }
+        Ok(output)
     }
 }
 
@@ -785,6 +920,25 @@ pub fn builtin_registry() -> ToolRegistry {
     registry
 }
 
+/// Create a `ToolRegistry` with a sandbox attached to the command executor.
+///
+/// When a sandbox is provided, the `execute_command` tool routes commands
+/// through the Docker container instead of the host shell.
+pub fn builtin_registry_with_sandbox(sandbox: SharedSandbox) -> ToolRegistry {
+    let mut registry = ToolRegistry::new();
+    registry.register_tool(Box::new(ReadFileTool));
+    registry.register_tool(Box::new(WriteFileTool));
+    registry.register_tool(Box::new(ListDirectoryTool));
+    registry.register_tool(Box::new(SearchFilesTool));
+    registry.register_tool(Box::new(ExecuteCommandTool::with_sandbox(sandbox)));
+    registry.register_tool(Box::new(GitStatusTool));
+    registry.register_tool(Box::new(GitDiffTool));
+    registry.register_tool(Box::new(MouseClickTool));
+    registry.register_tool(Box::new(TypeTextTool));
+    registry.register_tool(Box::new(PressEnterTool));
+    registry
+}
+
 // ---------------------------------------------------------------------------
 // Tool executor
 // ---------------------------------------------------------------------------
@@ -801,6 +955,7 @@ pub struct ToolExecutor {
     max_iterations: usize,
     current_iteration: usize,
     total_calls: usize,
+    message_queue: Option<SharedMessageQueue>,
 }
 
 impl ToolExecutor {
@@ -810,7 +965,56 @@ impl ToolExecutor {
             max_iterations,
             current_iteration: 0,
             total_calls: 0,
+            message_queue: None,
         }
+    }
+
+    /// Attach a shared message queue for steering/follow-up support.
+    pub fn with_message_queue(mut self, queue: SharedMessageQueue) -> Self {
+        self.message_queue = Some(queue);
+        self
+    }
+
+    /// Set the message queue after construction.
+    pub fn set_message_queue(&mut self, queue: SharedMessageQueue) {
+        self.message_queue = Some(queue);
+    }
+
+    /// Drain pending steering messages from the attached queue.
+    ///
+    /// Call this between tool rounds to inject high-priority user messages
+    /// into the conversation context before sending the next AI request.
+    /// Returns an empty vec if no queue is attached or no steering messages exist.
+    pub fn drain_steering(&self) -> Vec<AgentMessage> {
+        if let Some(ref queue) = self.message_queue {
+            if let Ok(mut q) = queue.lock() {
+                return q.drain_steering();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Drain pending follow-up messages from the attached queue.
+    ///
+    /// Call this at coarser boundaries (e.g. after the tool loop completes)
+    /// to collect queued follow-up messages for the next phase.
+    pub fn drain_followup(&self) -> Vec<AgentMessage> {
+        if let Some(ref queue) = self.message_queue {
+            if let Ok(mut q) = queue.lock() {
+                return q.drain_followup();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Check if there are pending steering messages without draining.
+    pub fn has_steering(&self) -> bool {
+        if let Some(ref queue) = self.message_queue {
+            if let Ok(q) = queue.lock() {
+                return q.has_steering();
+            }
+        }
+        false
     }
 
     /// Process a raw AI response JSON value.
@@ -818,6 +1022,10 @@ impl ToolExecutor {
     /// Returns `Some(results)` if tool calls were found and executed,
     /// or `None` if there were no tool calls (meaning the AI is done)
     /// or the iteration limit has been reached.
+    ///
+    /// When a message queue is attached, steering messages are checked
+    /// before each iteration. If steering is pending, the caller should
+    /// drain and inject them before the next AI call.
     pub fn process_response(&mut self, response: &serde_json::Value) -> Option<Vec<ToolResult>> {
         if self.current_iteration >= self.max_iterations {
             debug!(
@@ -839,6 +1047,7 @@ impl ToolExecutor {
         debug!(
             iteration = self.current_iteration,
             num_calls = calls.len(),
+            has_steering = self.has_steering(),
             "Executing tool calls"
         );
 

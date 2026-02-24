@@ -128,6 +128,8 @@ impl ChatMessage {
             cost: self.cost,
             tokens: total_tokens,
             thinking: None,
+            is_compacted: false,
+            compacted_from: None,
         }
     }
 
@@ -311,6 +313,9 @@ impl ChatService {
             total_tokens,
             created_at,
             updated_at: now,
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         };
 
         store.save(&conversation)
@@ -655,6 +660,7 @@ impl ChatService {
                         temperature: current_request.temperature,
                         system_prompt: current_request.system_prompt.clone(),
                         tools: current_request.tools.clone(),
+                        cache_system_prompt: false,
                     };
 
                     // --- Get new stream from provider ---

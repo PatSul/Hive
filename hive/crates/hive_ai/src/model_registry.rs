@@ -36,6 +36,12 @@ pub fn provider_capabilities(provider: ProviderType) -> HashSet<ModelCapability>
         ProviderType::XAI => [ModelCapability::ToolUse, ModelCapability::StructuredOutput]
             .into_iter()
             .collect(),
+        ProviderType::Mistral => [ModelCapability::ToolUse, ModelCapability::StructuredOutput]
+            .into_iter()
+            .collect(),
+        ProviderType::Doubao => [ModelCapability::ToolUse, ModelCapability::StructuredOutput]
+            .into_iter()
+            .collect(),
         _ => HashSet::new(),
     }
 }
@@ -926,6 +932,104 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             ]),
             release_date: Some("2024-12-12".into()),
         },
+        // ---- Mistral (direct API) ----
+        ModelInfo {
+            id: "mistral-large-latest".into(),
+            name: "Mistral Large".into(),
+            provider: "mistral".into(),
+            provider_type: ProviderType::Mistral,
+            tier: ModelTier::Mid,
+            context_window: 128_000,
+            input_price_per_mtok: 2.0,
+            output_price_per_mtok: 6.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::Vision,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "mistral-small-latest".into(),
+            name: "Mistral Small".into(),
+            provider: "mistral".into(),
+            provider_type: ProviderType::Mistral,
+            tier: ModelTier::Budget,
+            context_window: 32_000,
+            input_price_per_mtok: 0.1,
+            output_price_per_mtok: 0.3,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+            ]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "codestral-latest".into(),
+            name: "Codestral".into(),
+            provider: "mistral".into(),
+            provider_type: ProviderType::Mistral,
+            tier: ModelTier::Mid,
+            context_window: 256_000,
+            input_price_per_mtok: 0.3,
+            output_price_per_mtok: 0.9,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::CodeExecution,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "mistral-medium-latest".into(),
+            name: "Mistral Medium".into(),
+            provider: "mistral".into(),
+            provider_type: ProviderType::Mistral,
+            tier: ModelTier::Mid,
+            context_window: 128_000,
+            input_price_per_mtok: 2.7,
+            output_price_per_mtok: 8.1,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
+        // ---- Doubao / BytePlus ----
+        ModelInfo {
+            id: "doubao-pro-256k".into(),
+            name: "Doubao Pro 256K".into(),
+            provider: "doubao".into(),
+            provider_type: ProviderType::Doubao,
+            tier: ModelTier::Mid,
+            context_window: 256_000,
+            input_price_per_mtok: 0.8,
+            output_price_per_mtok: 2.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "doubao-lite-128k".into(),
+            name: "Doubao Lite 128K".into(),
+            provider: "doubao".into(),
+            provider_type: ProviderType::Doubao,
+            tier: ModelTier::Budget,
+            context_window: 128_000,
+            input_price_per_mtok: 0.3,
+            output_price_per_mtok: 0.6,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+            ]),
+            release_date: None,
+        },
         // ---- Hugging Face ----
         ModelInfo {
             id: "meta-llama/Llama-3.3-70B-Instruct".into(),
@@ -1128,6 +1232,14 @@ mod tests {
         let xai = models_for_provider(ProviderType::XAI);
         assert_eq!(xai.len(), 3);
         assert!(xai.iter().all(|m| m.provider_type == ProviderType::XAI));
+
+        let mistral = models_for_provider(ProviderType::Mistral);
+        assert_eq!(mistral.len(), 4);
+        assert!(
+            mistral
+                .iter()
+                .all(|m| m.provider_type == ProviderType::Mistral)
+        );
 
         let hf = models_for_provider(ProviderType::HuggingFace);
         assert_eq!(hf.len(), 3);

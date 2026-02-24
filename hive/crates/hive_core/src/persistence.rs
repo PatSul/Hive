@@ -1306,6 +1306,8 @@ mod tests {
                     cost: None,
                     tokens: None,
                     thinking: None,
+                    is_compacted: false,
+                    compacted_from: None,
                 },
                 crate::conversations::StoredMessage {
                     role: "assistant".to_string(),
@@ -1315,6 +1317,8 @@ mod tests {
                     cost: Some(0.002),
                     tokens: Some(42),
                     thinking: None,
+                    is_compacted: false,
+                    compacted_from: None,
                 },
             ],
             model: "claude-sonnet".to_string(),
@@ -1322,6 +1326,9 @@ mod tests {
             total_tokens: 42,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         }
     }
 

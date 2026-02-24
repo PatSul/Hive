@@ -11,6 +11,8 @@ use tokio::sync::Mutex;
 
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelTier, TokenUsage};
 
+use crate::message_queue::SharedMessageQueue;
+
 // ---------------------------------------------------------------------------
 // Agent Roles
 // ---------------------------------------------------------------------------
@@ -387,6 +389,7 @@ pub struct HiveMind<E: AiExecutor> {
     executor: E,
     status_callback: Option<StatusCallback>,
     accumulated_cost: Arc<Mutex<f64>>,
+    message_queue: Option<SharedMessageQueue>,
 }
 
 impl<E: AiExecutor> HiveMind<E> {
@@ -397,7 +400,19 @@ impl<E: AiExecutor> HiveMind<E> {
             executor,
             status_callback: None,
             accumulated_cost: Arc::new(Mutex::new(0.0)),
+            message_queue: None,
         }
+    }
+
+    /// Attach a shared message queue for steering/follow-up support.
+    pub fn with_message_queue(mut self, queue: SharedMessageQueue) -> Self {
+        self.message_queue = Some(queue);
+        self
+    }
+
+    /// Set the message queue after construction.
+    pub fn set_message_queue(&mut self, queue: SharedMessageQueue) {
+        self.message_queue = Some(queue);
     }
 
     /// Register a callback for status updates.
@@ -442,6 +457,9 @@ impl<E: AiExecutor> HiveMind<E> {
     /// Build a ChatRequest for a specific role and task content.
     pub fn build_request(&self, role: AgentRole, task_content: &str) -> ChatRequest {
         let model = self.model_for_role(role);
+        // Enable prompt caching for Anthropic models — system prompts are static
+        // per role, so they benefit from cache_control: ephemeral.
+        let is_anthropic = model.contains("claude");
         ChatRequest {
             messages: vec![ChatMessage::text(
                 MessageRole::User,
@@ -452,6 +470,7 @@ impl<E: AiExecutor> HiveMind<E> {
             temperature: Some(0.3),
             system_prompt: Some(role.system_prompt().to_string()),
             tools: None,
+            cache_system_prompt: is_anthropic,
         }
     }
 
@@ -585,6 +604,21 @@ impl<E: AiExecutor> HiveMind<E> {
                     total_duration_ms: start.elapsed().as_millis() as u64,
                     consensus_score: None,
                 };
+            }
+
+            // Drain steering messages between role executions.
+            // Steering content is appended to the enriched task so the
+            // next agent sees the user's real-time corrections.
+            if let Some(ref queue) = self.message_queue {
+                if let Ok(mut q) = queue.lock() {
+                    let steering = q.drain_steering();
+                    for msg in &steering {
+                        enriched_task = format!(
+                            "{}\n\n[User steering]: {}",
+                            enriched_task, msg.content
+                        );
+                    }
+                }
             }
 
             self.emit_status(OrchestrationStatus::ExecutingRole(role.label().into()));
@@ -845,7 +879,9 @@ mod tests {
                     prompt_tokens: 100,
                     completion_tokens: 200,
                     total_tokens: 300,
-                },
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,
@@ -1576,7 +1612,9 @@ mod tests {
             prompt_tokens: 1_000_000,
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
-        };
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            };
         // Opus: $15 input + $75 output = $90
         let opus_cost = estimate_cost_from_usage("claude-opus-4", &usage);
         assert!((opus_cost - 90.0).abs() < 0.01);
@@ -1604,7 +1642,9 @@ mod tests {
                         prompt_tokens: 10,
                         completion_tokens: 10,
                         total_tokens: 20,
-                    },
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
                     finish_reason: FinishReason::Stop,
                     thinking: None,
                     tool_calls: None,

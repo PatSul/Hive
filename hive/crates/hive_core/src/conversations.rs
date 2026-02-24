@@ -27,6 +27,16 @@ pub struct StoredMessage {
     pub tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<String>,
+    /// Whether this message is a compaction summary replacing older messages.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_compacted: bool,
+    /// Indices of the original messages this compaction replaced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compacted_from: Option<Vec<usize>>,
+}
+
+fn is_false(v: &bool) -> bool {
+    !v
 }
 
 /// Full conversation persisted as `{id}.json`.
@@ -41,6 +51,15 @@ pub struct Conversation {
     pub total_tokens: u32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Parent conversation this was branched from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Message index in the parent where this branch diverged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_point_index: Option<usize>,
+    /// User-assigned label for this branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +90,10 @@ struct ConversationMeta {
     total_cost: f64,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    branch_name: Option<String>,
 }
 
 /// Lightweight summary returned by `list_summaries` / `search`.
@@ -86,6 +109,12 @@ pub struct ConversationSummary {
     pub model: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Parent conversation ID if this is a branch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Branch label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +357,8 @@ impl ConversationStore {
                     model: meta.model,
                     created_at: meta.created_at,
                     updated_at: meta.updated_at,
+                    parent_id: meta.parent_id,
+                    branch_name: meta.branch_name,
                 });
             }
         }
@@ -360,7 +391,64 @@ impl ConversationStore {
             model: meta.model,
             created_at: meta.created_at,
             updated_at: meta.updated_at,
+            parent_id: meta.parent_id,
+            branch_name: meta.branch_name,
         })
+    }
+
+    // -----------------------------------------------------------------------
+    // Branching operations
+    // -----------------------------------------------------------------------
+
+    /// Get all conversations that are branches of the given conversation ID.
+    pub fn get_branches(&self, conversation_id: &str) -> Result<Vec<ConversationSummary>> {
+        let all = self.list_summaries()?;
+        Ok(all
+            .into_iter()
+            .filter(|s| s.parent_id.as_deref() == Some(conversation_id))
+            .collect())
+    }
+
+    /// Get the full conversation tree starting from a root conversation.
+    ///
+    /// Returns the root and all descendant branches (recursively), sorted
+    /// by creation time.
+    pub fn get_conversation_tree(&self, root_id: &str) -> Result<Vec<ConversationSummary>> {
+        let all = self.list_summaries()?;
+        let mut tree = Vec::new();
+
+        // BFS from root.
+        let mut queue = vec![root_id.to_string()];
+        while let Some(current_id) = queue.pop() {
+            if let Some(summary) = all.iter().find(|s| s.id == current_id) {
+                tree.push(summary.clone());
+            }
+            // Find children.
+            for s in &all {
+                if s.parent_id.as_deref() == Some(&current_id) {
+                    queue.push(s.id.clone());
+                }
+            }
+        }
+
+        tree.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        Ok(tree)
+    }
+
+    /// Branch a conversation at a specific message index and save the branch.
+    ///
+    /// Loads the parent, creates a new branched conversation, saves it, and
+    /// returns the new conversation.
+    pub fn branch_conversation(
+        &self,
+        conversation_id: &str,
+        message_index: usize,
+        branch_name: Option<String>,
+    ) -> Result<Conversation> {
+        let parent = self.load(conversation_id)?;
+        let branch = parent.branch_at(message_index, branch_name)?;
+        self.save(&branch)?;
+        Ok(branch)
     }
 }
 
@@ -381,6 +469,9 @@ impl Conversation {
             total_tokens: 0,
             created_at: now,
             updated_at: now,
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         }
     }
 
@@ -395,6 +486,56 @@ impl Conversation {
         self.messages.push(msg);
         self.title = generate_title(&self.messages);
         self.updated_at = Utc::now();
+    }
+
+    /// Create a new branch from this conversation at the given message index.
+    ///
+    /// The new conversation contains messages `[0..=message_index]` from the
+    /// parent, with `parent_id` and `branch_point_index` set so the lineage
+    /// can be reconstructed.
+    pub fn branch_at(&self, message_index: usize, branch_name: Option<String>) -> Result<Self> {
+        if message_index >= self.messages.len() {
+            anyhow::bail!(
+                "Branch point {} is out of range (conversation has {} messages)",
+                message_index,
+                self.messages.len()
+            );
+        }
+
+        let now = Utc::now();
+        let branched_messages = self.messages[..=message_index].to_vec();
+
+        // Recompute cost/token totals for the branched subset.
+        let total_cost: f64 = branched_messages
+            .iter()
+            .filter_map(|m| m.cost)
+            .sum();
+        let total_tokens: u32 = branched_messages
+            .iter()
+            .filter_map(|m| m.tokens)
+            .sum();
+
+        Ok(Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            title: branch_name
+                .as_deref()
+                .unwrap_or(&self.title)
+                .to_string(),
+            messages: branched_messages,
+            model: self.model.clone(),
+            total_cost,
+            total_tokens,
+            created_at: now,
+            updated_at: now,
+            parent_id: Some(self.id.clone()),
+            branch_point_index: Some(message_index),
+            branch_name,
+        })
+    }
+
+    /// Whether this conversation is a branch of another.
+    pub fn is_branch(&self) -> bool {
+        self.parent_id.is_some()
     }
 }
 
@@ -433,12 +574,17 @@ mod tests {
                 cost: Some(0.01),
                 tokens: Some(100),
                 thinking: None,
+                is_compacted: false,
+                compacted_from: None,
             }],
             model: "test-model".into(),
             total_cost: 0.01,
             total_tokens: 100,
             created_at: Utc::now() - chrono::Duration::hours(1),
             updated_at,
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         }
     }
 
@@ -539,12 +685,17 @@ mod tests {
                 cost: None,
                 tokens: None,
                 thinking: None,
+                is_compacted: false,
+                compacted_from: None,
             }],
             model: "gpt-4".into(),
             total_cost: 0.0,
             total_tokens: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         };
 
         let conv2 = Conversation {
@@ -558,12 +709,17 @@ mod tests {
                 cost: None,
                 tokens: None,
                 thinking: None,
+                is_compacted: false,
+                compacted_from: None,
             }],
             model: "claude".into(),
             total_cost: 0.0,
             total_tokens: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         };
 
         let conv3 = Conversation {
@@ -577,12 +733,17 @@ mod tests {
                 cost: None,
                 tokens: None,
                 thinking: None,
+                is_compacted: false,
+                compacted_from: None,
             }],
             model: "claude".into(),
             total_cost: 0.0,
             total_tokens: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         };
 
         store.save(&conv1).unwrap();
@@ -620,6 +781,8 @@ mod tests {
             cost: None,
             tokens: None,
             thinking: None,
+            is_compacted: false,
+            compacted_from: None,
         }];
         assert_eq!(generate_title(&msgs), "Hello");
     }
@@ -635,6 +798,8 @@ mod tests {
             cost: None,
             tokens: None,
             thinking: None,
+            is_compacted: false,
+            compacted_from: None,
         }];
         let title = generate_title(&msgs);
         assert!(title.ends_with("..."));
@@ -653,6 +818,8 @@ mod tests {
             cost: None,
             tokens: None,
             thinking: None,
+            is_compacted: false,
+            compacted_from: None,
         }];
         assert_eq!(generate_title(&msgs), "New Conversation");
     }
@@ -732,6 +899,8 @@ mod tests {
             cost: Some(0.005),
             tokens: Some(50),
             thinking: None,
+            is_compacted: false,
+            compacted_from: None,
         });
 
         assert_eq!(conv.messages.len(), 1);
@@ -759,12 +928,17 @@ mod tests {
                 cost: None,
                 tokens: None,
                 thinking: None,
+                is_compacted: false,
+                compacted_from: None,
             }],
             model: "test".into(),
             total_cost: 0.0,
             total_tokens: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            parent_id: None,
+            branch_point_index: None,
+            branch_name: None,
         };
         store.save(&conv).unwrap();
 
@@ -784,5 +958,200 @@ mod tests {
         let (store, _tmp) = temp_store();
         assert!(store.load("../../../etc/passwd").is_err());
         assert!(store.load("").is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Branching
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_branch_at_creates_correct_subset() {
+        let mut conv = Conversation::new("claude-sonnet");
+        for i in 0..5 {
+            conv.add_message(StoredMessage {
+                role: "user".into(),
+                content: format!("Message {i}"),
+                timestamp: Utc::now(),
+                model: None,
+                cost: Some(0.01),
+                tokens: Some(10),
+                thinking: None,
+                is_compacted: false,
+                compacted_from: None,
+            });
+        }
+
+        let branch = conv.branch_at(2, Some("alt-approach".into())).unwrap();
+
+        assert_eq!(branch.messages.len(), 3); // 0, 1, 2
+        assert_eq!(branch.parent_id.as_deref(), Some(conv.id.as_str()));
+        assert_eq!(branch.branch_point_index, Some(2));
+        assert_eq!(branch.branch_name.as_deref(), Some("alt-approach"));
+        assert_ne!(branch.id, conv.id);
+        assert!(branch.is_branch());
+        assert!(!conv.is_branch());
+    }
+
+    #[test]
+    fn test_branch_at_out_of_range() {
+        let conv = Conversation::new("test");
+        assert!(conv.branch_at(0, None).is_err());
+    }
+
+    #[test]
+    fn test_branch_preserves_cost_totals() {
+        let mut conv = Conversation::new("test");
+        conv.add_message(StoredMessage {
+            role: "user".into(),
+            content: "msg1".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: Some(0.05),
+            tokens: Some(100),
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+        conv.add_message(StoredMessage {
+            role: "assistant".into(),
+            content: "msg2".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: Some(0.10),
+            tokens: Some(200),
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+
+        let branch = conv.branch_at(0, None).unwrap();
+        assert!((branch.total_cost - 0.05).abs() < f64::EPSILON);
+        assert_eq!(branch.total_tokens, 100);
+    }
+
+    #[test]
+    fn test_store_branch_conversation() {
+        let (store, _tmp) = temp_store();
+
+        let mut parent = Conversation::new("claude");
+        parent.id = "parent-1".into();
+        parent.add_message(StoredMessage {
+            role: "user".into(),
+            content: "Hello".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: None,
+            tokens: None,
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+        parent.add_message(StoredMessage {
+            role: "assistant".into(),
+            content: "Hi there!".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: None,
+            tokens: None,
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+        store.save(&parent).unwrap();
+
+        let branch = store
+            .branch_conversation("parent-1", 0, Some("alt".into()))
+            .unwrap();
+        assert_eq!(branch.messages.len(), 1);
+        assert!(branch.is_branch());
+
+        // Verify branch persisted and loadable
+        let loaded = store.load(&branch.id).unwrap();
+        assert_eq!(loaded.parent_id.as_deref(), Some("parent-1"));
+        assert_eq!(loaded.branch_name.as_deref(), Some("alt"));
+    }
+
+    #[test]
+    fn test_get_branches() {
+        let (store, _tmp) = temp_store();
+
+        let mut parent = Conversation::new("claude");
+        parent.id = "root".into();
+        parent.add_message(StoredMessage {
+            role: "user".into(),
+            content: "root msg".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: None,
+            tokens: None,
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+        store.save(&parent).unwrap();
+
+        let b1 = store.branch_conversation("root", 0, Some("b1".into())).unwrap();
+        let b2 = store.branch_conversation("root", 0, Some("b2".into())).unwrap();
+
+        let branches = store.get_branches("root").unwrap();
+        assert_eq!(branches.len(), 2);
+
+        let ids: Vec<&str> = branches.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&b1.id.as_str()));
+        assert!(ids.contains(&b2.id.as_str()));
+    }
+
+    #[test]
+    fn test_get_conversation_tree() {
+        let (store, _tmp) = temp_store();
+
+        let mut root = Conversation::new("claude");
+        root.id = "tree-root".into();
+        root.add_message(StoredMessage {
+            role: "user".into(),
+            content: "root msg".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: None,
+            tokens: None,
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+        store.save(&root).unwrap();
+
+        let child = store.branch_conversation("tree-root", 0, Some("child".into())).unwrap();
+
+        let tree = store.get_conversation_tree("tree-root").unwrap();
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree[0].id, "tree-root");
+        assert_eq!(tree[1].id, child.id);
+    }
+
+    #[test]
+    fn test_branch_summary_includes_parent_id() {
+        let (store, _tmp) = temp_store();
+
+        let mut parent = Conversation::new("claude");
+        parent.id = "parent-sum".into();
+        parent.add_message(StoredMessage {
+            role: "user".into(),
+            content: "hello".into(),
+            timestamp: Utc::now(),
+            model: None,
+            cost: None,
+            tokens: None,
+            thinking: None,
+            is_compacted: false,
+            compacted_from: None,
+        });
+        store.save(&parent).unwrap();
+
+        store.branch_conversation("parent-sum", 0, Some("my-branch".into())).unwrap();
+
+        let summaries = store.list_summaries().unwrap();
+        let branch_summary = summaries.iter().find(|s| s.branch_name.as_deref() == Some("my-branch"));
+        assert!(branch_summary.is_some());
+        assert_eq!(branch_summary.unwrap().parent_id.as_deref(), Some("parent-sum"));
     }
 }

@@ -125,6 +125,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 "You are a swarm orchestration planner. Produce valid JSON only.".into(),
             ),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = self.executor.execute(&request).await?;
@@ -628,6 +629,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
             temperature: Some(0.3),
             system_prompt: Some(system_prompt),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = self.executor.execute(&request).await?;
@@ -668,6 +670,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 objective.name
             )),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = self.executor.execute(&request).await?;
@@ -802,6 +805,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                     .into(),
             ),
             tools: None,
+            cache_system_prompt: false,
         };
 
         match self.executor.execute(&request).await {
@@ -1573,6 +1577,8 @@ mod tests {
                 prompt_tokens: 1_000_000,
                 completion_tokens: 1_000_000,
                 total_tokens: 2_000_000,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             finish_reason: FinishReason::Stop,
             thinking: None,
@@ -1593,6 +1599,8 @@ mod tests {
                 prompt_tokens: 1000,
                 completion_tokens: 1000,
                 total_tokens: 2000,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             finish_reason: FinishReason::Stop,
             thinking: None,

@@ -11,6 +11,7 @@ pub mod integration_tools;
 pub mod knowledge_acquisition;
 pub mod mcp_client;
 pub mod mcp_server;
+pub mod message_queue;
 pub mod persistence;
 pub mod personas;
 pub mod queen;
@@ -62,4 +63,9 @@ pub use swarm::{
     SwarmStatusCallback, TeamObjective, TeamResult, TeamStatus,
 };
 pub use voice::{VoiceAssistant, VoiceCommand, VoiceIntent, VoiceState, WakeWordConfig};
+pub use message_queue::{
+    AgentMessage, AgentMessageQueue, MessagePriority, SharedMessageQueue, classify_input,
+    shared_queue, strip_prefix,
+};
+pub use tool_use::builtin_registry_with_sandbox;
 pub use worktree::{MergeBranchResult, TeamWorktree, WorktreeManager};

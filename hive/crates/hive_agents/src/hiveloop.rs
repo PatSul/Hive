@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+use crate::message_queue::{AgentMessage, SharedMessageQueue};
+
 // ---------------------------------------------------------------------------
 // Loop State
 // ---------------------------------------------------------------------------
@@ -18,6 +20,8 @@ pub enum LoopStatus {
     CostLimitReached,
     TimeLimitReached,
     IterationLimitReached,
+    /// A steering message interrupted the loop.
+    SteeringInterrupt,
     Failed,
 }
 
@@ -63,6 +67,7 @@ pub struct HiveLoop {
     pub total_cost: f64,
     pub last_output: String,
     started_at: Option<Instant>,
+    message_queue: Option<SharedMessageQueue>,
 }
 
 impl HiveLoop {
@@ -74,7 +79,19 @@ impl HiveLoop {
             total_cost: 0.0,
             last_output: String::new(),
             started_at: None,
+            message_queue: None,
         }
+    }
+
+    /// Attach a shared message queue for steering/follow-up support.
+    pub fn with_message_queue(mut self, queue: SharedMessageQueue) -> Self {
+        self.message_queue = Some(queue);
+        self
+    }
+
+    /// Set the message queue after construction.
+    pub fn set_message_queue(&mut self, queue: SharedMessageQueue) {
+        self.message_queue = Some(queue);
     }
 
     /// Start the loop timer.
@@ -84,6 +101,10 @@ impl HiveLoop {
     }
 
     /// Check if the loop should continue.
+    ///
+    /// When a message queue is attached, pending steering messages
+    /// cause the loop to pause (returning `false`) so the caller can
+    /// drain and handle the steering before the next iteration.
     pub fn should_continue(&self) -> bool {
         if self.status != LoopStatus::Running {
             return false;
@@ -98,7 +119,41 @@ impl HiveLoop {
             && started.elapsed() >= Duration::from_secs(self.config.time_limit_secs) {
                 return false;
             }
+        // Check for steering interrupts.
+        if self.has_steering() {
+            return false;
+        }
         true
+    }
+
+    /// Check if there are pending steering messages.
+    pub fn has_steering(&self) -> bool {
+        if let Some(ref queue) = self.message_queue {
+            if let Ok(q) = queue.lock() {
+                return q.has_steering();
+            }
+        }
+        false
+    }
+
+    /// Drain pending steering messages from the attached queue.
+    pub fn drain_steering(&self) -> Vec<AgentMessage> {
+        if let Some(ref queue) = self.message_queue {
+            if let Ok(mut q) = queue.lock() {
+                return q.drain_steering();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Drain pending follow-up messages from the attached queue.
+    pub fn drain_followup(&self) -> Vec<AgentMessage> {
+        if let Some(ref queue) = self.message_queue {
+            if let Ok(mut q) = queue.lock() {
+                return q.drain_followup();
+            }
+        }
+        Vec::new()
     }
 
     /// Record a completed iteration and check limits.

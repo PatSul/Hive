@@ -1,5 +1,6 @@
-//! Context window management — tracks token usage and prunes messages
-//! to stay within model-specific context limits.
+//! Context window management — tracks token usage, prunes messages
+//! to stay within model-specific context limits, and proactively compacts
+//! conversations to prevent dead sessions.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +11,12 @@ use serde::{Deserialize, Serialize};
 /// Rough token estimate: ~4 characters per token for English text.
 /// This is intentionally conservative (overestimates) to avoid truncation.
 const CHARS_PER_TOKEN: usize = 4;
+
+/// Default proactive compaction threshold (80% of context budget).
+const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.80;
+
+/// Aggressive compaction threshold used in reactive (post-overflow) path.
+const REACTIVE_COMPACTION_RATIO: f64 = 0.70;
 
 /// Estimate token count for a string.
 pub fn estimate_tokens(text: &str) -> usize {
@@ -29,6 +36,12 @@ pub struct ContextMessage {
     pub content: String,
     pub tokens: usize,
     pub pinned: bool,
+    /// Whether this message is a compaction summary replacing older messages.
+    #[serde(default)]
+    pub is_compacted: bool,
+    /// How many original messages this compaction summary replaced.
+    #[serde(default)]
+    pub original_count: Option<u32>,
 }
 
 impl ContextMessage {
@@ -41,6 +54,8 @@ impl ContextMessage {
             content,
             tokens,
             pinned: false,
+            is_compacted: false,
+            original_count: None,
         }
     }
 
@@ -51,14 +66,32 @@ impl ContextMessage {
     }
 }
 
+/// Result of a context compaction operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionResult {
+    /// Number of messages that were compacted into a summary.
+    pub messages_compacted: usize,
+    /// Tokens freed by compaction.
+    pub tokens_freed: usize,
+    /// Tokens used by the summary message.
+    pub summary_tokens: usize,
+    /// Context usage percentage after compaction.
+    pub usage_after: f64,
+}
+
 /// Manages the context window for a conversation.
 ///
 /// Keeps track of messages and their estimated token counts,
 /// pruning oldest non-pinned messages when the limit is reached.
+/// Supports proactive compaction (at configurable threshold) and
+/// reactive compaction (after context overflow).
 pub struct ContextWindow {
     messages: Vec<ContextMessage>,
     max_tokens: usize,
     system_prompt_tokens: usize,
+    /// Proactive compaction threshold (0.0 to 1.0). When `usage_pct()`
+    /// exceeds this value, `needs_compaction()` returns true.
+    compaction_threshold: f64,
 }
 
 impl ContextWindow {
@@ -68,7 +101,21 @@ impl ContextWindow {
             messages: Vec::new(),
             max_tokens,
             system_prompt_tokens: 0,
+            compaction_threshold: DEFAULT_COMPACTION_THRESHOLD,
         }
+    }
+
+    /// Set the proactive compaction threshold (0.0 to 1.0).
+    ///
+    /// When `usage_pct()` exceeds this value, `needs_compaction()` returns true.
+    /// Default is 0.80 (80%).
+    pub fn set_compaction_threshold(&mut self, threshold: f64) {
+        self.compaction_threshold = threshold.clamp(0.0, 1.0);
+    }
+
+    /// Get the current compaction threshold.
+    pub fn compaction_threshold(&self) -> f64 {
+        self.compaction_threshold
     }
 
     /// Set the system prompt (counts toward the token budget).
@@ -114,6 +161,145 @@ impl ContextWindow {
     pub fn is_over_budget(&self) -> bool {
         self.total_tokens() > self.max_tokens
     }
+
+    // -----------------------------------------------------------------------
+    // Compaction
+    // -----------------------------------------------------------------------
+
+    /// Whether the context window has grown enough to trigger proactive
+    /// compaction. Returns true when usage exceeds the compaction threshold
+    /// AND there are enough non-pinned messages to compact (at least 3).
+    pub fn needs_compaction(&self) -> bool {
+        if self.max_tokens == 0 {
+            return false;
+        }
+        let compactable = self.messages.iter().filter(|m| !m.pinned && !m.is_compacted).count();
+        self.usage_pct() >= self.compaction_threshold && compactable >= 3
+    }
+
+    /// Select the oldest non-pinned, non-compacted messages for compaction.
+    ///
+    /// Selects up to `ratio` (0.0-1.0) of total message tokens, ensuring
+    /// we don't compact pinned or already-compacted messages.
+    fn select_for_compaction(&self, ratio: f64) -> Vec<usize> {
+        let message_tokens: usize = self.messages.iter().map(|m| m.tokens).sum();
+        let target_tokens = (message_tokens as f64 * ratio) as usize;
+
+        let mut selected = Vec::new();
+        let mut accumulated = 0usize;
+
+        for (idx, msg) in self.messages.iter().enumerate() {
+            if accumulated >= target_tokens {
+                break;
+            }
+            if msg.pinned || msg.is_compacted {
+                continue;
+            }
+            accumulated += msg.tokens;
+            selected.push(idx);
+        }
+
+        selected
+    }
+
+    /// Proactively compact the context window by summarizing older messages.
+    ///
+    /// The `summarize` callback receives the messages to be compacted and
+    /// should return a summary string (typically by calling a budget AI model).
+    /// Returns `None` if compaction isn't needed.
+    ///
+    /// Compaction selects the oldest ~50% of non-pinned messages by token
+    /// count, replaces them with a single pinned summary message, and
+    /// preserves the most recent messages intact.
+    pub fn compact<F>(&mut self, summarize: F) -> Option<Result<CompactionResult, String>>
+    where
+        F: FnOnce(&[ContextMessage]) -> Result<String, String>,
+    {
+        if !self.needs_compaction() {
+            return None;
+        }
+
+        Some(self.do_compact(0.50, summarize))
+    }
+
+    /// Compact unconditionally with a custom ratio. Used for both proactive
+    /// and reactive paths.
+    fn do_compact<F>(&mut self, ratio: f64, summarize: F) -> Result<CompactionResult, String>
+    where
+        F: FnOnce(&[ContextMessage]) -> Result<String, String>,
+    {
+        let indices = self.select_for_compaction(ratio);
+        if indices.is_empty() {
+            return Err("No compactable messages found".into());
+        }
+
+        // Collect the messages to compact.
+        let to_compact: Vec<ContextMessage> = indices
+            .iter()
+            .map(|&i| self.messages[i].clone())
+            .collect();
+
+        let tokens_before: usize = to_compact.iter().map(|m| m.tokens).sum();
+        let count = to_compact.len() as u32;
+
+        // Call the summarizer.
+        let summary_text = summarize(&to_compact)?;
+        let summary_tokens = estimate_tokens(&summary_text);
+
+        // Remove compacted messages (iterate in reverse to preserve indices).
+        for &idx in indices.iter().rev() {
+            self.messages.remove(idx);
+        }
+
+        // Insert the compaction summary at the beginning (before remaining messages).
+        let summary_msg = ContextMessage {
+            role: "system".into(),
+            content: summary_text,
+            tokens: summary_tokens,
+            pinned: true,
+            is_compacted: true,
+            original_count: Some(count),
+        };
+        self.messages.insert(0, summary_msg);
+
+        let tokens_freed = tokens_before.saturating_sub(summary_tokens);
+
+        Ok(CompactionResult {
+            messages_compacted: count as usize,
+            tokens_freed,
+            summary_tokens,
+            usage_after: self.usage_pct(),
+        })
+    }
+
+    /// Reactive compaction — called after a context-length API error.
+    ///
+    /// Uses a more aggressive ratio (70% of messages) to free substantial
+    /// space. Always runs regardless of threshold (the error proves we need it).
+    pub fn compact_reactive<F>(&mut self, summarize: F) -> Result<CompactionResult, String>
+    where
+        F: FnOnce(&[ContextMessage]) -> Result<String, String>,
+    {
+        self.do_compact(REACTIVE_COMPACTION_RATIO, summarize)
+    }
+
+    /// Convenience: check and compact if needed using the provided summarizer.
+    /// Returns `Ok(Some(result))` if compaction happened, `Ok(None)` if not needed,
+    /// or `Err` if the summarizer failed.
+    pub fn compact_if_needed<F>(&mut self, summarize: F) -> Result<Option<CompactionResult>, String>
+    where
+        F: FnOnce(&[ContextMessage]) -> Result<String, String>,
+    {
+        match self.compact(summarize) {
+            None => Ok(None),
+            Some(Ok(result)) => Ok(Some(result)),
+            Some(Err(e)) => Err(e),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pruning (existing)
+    // -----------------------------------------------------------------------
 
     /// Prune oldest non-pinned messages until within budget.
     /// Uses a single-pass `retain()` instead of repeated `Vec::remove()` to
@@ -208,6 +394,8 @@ mod tests {
         let msg = ContextMessage::new("user", "Hello, how are you?");
         assert_eq!(msg.role, "user");
         assert!(!msg.pinned);
+        assert!(!msg.is_compacted);
+        assert!(msg.original_count.is_none());
         assert!(msg.tokens > 0);
     }
 
@@ -331,5 +519,183 @@ mod tests {
         ctx.push(ContextMessage::new("user", "hello"));
         // Should prune immediately, but if all messages are needed it stays over
         assert!(ctx.is_over_budget() || ctx.message_count() == 0);
+    }
+
+    // -- Compaction tests ---------------------------------------------------
+
+    #[test]
+    fn needs_compaction_below_threshold() {
+        let mut ctx = ContextWindow::new(1000);
+        // Add ~10 tokens worth of messages — well below 80%
+        ctx.push(ContextMessage::new("user", "Hello"));
+        assert!(!ctx.needs_compaction());
+    }
+
+    #[test]
+    fn needs_compaction_above_threshold() {
+        let mut ctx = ContextWindow::new(100);
+        // Add ~85 tokens (> 80% of 100)
+        ctx.push(ContextMessage::new("user", "a".repeat(100))); // ~25 tokens
+        ctx.push(ContextMessage::new("assistant", "b".repeat(100))); // ~25 tokens
+        ctx.push(ContextMessage::new("user", "c".repeat(100))); // ~25 tokens
+        ctx.push(ContextMessage::new("assistant", "d".repeat(40))); // ~10 tokens
+        // Total ~85 tokens, 85% > 80%
+        assert!(ctx.needs_compaction());
+    }
+
+    #[test]
+    fn needs_compaction_requires_enough_messages() {
+        let mut ctx = ContextWindow::new(50);
+        ctx.set_compaction_threshold(0.5);
+        // One big message — above threshold but only 1 compactable message
+        ctx.push(ContextMessage::new("user", "a".repeat(120))); // ~30 tokens = 60%
+        assert!(!ctx.needs_compaction(), "Need at least 3 compactable messages");
+    }
+
+    #[test]
+    fn compact_reduces_usage() {
+        // Each message: 400 chars / 4 = 100 tokens. 4 messages = 400 tokens.
+        // max_tokens = 450 → usage = 400/450 = 88.9% > 80% threshold.
+        // No pruning because 400 < 450.
+        let mut ctx = ContextWindow::new(450);
+        ctx.push(ContextMessage::new("user", "a".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "b".repeat(400)));
+        ctx.push(ContextMessage::new("user", "c".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "d".repeat(400)));
+
+        let usage_before = ctx.usage_pct();
+        assert!(ctx.needs_compaction(), "usage={:.2}% should exceed 80%", usage_before * 100.0);
+
+        let result = ctx.compact(|msgs| {
+            // Simple mock summarizer — return a short summary
+            Ok(format!("Summary of {} messages.", msgs.len()))
+        });
+
+        assert!(result.is_some());
+        let result = result.unwrap().unwrap();
+        assert!(result.messages_compacted > 0);
+        assert!(result.tokens_freed > 0);
+        assert!(ctx.usage_pct() < usage_before);
+    }
+
+    #[test]
+    fn compact_returns_none_when_not_needed() {
+        let mut ctx = ContextWindow::new(10000);
+        ctx.push(ContextMessage::new("user", "Hello"));
+
+        let result = ctx.compact(|_| Ok("summary".into()));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn compact_preserves_pinned_messages() {
+        // 1 pinned (~4 tokens) + 4 messages (100 tokens each) = ~404 tokens.
+        // max_tokens = 450 → 89.8% > 80%. No pruning.
+        let mut ctx = ContextWindow::new(450);
+        ctx.push(ContextMessage::new("system", "Important context").pinned());
+        ctx.push(ContextMessage::new("user", "a".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "b".repeat(400)));
+        ctx.push(ContextMessage::new("user", "c".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "d".repeat(400)));
+
+        ctx.compact(|msgs| {
+            // Pinned messages should NOT be in the compaction set
+            assert!(msgs.iter().all(|m| !m.pinned));
+            Ok("summary".into())
+        });
+
+        // The original pinned message should still exist
+        assert!(ctx.messages().iter().any(|m| m.pinned && m.content == "Important context"));
+    }
+
+    #[test]
+    fn compact_creates_compacted_summary_message() {
+        // 4 messages of 100 tokens = 400 tokens. max_tokens = 450 → 88.9%.
+        let mut ctx = ContextWindow::new(450);
+        ctx.push(ContextMessage::new("user", "a".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "b".repeat(400)));
+        ctx.push(ContextMessage::new("user", "c".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "d".repeat(400)));
+
+        ctx.compact(|_| Ok("Compacted summary".into()));
+
+        let compacted = ctx.messages().iter().find(|m| m.is_compacted);
+        assert!(compacted.is_some());
+        let compacted = compacted.unwrap();
+        assert_eq!(compacted.role, "system");
+        assert!(compacted.pinned);
+        assert!(compacted.original_count.is_some());
+        assert!(compacted.original_count.unwrap() > 0);
+    }
+
+    #[test]
+    fn compact_reactive_always_runs() {
+        let mut ctx = ContextWindow::new(10000);
+        // Well below threshold — but reactive should still compact
+        ctx.push(ContextMessage::new("user", "a".repeat(80)));
+        ctx.push(ContextMessage::new("assistant", "b".repeat(80)));
+        ctx.push(ContextMessage::new("user", "c".repeat(80)));
+
+        assert!(!ctx.needs_compaction());
+
+        let result = ctx.compact_reactive(|_| Ok("reactive summary".into()));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.messages_compacted > 0);
+    }
+
+    #[test]
+    fn compact_if_needed_convenience() {
+        let mut ctx = ContextWindow::new(10000);
+        ctx.push(ContextMessage::new("user", "Hello"));
+
+        // Not needed — should return Ok(None)
+        let result = ctx.compact_if_needed(|_| Ok("summary".into()));
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn compact_propagates_summarizer_error() {
+        // 4 messages of 100 tokens = 400 tokens. max_tokens = 450 → 88.9%.
+        let mut ctx = ContextWindow::new(450);
+        ctx.push(ContextMessage::new("user", "a".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "b".repeat(400)));
+        ctx.push(ContextMessage::new("user", "c".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "d".repeat(400)));
+
+        let result = ctx.compact(|_| Err("AI unavailable".into()));
+        assert!(result.is_some());
+        assert!(result.unwrap().is_err());
+    }
+
+    #[test]
+    fn set_compaction_threshold() {
+        let mut ctx = ContextWindow::new(1000);
+        assert!((ctx.compaction_threshold() - 0.80).abs() < f64::EPSILON);
+
+        ctx.set_compaction_threshold(0.60);
+        assert!((ctx.compaction_threshold() - 0.60).abs() < f64::EPSILON);
+
+        // Clamp to valid range
+        ctx.set_compaction_threshold(1.5);
+        assert!((ctx.compaction_threshold() - 1.0).abs() < f64::EPSILON);
+
+        ctx.set_compaction_threshold(-0.1);
+        assert!((ctx.compaction_threshold() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn compaction_result_serialization() {
+        let result = CompactionResult {
+            messages_compacted: 5,
+            tokens_freed: 200,
+            summary_tokens: 50,
+            usage_after: 0.45,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: CompactionResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.messages_compacted, 5);
+        assert_eq!(parsed.tokens_freed, 200);
     }
 }

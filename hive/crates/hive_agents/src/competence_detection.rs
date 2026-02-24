@@ -427,6 +427,7 @@ impl CompetenceDetector {
             temperature: Some(0.0),
             system_prompt: Some(system_prompt),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let ai_signal = match executor.execute(&ai_request).await {
@@ -615,7 +616,7 @@ mod tests {
             Ok(ChatResponse {
                 content: self.response.clone(),
                 model: "mock".to_string(),
-                usage: TokenUsage { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+                usage: TokenUsage { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cache_creation_input_tokens: None, cache_read_input_tokens: None },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,

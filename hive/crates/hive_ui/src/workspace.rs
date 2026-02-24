@@ -351,6 +351,9 @@ impl HiveWorkspace {
             if cfg.xai_api_key.is_some() {
                 providers.insert(hive_ai::types::ProviderType::XAI);
             }
+            if cfg.mistral_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::Mistral);
+            }
             if cfg.groq_api_key.is_some() {
                 providers.insert(hive_ai::types::ProviderType::Groq);
             }

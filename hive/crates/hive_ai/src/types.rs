@@ -166,6 +166,8 @@ pub enum ProviderType {
     LMStudio,
     GenericLocal,
     XAI,
+    Mistral,
+    Doubao,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -182,6 +184,8 @@ impl std::fmt::Display for ProviderType {
             Self::LMStudio => write!(f, "lmstudio"),
             Self::GenericLocal => write!(f, "generic_local"),
             Self::XAI => write!(f, "xai"),
+            Self::Mistral => write!(f, "mistral"),
+            Self::Doubao => write!(f, "doubao"),
         }
     }
 }
@@ -229,6 +233,12 @@ pub struct ChatRequest {
     /// Tool definitions the model can call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    /// Enable prompt caching for the system prompt (Anthropic only).
+    /// When true, the system prompt is sent as a content block with
+    /// `cache_control: {"type": "ephemeral"}`, enabling Anthropic's
+    /// prompt caching to avoid re-processing static system prompts.
+    #[serde(default)]
+    pub cache_system_prompt: bool,
 }
 
 fn default_max_tokens() -> u32 {
@@ -241,6 +251,12 @@ pub struct TokenUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    /// Tokens written to cache (Anthropic prompt caching).
+    #[serde(default)]
+    pub cache_creation_input_tokens: Option<u32>,
+    /// Tokens read from cache (Anthropic prompt caching).
+    #[serde(default)]
+    pub cache_read_input_tokens: Option<u32>,
 }
 
 /// Why the model stopped generating.

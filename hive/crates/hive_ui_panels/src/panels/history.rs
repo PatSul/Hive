@@ -64,6 +64,8 @@ impl HistoryData {
                     model: row.model.clone(),
                     created_at,
                     updated_at,
+                    parent_id: None,
+                    branch_name: None,
                 }
             })
             .collect();
@@ -135,6 +137,8 @@ impl HistoryData {
                     model: "claude-sonnet-4-5".into(),
                     created_at: now - chrono::Duration::hours(2),
                     updated_at: now - chrono::Duration::minutes(30),
+                    parent_id: None,
+                    branch_name: None,
                 },
                 ConversationSummary {
                     id: "conv-2".into(),
@@ -145,6 +149,8 @@ impl HistoryData {
                     model: "gpt-4o".into(),
                     created_at: now - chrono::Duration::days(1),
                     updated_at: now - chrono::Duration::hours(6),
+                    parent_id: None,
+                    branch_name: None,
                 },
             ],
             selected_id: None,
