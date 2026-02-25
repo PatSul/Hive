@@ -14,6 +14,7 @@ pub mod mcp_server;
 pub mod message_queue;
 pub mod persistence;
 pub mod personas;
+pub mod plugin_manager;
 pub mod plugin_types;
 pub mod queen;
 pub mod skill_authoring;
@@ -57,6 +58,7 @@ pub use skill_marketplace::{
     AvailableSkill, InstalledSkill, SecurityIssue, SecurityIssueType, Severity, SkillCategory,
     SkillDirectory, SkillMarketplace, SkillOrg, SkillSource,
 };
+pub use plugin_manager::PluginManager;
 pub use plugin_types::{
     CachedVersion, InstalledCommand, InstalledPlugin, ParsedCommand, ParsedSkill,
     PluginAuthor, PluginCache, PluginManifest, PluginPreview, PluginSkill, PluginSource,
