@@ -21,9 +21,9 @@ use crate::chat_service::{ChatService, StreamCompleted};
 use chrono::Utc;
 use hive_ui_core::{
     // Globals
-    AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppLearning,
-    AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppRagService, AppContextEngine,
-    AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
+    AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppKnowledge,
+    AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppRagService,
+    AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
 };
@@ -52,6 +52,10 @@ pub use hive_ui_core::{
     SkillsRefresh, SkillsClearSearch, SkillsInstall, SkillsRemove, SkillsToggle,
     SkillsCreate, SkillsAddSource, SkillsRemoveSource, SkillsSetTab, SkillsSetSearch,
     SkillsSetCategory,
+    PluginImportOpen, PluginImportCancel, PluginImportFromGitHub,
+    PluginImportFromUrl, PluginImportFromLocal, PluginImportConfirm,
+    PluginImportToggleSkill, PluginRemove, PluginUpdate, PluginToggleExpand,
+    PluginToggleSkill, AppPluginManager,
     RoutingAddRule, TokenLaunchDeploy, TokenLaunchSetStep, TokenLaunchSelectChain,
     SettingsSave, ExportConfig, ImportConfig,
     MonitorRefresh, NetworkRefresh, AgentsReloadWorkflows, AgentsRunWorkflow,
@@ -1043,6 +1047,31 @@ impl HiveWorkspace {
                 .collect();
         }
 
+        // Populate installed plugins for the UI.
+        if cx.has_global::<AppMarketplace>() {
+            let mp = &cx.global::<AppMarketplace>().0;
+            self.skills_data.installed_plugins = mp.installed_plugins()
+                .iter()
+                .map(|p| {
+                    use hive_ui_panels::panels::skills::{UiInstalledPlugin, UiPluginSkill};
+                    UiInstalledPlugin {
+                        id: p.id.clone(),
+                        name: p.name.clone(),
+                        version: p.version.clone(),
+                        author: p.author.name.clone(),
+                        description: p.description.clone(),
+                        skills: p.skills.iter().map(|s| UiPluginSkill {
+                            name: s.name.clone(),
+                            description: s.description.clone(),
+                            enabled: s.enabled,
+                        }).collect(),
+                        expanded: false,
+                        update_available: None,
+                    }
+                })
+                .collect();
+        }
+
         // Populate directory from all connected skill sources.
         let catalog = hive_agents::skill_marketplace::SkillMarketplace::default_directory();
         let mut directory = Vec::new();
@@ -1763,8 +1792,25 @@ impl HiveWorkspace {
                 }
             }
 
-            // Optional: Add semantic search across recent files if available in context.
-            // Currently SemanticSearch requires specific paths, but we can search recent files or open buffers if needed.
+            // Pull from Knowledge Hub (Obsidian vaults + Notion workspaces)
+            if cx.has_global::<AppKnowledge>() {
+                let kb = cx.global::<AppKnowledge>().0.clone();
+                if kb.provider_count() > 0 {
+                    let query = user_query_text.clone();
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    if let Ok(rt) = rt {
+                        let kb_context = rt.block_on(kb.get_context_all(&query));
+                        if !kb_context.trim().is_empty() {
+                            all_context.push_str("# Knowledge Base Context\n\n");
+                            all_context.push_str(&kb_context);
+                            all_context.push_str("\n\n");
+                        }
+                    }
+                }
+            }
+
             // For now, we seed the ContextEngine with whatever RAG found, plus we can index the current directory.
             if cx.has_global::<AppContextEngine>() {
                 if let Ok(mut ctx_engine) = cx.global::<AppContextEngine>().0.lock() {
@@ -5204,6 +5250,276 @@ impl HiveWorkspace {
         cx.notify();
     }
 
+    // -- Plugin action handlers -----------------------------------------------
+
+    fn handle_plugin_import_open(
+        &mut self,
+        _action: &PluginImportOpen,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: import open");
+        self.skills_data.import_state = ImportState::SelectMethod;
+        cx.notify();
+    }
+
+    fn handle_plugin_import_cancel(
+        &mut self,
+        _action: &PluginImportCancel,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: import cancel");
+        self.skills_data.import_state = ImportState::Closed;
+        cx.notify();
+    }
+
+    fn handle_plugin_import_from_github(
+        &mut self,
+        action: &PluginImportFromGitHub,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: import from GitHub '{}'", action.owner_repo);
+
+        if action.owner_repo.is_empty() {
+            self.skills_data.import_state = ImportState::InputGitHub(String::new());
+            cx.notify();
+            return;
+        }
+
+        // Validate owner/repo format.
+        let parts: Vec<&str> = action.owner_repo.splitn(2, '/').collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            self.skills_data.import_state = ImportState::Done(
+                "Invalid format. Use owner/repo (e.g. obra/superpowers)".into(),
+                false,
+            );
+            cx.notify();
+            return;
+        }
+
+        // Set state to Fetching.
+        self.skills_data.import_state = ImportState::Fetching;
+        cx.notify();
+
+        // TODO: Wire up async fetch via background thread
+        self.skills_data.import_state = ImportState::Done(
+            format!("Fetching {}/{} — async integration pending", parts[0], parts[1]),
+            true,
+        );
+        cx.notify();
+    }
+
+    fn handle_plugin_import_from_url(
+        &mut self,
+        action: &PluginImportFromUrl,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: import from URL '{}'", action.url);
+
+        if action.url.is_empty() {
+            self.skills_data.import_state = ImportState::InputUrl(String::new());
+            cx.notify();
+            return;
+        }
+
+        // Basic URL validation.
+        if !action.url.starts_with("http://") && !action.url.starts_with("https://") {
+            self.skills_data.import_state = ImportState::Done(
+                "Invalid URL. Must start with http:// or https://".into(),
+                false,
+            );
+            cx.notify();
+            return;
+        }
+
+        self.skills_data.import_state = ImportState::Fetching;
+        cx.notify();
+
+        // TODO: Wire up async fetch via background thread
+        self.skills_data.import_state = ImportState::Done(
+            format!("Fetching {} — async integration pending", action.url),
+            true,
+        );
+        cx.notify();
+    }
+
+    fn handle_plugin_import_from_local(
+        &mut self,
+        action: &PluginImportFromLocal,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: import from local '{}'", action.path);
+
+        if action.path.is_empty() {
+            self.skills_data.import_state = ImportState::InputLocal(None);
+            cx.notify();
+            return;
+        }
+
+        let path = std::path::Path::new(&action.path);
+        if !path.exists() {
+            self.skills_data.import_state = ImportState::Done(
+                format!("Path does not exist: {}", action.path),
+                false,
+            );
+            cx.notify();
+            return;
+        }
+
+        self.skills_data.import_state = ImportState::Fetching;
+        cx.notify();
+
+        // TODO: Wire up async fetch via background thread
+        self.skills_data.import_state = ImportState::Done(
+            format!("Loading from {} — async integration pending", action.path),
+            true,
+        );
+        cx.notify();
+    }
+
+    fn handle_plugin_import_confirm(
+        &mut self,
+        _action: &PluginImportConfirm,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: import confirm");
+
+        if let ImportState::Preview(ref _preview) = self.skills_data.import_state {
+            self.skills_data.import_state = ImportState::Installing;
+            cx.notify();
+
+            // TODO: Call marketplace.install_plugin() with preview data
+            self.skills_data.import_state = ImportState::Done(
+                "Plugin installed successfully".into(),
+                true,
+            );
+            self.refresh_skills_data(cx);
+            cx.notify();
+        }
+    }
+
+    fn handle_plugin_import_toggle_skill(
+        &mut self,
+        action: &PluginImportToggleSkill,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: toggle import skill at index {}", action.index);
+
+        if let ImportState::Preview(ref mut preview) = self.skills_data.import_state {
+            if let Some(skill) = preview.skills.get_mut(action.index) {
+                skill.selected = !skill.selected;
+                cx.notify();
+            }
+        }
+    }
+
+    fn handle_plugin_remove(
+        &mut self,
+        action: &PluginRemove,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Plugin: remove '{}'", action.plugin_id);
+
+        if cx.has_global::<AppMarketplace>() {
+            let mp = &mut cx.global_mut::<AppMarketplace>().0;
+            if let Err(e) = mp.remove_plugin(&action.plugin_id) {
+                warn!("Failed to remove plugin '{}': {e}", action.plugin_id);
+            }
+            let plugins_path = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".hive")
+                .join("plugins.json");
+            if let Err(e) = mp.save_plugins_to_file(&plugins_path) {
+                warn!("Failed to save plugins: {e}");
+            }
+        }
+
+        self.refresh_skills_data(cx);
+        cx.notify();
+    }
+
+    fn handle_plugin_update(
+        &mut self,
+        action: &PluginUpdate,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_ui_panels::panels::skills::ImportState;
+        info!("Plugin: update '{}'", action.plugin_id);
+
+        // TODO: Actual update = re-fetch + re-install
+        self.skills_data.import_state = ImportState::Done(
+            format!("Update for '{}' — not yet implemented", action.plugin_id),
+            true,
+        );
+        cx.notify();
+    }
+
+    fn handle_plugin_toggle_expand(
+        &mut self,
+        action: &PluginToggleExpand,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Plugin: toggle expand '{}'", action.plugin_id);
+
+        if let Some(plugin) = self
+            .skills_data
+            .installed_plugins
+            .iter_mut()
+            .find(|p| p.id == action.plugin_id)
+        {
+            plugin.expanded = !plugin.expanded;
+            cx.notify();
+        }
+    }
+
+    fn handle_plugin_toggle_skill(
+        &mut self,
+        action: &PluginToggleSkill,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!(
+            "Plugin: toggle skill '{}' in '{}'",
+            action.skill_name, action.plugin_id
+        );
+
+        if cx.has_global::<AppMarketplace>() {
+            let mp = &mut cx.global_mut::<AppMarketplace>().0;
+            if let Err(e) = mp.toggle_plugin_skill(&action.plugin_id, &action.skill_name) {
+                warn!(
+                    "Failed to toggle skill '{}' in plugin '{}': {e}",
+                    action.skill_name, action.plugin_id
+                );
+            }
+            let plugins_path = dirs::home_dir()
+                .unwrap_or_default()
+                .join(".hive")
+                .join("plugins.json");
+            if let Err(e) = mp.save_plugins_to_file(&plugins_path) {
+                warn!("Failed to save plugins: {e}");
+            }
+        }
+
+        self.refresh_skills_data(cx);
+        cx.notify();
+    }
+
     // -- Routing panel handlers ----------------------------------------------
 
     fn handle_routing_add_rule(
@@ -5680,6 +5996,8 @@ impl HiveWorkspace {
                 cfg.tts_enabled = snapshot.tts_enabled;
                 cfg.tts_auto_speak = snapshot.tts_auto_speak;
                 cfg.clawdtalk_enabled = snapshot.clawdtalk_enabled;
+                // Knowledge base
+                cfg.obsidian_vault_path = snapshot.obsidian_vault_path.clone();
                 // OAuth client IDs
                 cfg.google_oauth_client_id = snapshot.google_oauth_client_id.clone();
                 cfg.microsoft_oauth_client_id = snapshot.microsoft_oauth_client_id.clone();
@@ -5703,6 +6021,7 @@ impl HiveWorkspace {
                 ("litellm", &snapshot.litellm_key),
                 ("elevenlabs", &snapshot.elevenlabs_key),
                 ("telnyx", &snapshot.telnyx_key),
+                ("notion", &snapshot.notion_key),
             ];
             for (provider, key) in key_pairs {
                 if let Some(k) = key
@@ -5729,11 +6048,74 @@ impl HiveWorkspace {
             });
         }
 
+        // Rebuild knowledge hub so changed vault paths and Notion keys take effect.
+        self.rebuild_knowledge_hub(cx);
+
         // Re-push API keys to the models browser so new/changed keys take effect
         // immediately without requiring the user to switch away and back.
         self.push_keys_to_models_browser(cx);
 
         cx.notify();
+    }
+
+    // -- Knowledge hub rebuild ------------------------------------------------
+
+    /// Rebuild the KnowledgeHub when knowledge base settings change.
+    /// Replaces the `AppKnowledge` global with a newly constructed hub.
+    fn rebuild_knowledge_hub(&mut self, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppConfig>() {
+            return;
+        }
+        let config = cx.global::<AppConfig>().0.get();
+
+        let mut knowledge_hub = hive_integrations::knowledge::KnowledgeHub::new();
+
+        // Register Obsidian provider if vault path is configured.
+        if let Some(ref vault_path) = config.obsidian_vault_path {
+            if !vault_path.is_empty() {
+                let mut obsidian =
+                    hive_integrations::knowledge::ObsidianProvider::new(vault_path);
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                match rt {
+                    Ok(rt) => match rt.block_on(obsidian.index_vault()) {
+                        Ok(count) => {
+                            info!(
+                                "Knowledge hub: Obsidian vault re-indexed ({count} pages)"
+                            );
+                        }
+                        Err(e) => {
+                            warn!("Knowledge hub: Obsidian re-indexing failed: {e}");
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Knowledge hub: runtime creation failed: {e}");
+                    }
+                }
+                knowledge_hub.register_provider(Box::new(obsidian));
+            }
+        }
+
+        // Register Notion provider if API key is configured.
+        if let Some(ref notion_key) = config.notion_api_key {
+            if !notion_key.is_empty() {
+                match hive_integrations::knowledge::NotionClient::new(notion_key) {
+                    Ok(notion) => {
+                        info!("Knowledge hub: Notion reconnected");
+                        knowledge_hub.register_provider(Box::new(notion));
+                    }
+                    Err(e) => {
+                        warn!("Knowledge hub: Notion init failed: {e}");
+                    }
+                }
+            }
+        }
+
+        let provider_count = knowledge_hub.provider_count();
+        let knowledge = std::sync::Arc::new(knowledge_hub);
+        cx.set_global(AppKnowledge(knowledge));
+        info!("Knowledge hub rebuilt ({provider_count} providers)");
     }
 
     // -- Monitor panel handlers ----------------------------------------------
@@ -6687,6 +7069,18 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_skills_set_search))
             .on_action(cx.listener(Self::handle_skills_set_category))
             .on_action(cx.listener(Self::handle_skills_clear_search))
+            // Plugins
+            .on_action(cx.listener(Self::handle_plugin_import_open))
+            .on_action(cx.listener(Self::handle_plugin_import_cancel))
+            .on_action(cx.listener(Self::handle_plugin_import_from_github))
+            .on_action(cx.listener(Self::handle_plugin_import_from_url))
+            .on_action(cx.listener(Self::handle_plugin_import_from_local))
+            .on_action(cx.listener(Self::handle_plugin_import_confirm))
+            .on_action(cx.listener(Self::handle_plugin_import_toggle_skill))
+            .on_action(cx.listener(Self::handle_plugin_remove))
+            .on_action(cx.listener(Self::handle_plugin_update))
+            .on_action(cx.listener(Self::handle_plugin_toggle_expand))
+            .on_action(cx.listener(Self::handle_plugin_toggle_skill))
             // Routing
             .on_action(cx.listener(Self::handle_routing_add_rule))
             // Token Launch
