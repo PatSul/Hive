@@ -4,7 +4,7 @@
 //! features: installing/removing skills by trigger, trusted-source management,
 //! integrity verification via SHA-256, and prompt-injection scanning.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -196,6 +196,7 @@ pub struct SkillMarketplace {
     installed_skills: Vec<InstalledSkill>,
     skill_sources: Vec<SkillSource>,
     trusted_domains: Vec<String>,
+    installed_plugins: Vec<crate::plugin_types::InstalledPlugin>,
 }
 
 impl SkillMarketplace {
@@ -205,6 +206,7 @@ impl SkillMarketplace {
             installed_skills: Vec::new(),
             skill_sources: Vec::new(),
             trusted_domains: Vec::new(),
+            installed_plugins: Vec::new(),
         }
     }
 
@@ -440,6 +442,115 @@ impl SkillMarketplace {
         prompt: &str,
     ) -> Result<InstalledSkill> {
         self.install_skill(name, trigger, category, prompt, None)
+    }
+
+    // -- plugin management --------------------------------------------------
+
+    /// Return all installed plugins.
+    pub fn installed_plugins(&self) -> &[crate::plugin_types::InstalledPlugin] {
+        &self.installed_plugins
+    }
+
+    /// Install a plugin from a preview (user has confirmed).
+    pub fn install_plugin(
+        &mut self,
+        preview: &crate::plugin_types::PluginPreview,
+        source: crate::plugin_types::PluginSource,
+        selected_skills: &[usize],
+        selected_commands: &[usize],
+    ) -> crate::plugin_types::InstalledPlugin {
+        use crate::plugin_types::*;
+
+        let plugin = InstalledPlugin {
+            id: Uuid::new_v4().to_string(),
+            name: preview.manifest.name.clone(),
+            version: preview.manifest.version.clone(),
+            author: preview.manifest.author.clone(),
+            description: preview.manifest.description.clone(),
+            source,
+            installed_at: Utc::now(),
+            skills: selected_skills
+                .iter()
+                .filter_map(|&i| preview.skills.get(i))
+                .map(|s| PluginSkill {
+                    name: s.name.clone(),
+                    description: s.description.clone(),
+                    instructions: s.instructions.clone(),
+                    source_file: s.source_file.clone(),
+                    enabled: true,
+                    integrity_hash: Self::compute_integrity_hash(&s.instructions),
+                })
+                .collect(),
+            commands: selected_commands
+                .iter()
+                .filter_map(|&i| preview.commands.get(i))
+                .map(|c| InstalledCommand {
+                    name: c.name.clone(),
+                    description: c.description.clone(),
+                    instructions: c.instructions.clone(),
+                    source_file: c.source_file.clone(),
+                })
+                .collect(),
+        };
+
+        debug!(name = plugin.name, skills = plugin.skills.len(), "Installed plugin");
+        self.installed_plugins.push(plugin.clone());
+        plugin
+    }
+
+    /// Remove an installed plugin by ID.
+    pub fn remove_plugin(&mut self, plugin_id: &str) -> Result<()> {
+        let before = self.installed_plugins.len();
+        self.installed_plugins.retain(|p| p.id != plugin_id);
+        if self.installed_plugins.len() == before {
+            bail!("Plugin with id '{}' not found", plugin_id);
+        }
+        debug!(plugin_id, "Removed plugin");
+        Ok(())
+    }
+
+    /// Toggle a skill within an installed plugin. Returns the new state.
+    pub fn toggle_plugin_skill(&mut self, plugin_id: &str, skill_name: &str) -> Result<bool> {
+        let plugin = self.installed_plugins
+            .iter_mut()
+            .find(|p| p.id == plugin_id)
+            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", plugin_id))?;
+
+        let skill = plugin.skills
+            .iter_mut()
+            .find(|s| s.name == skill_name)
+            .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found in plugin", skill_name))?;
+
+        skill.enabled = !skill.enabled;
+        debug!(plugin_id, skill_name, enabled = skill.enabled, "Toggled plugin skill");
+        Ok(skill.enabled)
+    }
+
+    /// Load plugins from a JSON file (~/.hive/plugins.json).
+    pub fn load_plugins_from_file(&mut self, path: &std::path::Path) -> Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let content = std::fs::read_to_string(path)
+            .context("Failed to read plugins.json")?;
+        let store: crate::plugin_types::PluginStore = serde_json::from_str(&content)
+            .context("Failed to parse plugins.json")?;
+        self.installed_plugins = store.plugins;
+        debug!(count = self.installed_plugins.len(), "Loaded plugins from file");
+        Ok(())
+    }
+
+    /// Save plugins to a JSON file (~/.hive/plugins.json).
+    pub fn save_plugins_to_file(&self, path: &std::path::Path) -> Result<()> {
+        let store = crate::plugin_types::PluginStore {
+            plugins: self.installed_plugins.clone(),
+        };
+        let json = serde_json::to_string_pretty(&store)
+            .context("Failed to serialize plugins")?;
+        std::fs::write(path, json)
+            .context("Failed to write plugins.json")?;
+        debug!(count = self.installed_plugins.len(), "Saved plugins to file");
+        Ok(())
     }
 
     // -- directory (built-in catalog) ----------------------------------------
@@ -1005,5 +1116,109 @@ mod tests {
                 .to_string()
                 .contains("failed security scan")
         );
+    }
+
+    // -- plugin management --------------------------------------------------
+
+    #[test]
+    fn install_and_list_plugin() {
+        use crate::plugin_types::*;
+
+        let mut mp = SkillMarketplace::new();
+        let preview = PluginPreview {
+            manifest: PluginManifest {
+                name: "test-plugin".into(),
+                description: "A test plugin".into(),
+                version: "1.0.0".into(),
+                author: PluginAuthor { name: "Tester".into(), email: None },
+                homepage: None, repository: None, license: None,
+                keywords: vec![], skills_path: None, commands_path: None, agents_path: None,
+            },
+            skills: vec![
+                ParsedSkill {
+                    name: "skill-a".into(),
+                    description: "Skill A".into(),
+                    instructions: "Do thing A.".into(),
+                    source_file: "skills/a/SKILL.md".into(),
+                },
+                ParsedSkill {
+                    name: "skill-b".into(),
+                    description: "Skill B".into(),
+                    instructions: "Do thing B.".into(),
+                    source_file: "skills/b/SKILL.md".into(),
+                },
+            ],
+            commands: vec![],
+            security_warnings: vec![],
+        };
+
+        let source = PluginSource::GitHub {
+            owner: "test".into(),
+            repo: "plugin".into(),
+            branch: None,
+        };
+
+        let plugin = mp.install_plugin(&preview, source, &[0, 1], &[]);
+        assert_eq!(plugin.name, "test-plugin");
+        assert_eq!(plugin.skills.len(), 2);
+        assert!(plugin.skills[0].enabled);
+        assert!(!plugin.skills[0].integrity_hash.is_empty());
+        assert_eq!(mp.installed_plugins().len(), 1);
+    }
+
+    #[test]
+    fn remove_plugin_success() {
+        use crate::plugin_types::*;
+
+        let mut mp = SkillMarketplace::new();
+        let preview = PluginPreview {
+            manifest: PluginManifest {
+                name: "to-remove".into(), description: "".into(), version: "1.0.0".into(),
+                author: PluginAuthor::default(),
+                homepage: None, repository: None, license: None,
+                keywords: vec![], skills_path: None, commands_path: None, agents_path: None,
+            },
+            skills: vec![], commands: vec![], security_warnings: vec![],
+        };
+        let source = PluginSource::Local { path: "/tmp".into() };
+        let plugin = mp.install_plugin(&preview, source, &[], &[]);
+        assert!(mp.remove_plugin(&plugin.id).is_ok());
+        assert!(mp.installed_plugins().is_empty());
+    }
+
+    #[test]
+    fn remove_plugin_not_found() {
+        let mut mp = SkillMarketplace::new();
+        assert!(mp.remove_plugin("nonexistent").is_err());
+    }
+
+    #[test]
+    fn toggle_plugin_skill_state() {
+        use crate::plugin_types::*;
+
+        let mut mp = SkillMarketplace::new();
+        let preview = PluginPreview {
+            manifest: PluginManifest {
+                name: "toggler".into(), description: "".into(), version: "1.0.0".into(),
+                author: PluginAuthor::default(),
+                homepage: None, repository: None, license: None,
+                keywords: vec![], skills_path: None, commands_path: None, agents_path: None,
+            },
+            skills: vec![ParsedSkill {
+                name: "my-skill".into(), description: "".into(),
+                instructions: "Do stuff.".into(), source_file: "s.md".into(),
+            }],
+            commands: vec![], security_warnings: vec![],
+        };
+        let source = PluginSource::Local { path: "/tmp".into() };
+        let plugin = mp.install_plugin(&preview, source, &[0], &[]);
+
+        // Toggle off
+        let enabled = mp.toggle_plugin_skill(&plugin.id, "my-skill").unwrap();
+        assert!(!enabled);
+
+        // Toggle on
+        let enabled = mp.toggle_plugin_skill(&plugin.id, "my-skill").unwrap();
+        assert!(enabled);
     }
 }
