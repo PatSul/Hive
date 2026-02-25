@@ -23,6 +23,7 @@ hive_shield = { path = "../hive_shield" }
 hive_network = { path = "../hive_network" }
 
 gpui.workspace = true
+reqwest.workspace = true
 tokio.workspace = true
 gpui-component.workspace = true
 anyhow.workspace = true
