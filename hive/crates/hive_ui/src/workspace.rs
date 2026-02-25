@@ -188,6 +188,18 @@ const MAX_RECENT_WORKSPACES: usize = 8;
 
 impl HiveWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Resolve and publish the theme BEFORE creating child views so they
+        // can read AppTheme from the global during their constructors.
+        let theme = {
+            let theme_name = if cx.has_global::<AppConfig>() {
+                cx.global::<AppConfig>().0.get().theme.clone()
+            } else {
+                "dark".to_string()
+            };
+            Self::resolve_theme_by_name(&theme_name)
+        };
+        cx.set_global(AppTheme(theme.clone()));
+
         // Read default model from config if available.
         let default_model = if cx.has_global::<AppConfig>() {
             cx.global::<AppConfig>().0.get().default_model.clone()
@@ -490,21 +502,7 @@ impl HiveWorkspace {
         let learning_data = LearningPanelData::empty();
         let assistant_data = AssistantPanelData::empty();
 
-        // Resolve the theme from config.  "dark" / "light" map to built-in
-        // constructors; everything else is looked up by name in the
-        // ThemeManager built-in catalog, falling back to dark.
-        let theme = {
-            let theme_name = if cx.has_global::<AppConfig>() {
-                cx.global::<AppConfig>().0.get().theme.clone()
-            } else {
-                "dark".to_string()
-            };
-            Self::resolve_theme_by_name(&theme_name)
-        };
-
-        // Publish the theme as a global so child views can read it.
-        cx.set_global(AppTheme(theme.clone()));
-
+        // Theme was already resolved and published at the top of new().
         Self {
             theme,
             sidebar,
@@ -555,7 +553,7 @@ impl HiveWorkspace {
     /// * Falls back to `HiveTheme::dark()` if no match is found.
     fn resolve_theme_by_name(name: &str) -> HiveTheme {
         let lower = name.to_lowercase();
-        match lower.as_str() {
+        let mut theme = match lower.as_str() {
             "dark" | "hivecode dark" => HiveTheme::dark(),
             "light" | "hivecode light" => HiveTheme::light(),
             _ => {
@@ -576,7 +574,10 @@ impl HiveWorkspace {
                 // Fallback
                 HiveTheme::dark()
             }
-        }
+        };
+        // Always enforce text/bg contrast regardless of theme source.
+        theme.ensure_contrast();
+        theme
     }
 
     fn resolve_project_root_from_session(session: &SessionState) -> PathBuf {
@@ -6564,6 +6565,9 @@ impl Render for HiveWorkspace {
         if window.focused(cx).is_none() {
             if self.sidebar.active_panel == Panel::Chat {
                 let fh = self.chat_input.read(cx).input_focus_handle();
+                window.focus(&fh);
+            } else if self.sidebar.active_panel == Panel::Settings {
+                let fh = self.settings_view.read(cx).focus_handle().clone();
                 window.focus(&fh);
             } else {
                 window.focus(&self.focus_handle);
