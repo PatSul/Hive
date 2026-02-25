@@ -121,6 +121,83 @@ pub struct SkillSource {
     pub skill_count: usize,
 }
 
+// ---------------------------------------------------------------------------
+// Plugin import types
+// ---------------------------------------------------------------------------
+
+/// Import flow state machine.
+#[derive(Debug, Clone)]
+pub enum ImportState {
+    /// Import dialog is closed.
+    Closed,
+    /// Showing method selection dropdown.
+    SelectMethod,
+    /// Showing GitHub owner/repo input.
+    InputGitHub(String),
+    /// Showing URL input.
+    InputUrl(String),
+    /// Showing local path input.
+    InputLocal(Option<String>),
+    /// Fetching plugin from source.
+    Fetching,
+    /// Showing preview of plugin to install.
+    Preview(ImportPreview),
+    /// Installing selected skills.
+    Installing,
+    /// Import complete (message, is_success).
+    Done(String, bool),
+}
+
+/// Import preview data (UI-friendly).
+#[derive(Debug, Clone)]
+pub struct ImportPreview {
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub skills: Vec<ImportSkillEntry>,
+    pub commands: Vec<ImportCommandEntry>,
+    pub security_warnings: Vec<String>,
+}
+
+/// A skill entry in the import preview with selection state.
+#[derive(Debug, Clone)]
+pub struct ImportSkillEntry {
+    pub name: String,
+    pub description: String,
+    pub selected: bool,
+}
+
+/// A command entry in the import preview with selection state.
+#[derive(Debug, Clone)]
+pub struct ImportCommandEntry {
+    pub name: String,
+    pub description: String,
+    pub selected: bool,
+}
+
+/// An installed plugin displayed in the Installed tab.
+#[derive(Debug, Clone)]
+pub struct UiInstalledPlugin {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub skills: Vec<UiPluginSkill>,
+    pub expanded: bool,
+    /// If set, a newer version is available.
+    pub update_available: Option<String>,
+}
+
+/// A skill within an installed plugin (UI view).
+#[derive(Debug, Clone)]
+pub struct UiPluginSkill {
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+}
+
 /// All data for the skills panel.
 #[derive(Debug, Clone)]
 pub struct SkillsData {
@@ -131,6 +208,9 @@ pub struct SkillsData {
     pub selected_category: Option<SkillCategory>,
     pub sources: Vec<SkillSource>,
     pub create_draft: CreateSkillDraft,
+    // Plugin import
+    pub installed_plugins: Vec<UiInstalledPlugin>,
+    pub import_state: ImportState,
 }
 
 impl SkillsData {
@@ -144,6 +224,8 @@ impl SkillsData {
             selected_category: None,
             sources: Vec::new(),
             create_draft: CreateSkillDraft::empty(),
+            installed_plugins: Vec::new(),
+            import_state: ImportState::Closed,
         }
     }
 
@@ -338,6 +420,8 @@ impl SkillsData {
             search_query: String::new(),
             selected_category: None,
             create_draft: CreateSkillDraft::empty(),
+            installed_plugins: Vec::new(),
+            import_state: ImportState::Closed,
         }
     }
 }
