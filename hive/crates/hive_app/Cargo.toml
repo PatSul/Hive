@@ -21,6 +21,7 @@ hive_integrations = { path = "../hive_integrations" }
 hive_learn = { path = "../hive_learn" }
 hive_shield = { path = "../hive_shield" }
 hive_network = { path = "../hive_network" }
+hive_remote = { path = "../hive_remote" }
 
 gpui.workspace = true
 tokio.workspace = true
