@@ -53,3 +53,4 @@ AGENT_BOARD.md.lock
 # Local runtime/workflow artifacts
 .hive/
 hive/target_nolock/
+.worktrees/
