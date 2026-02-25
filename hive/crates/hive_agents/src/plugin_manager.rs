@@ -18,6 +18,7 @@ use crate::skill_marketplace::{SecurityIssue, SkillMarketplace};
 // ---------------------------------------------------------------------------
 
 /// Manages fetching, parsing, and version-checking of external plugin packages.
+#[derive(Clone)]
 pub struct PluginManager {
     client: reqwest::Client,
 }
