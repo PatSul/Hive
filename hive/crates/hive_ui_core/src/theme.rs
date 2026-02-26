@@ -116,7 +116,7 @@ impl HiveTheme {
     /// inherit the defaults from [`Self::dark()`].
     pub fn from_definition(def: &ThemeDefinition) -> Self {
         let c = &def.colors;
-        Self {
+        let mut theme = Self {
             bg_primary: parse_hex_color(&c.bg_primary),
             bg_secondary: parse_hex_color(&c.bg_secondary),
             bg_tertiary: parse_hex_color(&c.bg_tertiary),
@@ -151,6 +151,38 @@ impl HiveTheme {
             font_mono: SharedString::from(def.fonts.mono.clone()),
             // Inherit fixed spacing/sizing defaults
             ..Self::dark()
+        };
+        theme.ensure_contrast();
+        theme
+    }
+
+    /// Ensure text colors have adequate contrast against background colors.
+    /// If text_primary is too close in luminance to bg_primary, invert it.
+    pub fn ensure_contrast(&mut self) {
+        let bg_l = self.bg_primary.l;
+        let is_light_bg = bg_l > 0.5;
+
+        // text_primary must contrast with bg_primary
+        if is_light_bg && self.text_primary.l > 0.55 {
+            // Light bg + light text → force dark text
+            self.text_primary = hsla(self.text_primary.h, self.text_primary.s, 0.12, 1.0);
+        } else if !is_light_bg && self.text_primary.l < 0.35 {
+            // Dark bg + dark text → force light text
+            self.text_primary = hsla(self.text_primary.h, self.text_primary.s, 0.92, 1.0);
+        }
+
+        // text_secondary must contrast with bg_primary
+        if is_light_bg && self.text_secondary.l > 0.65 {
+            self.text_secondary = hsla(self.text_secondary.h, self.text_secondary.s, 0.30, 1.0);
+        } else if !is_light_bg && self.text_secondary.l < 0.25 {
+            self.text_secondary = hsla(self.text_secondary.h, self.text_secondary.s, 0.75, 1.0);
+        }
+
+        // text_muted must contrast with bg_primary (lower bar)
+        if is_light_bg && self.text_muted.l > 0.75 {
+            self.text_muted = hsla(self.text_muted.h, self.text_muted.s, 0.45, 1.0);
+        } else if !is_light_bg && self.text_muted.l < 0.20 {
+            self.text_muted = hsla(self.text_muted.h, self.text_muted.s, 0.60, 1.0);
         }
     }
 

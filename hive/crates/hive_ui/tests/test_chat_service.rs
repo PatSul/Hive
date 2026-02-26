@@ -112,7 +112,9 @@ fn test_finalize_stream_sets_content_and_cost() {
         prompt_tokens: 10,
         completion_tokens: 20,
         total_tokens: 30,
-    };
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            };
 
     svc.finalize_stream(1, "hello world", "claude-sonnet-4-5", Some(&usage));
 

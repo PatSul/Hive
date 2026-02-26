@@ -3100,7 +3100,7 @@ dependencies = [
 
 [[package]]
 name = "hive_agents"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3129,7 +3129,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ai"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3154,7 +3154,7 @@ dependencies = [
 
 [[package]]
 name = "hive_app"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3183,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "hive_assistant"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "hive_blockchain"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3227,7 +3227,7 @@ dependencies = [
 
 [[package]]
 name = "hive_core"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3258,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "hive_docs"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3273,7 +3273,7 @@ dependencies = [
 
 [[package]]
 name = "hive_fs"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3293,7 +3293,7 @@ dependencies = [
 
 [[package]]
 name = "hive_integrations"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3314,7 +3314,7 @@ dependencies = [
 
 [[package]]
 name = "hive_learn"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3332,7 +3332,7 @@ dependencies = [
 
 [[package]]
 name = "hive_network"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "chrono",
  "futures",
@@ -3347,7 +3347,7 @@ dependencies = [
 
 [[package]]
 name = "hive_shield"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "chrono",
  "once_cell",
@@ -3363,7 +3363,7 @@ dependencies = [
 
 [[package]]
 name = "hive_terminal"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3384,7 +3384,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3413,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui_core"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -3431,7 +3431,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui_panels"
-version = "0.3.8"
+version = "0.3.10"
 dependencies = [
  "anyhow",
  "chrono",

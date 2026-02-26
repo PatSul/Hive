@@ -1,7 +1,7 @@
-//! Groq provider (ultra-fast inference via Groq Cloud).
+//! Mistral AI provider.
 //!
-//! Groq exposes an OpenAI-compatible API at `api.groq.com`. Streaming uses
-//! the same SSE wire format parsed by [`super::openai_sse`].
+//! Mistral exposes an OpenAI-compatible API at `https://api.mistral.ai/v1`.
+//! Streaming uses the same SSE wire format parsed by [`super::openai_sse`].
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -11,7 +11,7 @@ use super::openai_sse::{self, ChatCompletionResponse};
 use super::{AiProvider, ProviderError};
 use crate::types::{
     ChatMessage, ChatRequest, ChatResponse, FinishReason, ModelInfo, ProviderType, StreamChunk,
-    TokenUsage,
+    TokenUsage, ToolCall,
 };
 
 // ---------------------------------------------------------------------------
@@ -19,9 +19,9 @@ use crate::types::{
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
-struct GroqChatRequest {
+struct MistralChatRequest {
     model: String,
-    messages: Vec<GroqMessage>,
+    messages: Vec<MistralMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
@@ -30,6 +30,11 @@ struct GroqChatRequest {
     /// When streaming, ask the API to include usage in the final chunk.
     #[serde(skip_serializing_if = "Option::is_none")]
     stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<MistralTool>>,
+    /// Mistral-specific: enable safe prompt injection guard.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    safe_prompt: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,24 +43,57 @@ struct StreamOptions {
 }
 
 #[derive(Debug, Serialize)]
-struct GroqMessage {
+struct MistralTool {
+    #[serde(rename = "type")]
+    tool_type: String,
+    function: MistralFunction,
+}
+
+#[derive(Debug, Serialize)]
+struct MistralFunction {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct MistralMessage {
     role: String,
-    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<MistralToolCallMsg>>,
+}
+
+#[derive(Debug, Serialize)]
+struct MistralToolCallMsg {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: MistralFunctionCall,
+}
+
+#[derive(Debug, Serialize)]
+struct MistralFunctionCall {
+    name: String,
+    arguments: String,
 }
 
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
-/// Groq Cloud API provider (LLaMA, Mixtral, Gemma via Groq LPU inference).
-pub struct GroqProvider {
+/// Mistral AI provider (Mistral Large, Mistral Small, Codestral, etc.).
+pub struct MistralProvider {
     api_key: Option<String>,
     base_url: String,
     client: reqwest::Client,
 }
 
-impl GroqProvider {
-    /// Create a new Groq provider.
+impl MistralProvider {
+    /// Create a new Mistral provider.
     ///
     /// Pass an empty string for `api_key` to create an unavailable provider
     /// that can still be configured later.
@@ -66,12 +104,12 @@ impl GroqProvider {
             } else {
                 Some(api_key)
             },
-            base_url: "https://api.groq.com/openai/v1".into(),
+            base_url: "https://api.mistral.ai/v1".into(),
             client: reqwest::Client::new(),
         }
     }
 
-    /// Create a provider with a custom base URL (useful for proxies).
+    /// Create a provider with a custom base URL.
     pub fn with_base_url(api_key: String, base_url: String) -> Self {
         Self {
             api_key: if api_key.is_empty() {
@@ -88,27 +126,75 @@ impl GroqProvider {
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// Convert generic messages to the Groq wire format.
-    fn convert_messages(messages: &[ChatMessage], system_prompt: Option<&str>) -> Vec<GroqMessage> {
+    /// Convert generic messages to the Mistral wire format.
+    fn convert_messages(
+        messages: &[ChatMessage],
+        system_prompt: Option<&str>,
+    ) -> Vec<MistralMessage> {
         let mut out = Vec::with_capacity(messages.len() + 1);
 
         if let Some(sys) = system_prompt {
-            out.push(GroqMessage {
+            out.push(MistralMessage {
                 role: "system".into(),
-                content: sys.to_string(),
+                content: Some(serde_json::Value::String(sys.to_string())),
+                tool_call_id: None,
+                tool_calls: None,
             });
         }
 
         for m in messages {
-            out.push(GroqMessage {
-                role: match m.role {
-                    crate::types::MessageRole::User => "user".into(),
-                    crate::types::MessageRole::Assistant => "assistant".into(),
-                    crate::types::MessageRole::System => "system".into(),
-                    crate::types::MessageRole::Error => "user".into(),
-                    crate::types::MessageRole::Tool => "user".into(),
-                },
-                content: m.content.clone(),
+            let role = match m.role {
+                crate::types::MessageRole::User => "user",
+                crate::types::MessageRole::Assistant => "assistant",
+                crate::types::MessageRole::System => "system",
+                crate::types::MessageRole::Error => "user",
+                crate::types::MessageRole::Tool => "tool",
+            };
+
+            // Tool result messages use "tool" role with tool_call_id.
+            if m.role == crate::types::MessageRole::Tool {
+                out.push(MistralMessage {
+                    role: role.into(),
+                    content: Some(serde_json::Value::String(m.content.clone())),
+                    tool_call_id: m.tool_call_id.clone(),
+                    tool_calls: None,
+                });
+                continue;
+            }
+
+            // Assistant messages with tool_calls.
+            if m.role == crate::types::MessageRole::Assistant
+                && let Some(ref calls) = m.tool_calls
+            {
+                let tc_msgs: Vec<MistralToolCallMsg> = calls
+                    .iter()
+                    .map(|c| MistralToolCallMsg {
+                        id: c.id.clone(),
+                        call_type: "function".into(),
+                        function: MistralFunctionCall {
+                            name: c.name.clone(),
+                            arguments: serde_json::to_string(&c.input).unwrap_or_default(),
+                        },
+                    })
+                    .collect();
+                out.push(MistralMessage {
+                    role: role.into(),
+                    content: if m.content.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::String(m.content.clone()))
+                    },
+                    tool_call_id: None,
+                    tool_calls: Some(tc_msgs),
+                });
+                continue;
+            }
+
+            out.push(MistralMessage {
+                role: role.into(),
+                content: Some(serde_json::Value::String(m.content.clone())),
+                tool_call_id: None,
+                tool_calls: None,
             });
         }
 
@@ -116,8 +202,8 @@ impl GroqProvider {
     }
 
     /// Build the JSON request body.
-    fn build_body(&self, request: &ChatRequest, stream: bool) -> GroqChatRequest {
-        GroqChatRequest {
+    fn build_body(&self, request: &ChatRequest, stream: bool) -> MistralChatRequest {
+        MistralChatRequest {
             model: request.model.clone(),
             messages: Self::convert_messages(&request.messages, request.system_prompt.as_deref()),
             stream,
@@ -130,6 +216,19 @@ impl GroqProvider {
             } else {
                 None
             },
+            tools: request.tools.as_ref().map(|defs| {
+                defs.iter()
+                    .map(|t| MistralTool {
+                        tool_type: "function".into(),
+                        function: MistralFunction {
+                            name: t.name.clone(),
+                            description: t.description.clone(),
+                            parameters: t.input_schema.clone(),
+                        },
+                    })
+                    .collect()
+            }),
+            safe_prompt: None,
         }
     }
 
@@ -141,7 +240,7 @@ impl GroqProvider {
     /// Send a POST to the chat completions endpoint.
     async fn post_completions(
         &self,
-        body: &GroqChatRequest,
+        body: &MistralChatRequest,
     ) -> Result<reqwest::Response, ProviderError> {
         let key = self.require_key()?;
         let url = format!("{}/chat/completions", self.base_url);
@@ -156,7 +255,6 @@ impl GroqProvider {
             .await
             .map_err(|e| ProviderError::Network(e.to_string()))?;
 
-        // Map HTTP error codes to typed errors.
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(ProviderError::InvalidKey);
@@ -172,7 +270,7 @@ impl GroqProvider {
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(ProviderError::Other(format!(
-                "Groq API error {status}: {text}"
+                "Mistral API error {status}: {text}"
             )));
         }
 
@@ -181,13 +279,13 @@ impl GroqProvider {
 }
 
 #[async_trait]
-impl AiProvider for GroqProvider {
+impl AiProvider for MistralProvider {
     fn provider_type(&self) -> ProviderType {
-        ProviderType::Groq
+        ProviderType::Mistral
     }
 
     fn name(&self) -> &str {
-        "Groq"
+        "Mistral"
     }
 
     async fn is_available(&self) -> bool {
@@ -195,10 +293,26 @@ impl AiProvider for GroqProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        crate::model_registry::models_for_provider(ProviderType::Groq)
-            .into_iter()
-            .cloned()
-            .collect()
+        let mut static_models: Vec<ModelInfo> =
+            crate::model_registry::models_for_provider(ProviderType::Mistral)
+                .into_iter()
+                .cloned()
+                .collect();
+
+        // Try to enrich with live catalog
+        if let Ok(key) = self.require_key() {
+            if let Ok(live) = super::mistral_catalog::fetch_mistral_models(key).await {
+                let static_ids: std::collections::HashSet<_> =
+                    static_models.iter().map(|m| m.id.clone()).collect();
+                for model in live {
+                    if !static_ids.contains(&model.id) {
+                        static_models.push(model);
+                    }
+                }
+            }
+        }
+
+        static_models
     }
 
     /// Non-streaming chat completion.
@@ -214,7 +328,7 @@ impl AiProvider for GroqProvider {
         let choice = data
             .choices
             .first()
-            .ok_or_else(|| ProviderError::Other("No choices in Groq response".into()))?;
+            .ok_or_else(|| ProviderError::Other("No choices in Mistral response".into()))?;
 
         let content = choice.message.content.clone().unwrap_or_default();
 
@@ -234,11 +348,23 @@ impl AiProvider for GroqProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }
             })
             .unwrap_or_default();
+
+        // Extract tool calls from the response.
+        let tool_calls = choice.message.tool_calls.as_ref().map(|tcs| {
+            tcs.iter()
+                .map(|tc| ToolCall {
+                    id: tc.id.clone(),
+                    name: tc.function.name.clone(),
+                    input: serde_json::from_str(&tc.function.arguments)
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+                })
+                .collect()
+        });
 
         Ok(ChatResponse {
             content,
@@ -246,7 +372,7 @@ impl AiProvider for GroqProvider {
             usage,
             finish_reason,
             thinking: None,
-            tool_calls: None,
+            tool_calls,
         })
     }
 
@@ -279,13 +405,7 @@ mod tests {
 
     fn sample_request(model: &str) -> ChatRequest {
         ChatRequest {
-            messages: vec![ChatMessage {
-                role: MessageRole::User,
-                content: "Hello".into(),
-                timestamp: chrono::Utc::now(),
-                tool_call_id: None,
-                tool_calls: None,
-            }],
+            messages: vec![ChatMessage::text(MessageRole::User, "Hello")],
             model: model.into(),
             max_tokens: 1024,
             temperature: Some(0.7),
@@ -297,21 +417,22 @@ mod tests {
 
     #[test]
     fn build_body_standard() {
-        let provider = GroqProvider::new("gsk-test".into());
-        let req = sample_request("llama-3.3-70b-versatile");
+        let provider = MistralProvider::new("mistral-test".into());
+        let req = sample_request("mistral-large-latest");
         let body = provider.build_body(&req, false);
 
-        assert_eq!(body.model, "llama-3.3-70b-versatile");
+        assert_eq!(body.model, "mistral-large-latest");
         assert_eq!(body.max_tokens, Some(1024));
         assert_eq!(body.temperature, Some(0.7));
         assert!(!body.stream);
         assert!(body.stream_options.is_none());
+        assert!(body.safe_prompt.is_none());
     }
 
     #[test]
     fn build_body_stream_includes_usage() {
-        let provider = GroqProvider::new("gsk-test".into());
-        let req = sample_request("llama-3.3-70b-versatile");
+        let provider = MistralProvider::new("mistral-test".into());
+        let req = sample_request("mistral-large-latest");
         let body = provider.build_body(&req, true);
 
         assert!(body.stream);
@@ -321,100 +442,75 @@ mod tests {
 
     #[test]
     fn build_body_with_system_prompt() {
-        let provider = GroqProvider::new("gsk-test".into());
-        let mut req = sample_request("llama-3.3-70b-versatile");
+        let provider = MistralProvider::new("mistral-test".into());
+        let mut req = sample_request("mistral-large-latest");
         req.system_prompt = Some("You are helpful.".into());
         let body = provider.build_body(&req, false);
 
         assert_eq!(body.messages.len(), 2);
         assert_eq!(body.messages[0].role, "system");
-        assert_eq!(body.messages[0].content, "You are helpful.");
+        assert_eq!(
+            body.messages[0].content,
+            Some(serde_json::Value::String("You are helpful.".into()))
+        );
         assert_eq!(body.messages[1].role, "user");
     }
 
     #[test]
+    fn build_body_with_tools() {
+        let provider = MistralProvider::new("mistral-test".into());
+        let mut req = sample_request("mistral-large-latest");
+        req.tools = Some(vec![crate::types::ToolDefinition {
+            name: "get_weather".into(),
+            description: "Get the weather".into(),
+            input_schema: serde_json::json!({"type": "object", "properties": {}}),
+        }]);
+        let body = provider.build_body(&req, false);
+
+        assert!(body.tools.is_some());
+        let tools = body.tools.unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].function.name, "get_weather");
+    }
+
+    #[test]
     fn provider_metadata() {
-        let provider = GroqProvider::new("gsk-test".into());
-        assert_eq!(provider.provider_type(), ProviderType::Groq);
-        assert_eq!(provider.name(), "Groq");
+        let provider = MistralProvider::new("mistral-test".into());
+        assert_eq!(provider.provider_type(), ProviderType::Mistral);
+        assert_eq!(provider.name(), "Mistral");
     }
 
     #[tokio::test]
     async fn is_available_with_key() {
-        let provider = GroqProvider::new("gsk-test".into());
+        let provider = MistralProvider::new("mistral-test".into());
         assert!(provider.is_available().await);
     }
 
     #[tokio::test]
     async fn is_available_without_key() {
-        let provider = GroqProvider::new(String::new());
+        let provider = MistralProvider::new(String::new());
         assert!(!provider.is_available().await);
     }
 
     #[test]
     fn require_key_returns_error_when_missing() {
-        let provider = GroqProvider::new(String::new());
+        let provider = MistralProvider::new(String::new());
         assert!(provider.require_key().is_err());
     }
 
     #[test]
     fn request_body_serializes_correctly() {
-        let provider = GroqProvider::new("gsk-test".into());
-        let req = sample_request("llama-3.3-70b-versatile");
+        let provider = MistralProvider::new("mistral-test".into());
+        let req = sample_request("mistral-small-latest");
         let body = provider.build_body(&req, false);
         let json = serde_json::to_value(&body).unwrap();
 
-        assert_eq!(json["model"], "llama-3.3-70b-versatile");
+        assert_eq!(json["model"], "mistral-small-latest");
         assert_eq!(json["max_tokens"], 1024);
-        // f32 0.7 doesn't round-trip exactly through JSON, so compare approximately.
         let temp = json["temperature"].as_f64().unwrap();
         assert!((temp - 0.7).abs() < 0.001, "temperature was {temp}");
         assert_eq!(json["stream"], false);
-        // stream_options should not appear when not streaming.
-        assert!(json.get("stream_options").is_none());
-    }
-
-    #[tokio::test]
-    async fn stream_chat_parses_mock_sse() {
-        // Build a fake SSE payload.
-        let sse_payload = concat!(
-            "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"index\":0,\"finish_reason\":null}]}\n\n",
-            "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"index\":0,\"finish_reason\":null}]}\n\n",
-            "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\" there\"},\"index\":0,\"finish_reason\":null}]}\n\n",
-            "data: {\"id\":\"1\",\"choices\":[{\"delta\":{},\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\n",
-            "data: [DONE]\n\n",
-        );
-
-        let body_stream = futures::stream::once(async move {
-            Ok::<_, reqwest::Error>(bytes::Bytes::from(sse_payload))
-        });
-        let resp = http::Response::builder()
-            .status(200)
-            .body(reqwest::Body::wrap_stream(body_stream))
-            .unwrap();
-        let resp = reqwest::Response::from(resp);
-
-        let (tx, mut rx) = mpsc::channel::<StreamChunk>(32);
-
-        tokio::spawn(async move {
-            openai_sse::drive_sse_stream(resp, tx).await;
-        });
-
-        let mut chunks = Vec::new();
-        while let Some(chunk) = rx.recv().await {
-            chunks.push(chunk);
-        }
-
-        assert_eq!(chunks[0].content, "Hi");
-        assert!(!chunks[0].done);
-        assert_eq!(chunks[1].content, " there");
-        assert!(!chunks[1].done);
-
-        let last = chunks.last().unwrap();
-        assert!(last.done);
-        let usage = last.usage.as_ref().unwrap();
-        assert_eq!(usage.prompt_tokens, 5);
-        assert_eq!(usage.completion_tokens, 3);
-        assert_eq!(usage.total_tokens, 8);
+        // safe_prompt should not appear when None.
+        assert!(json.get("safe_prompt").is_none());
     }
 }

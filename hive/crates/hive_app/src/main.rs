@@ -23,7 +23,7 @@ use hive_ui::globals::{
     AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppDatabase,
     AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppIde, AppIntegrationDb,
     AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
-    AppContextEngine, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
+    AppContextEngine, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
     AppSecurity, AppSemanticSearch, AppShield, AppSkills, AppSpecs, AppStandupService,
     AppTts, AppUpdater, AppWallets,
 };
@@ -118,6 +118,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         groq_api_key: config.groq_api_key.clone(),
         huggingface_api_key: config.huggingface_api_key.clone(),
         xai_api_key: config.xai_api_key.clone(),
+        mistral_api_key: config.mistral_api_key.clone(),
         litellm_url: config.litellm_url.clone(),
         litellm_api_key: config.litellm_api_key.clone(),
         ollama_url: config.ollama_url.clone(),
@@ -283,6 +284,23 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppMarketplace(hive_agents::SkillMarketplace::new()));
     info!("SkillMarketplace initialized");
 
+    // Plugin manager — fetch, parse, and version-check external plugin packages.
+    cx.set_global(AppPluginManager(hive_agents::PluginManager::new(
+        reqwest::Client::new(),
+    )));
+    info!("PluginManager initialized");
+
+    // Load installed plugins from disk.
+    {
+        let plugins_path = HiveConfig::base_dir()
+            .map(|d| d.join("plugins.json"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("plugins.json"));
+        let mp = &mut cx.global_mut::<AppMarketplace>().0;
+        if let Err(e) = mp.load_plugins_from_file(&plugins_path) {
+            warn!("Failed to load plugins: {e}");
+        }
+    }
+
     // Persona registry — built-in agent roles.
     cx.set_global(AppPersonas(hive_agents::personas::PersonaRegistry::new()));
     info!("PersonaRegistry initialized (6 built-in personas)");
@@ -394,7 +412,49 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     info!("ProjectManagementHub initialized");
 
     // Knowledge hub — always create, providers added when tokens configured.
-    let knowledge = std::sync::Arc::new(hive_integrations::knowledge::KnowledgeHub::new());
+    let mut knowledge_hub = hive_integrations::knowledge::KnowledgeHub::new();
+
+    // Register Obsidian provider if a vault path is configured.
+    if let Some(ref vault_path) = config.obsidian_vault_path {
+        if !vault_path.is_empty() {
+            let mut obsidian = hive_integrations::knowledge::ObsidianProvider::new(vault_path);
+            // index_vault is async — run it on a temporary single-threaded runtime.
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => match rt.block_on(obsidian.index_vault()) {
+                    Ok(count) => {
+                        info!("Obsidian vault indexed: {vault_path} ({count} pages)");
+                    }
+                    Err(e) => {
+                        warn!("Obsidian vault indexing failed: {e}");
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to create Obsidian indexing runtime: {e}");
+                }
+            }
+            knowledge_hub.register_provider(Box::new(obsidian));
+        }
+    }
+
+    // Register Notion provider if an API key is configured.
+    if let Some(ref notion_key) = config.notion_api_key {
+        if !notion_key.is_empty() {
+            match hive_integrations::knowledge::NotionClient::new(notion_key) {
+                Ok(notion) => {
+                    info!("Notion knowledge base connected");
+                    knowledge_hub.register_provider(Box::new(notion));
+                }
+                Err(e) => {
+                    warn!("Notion client initialization failed: {e}");
+                }
+            }
+        }
+    }
+
+    let knowledge = std::sync::Arc::new(knowledge_hub);
     cx.set_global(AppKnowledge(knowledge));
     info!("KnowledgeHub initialized");
 

@@ -4,6 +4,8 @@
 
 pub mod anthropic;
 pub mod anthropic_catalog;
+pub mod doubao;
+pub mod doubao_catalog;
 pub mod gemini;
 pub mod generic_local;
 pub mod google_catalog;
@@ -14,6 +16,8 @@ pub mod huggingface_catalog;
 pub mod litellm;
 pub mod lmstudio;
 pub mod ollama;
+pub mod mistral;
+pub mod mistral_catalog;
 pub mod openai;
 pub mod openai_catalog;
 pub(crate) mod openai_sse;

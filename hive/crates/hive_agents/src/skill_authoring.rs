@@ -223,6 +223,7 @@ impl SkillAuthoringPipeline {
                         .into(),
                 ),
                 tools: None,
+                cache_system_prompt: false,
             };
 
             match executor.execute(&chat_request).await {
@@ -515,6 +516,7 @@ impl SkillAuthoringPipeline {
             temperature: Some(0.4),
             system_prompt: Some(system_prompt.into()),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = executor.execute(&chat_request).await?;
@@ -570,6 +572,7 @@ impl SkillAuthoringPipeline {
             temperature: Some(0.3),
             system_prompt: Some(system_prompt),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = executor.execute(&chat_request).await?;
@@ -601,6 +604,7 @@ impl SkillAuthoringPipeline {
             temperature: Some(0.3),
             system_prompt: Some(draft.prompt_template.clone()),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = executor.execute(&chat_request).await?;
@@ -758,7 +762,9 @@ mod tests {
                     prompt_tokens: 10,
                     completion_tokens: 20,
                     total_tokens: 30,
-                },
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,

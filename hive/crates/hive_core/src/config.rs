@@ -192,6 +192,7 @@ const KEY_LITELLM: &str = "api_key_litellm";
 const KEY_ELEVENLABS: &str = "api_key_elevenlabs";
 const KEY_TELNYX: &str = "api_key_telnyx";
 const KEY_XAI: &str = "api_key_xai";
+const KEY_MISTRAL: &str = "api_key_mistral";
 
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
@@ -342,6 +343,10 @@ pub struct HiveConfig {
     #[serde(skip)]
     pub xai_api_key: Option<String>,
 
+    // Mistral
+    #[serde(skip)]
+    pub mistral_api_key: Option<String>,
+
     // OAuth client IDs — user-provided per-platform
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,
@@ -399,6 +404,7 @@ impl Default for HiveConfig {
             shield_enabled: true,
             shield: hive_shield::ShieldConfig::default(),
             xai_api_key: None,
+            mistral_api_key: None,
         }
     }
 }
@@ -687,6 +693,7 @@ impl ConfigManager {
             config.elevenlabs_api_key = get_secure_key(ss, &key_map, KEY_ELEVENLABS);
             config.telnyx_api_key = get_secure_key(ss, &key_map, KEY_TELNYX);
             config.xai_api_key = get_secure_key(ss, &key_map, KEY_XAI);
+            config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
         }
     }
 
@@ -720,6 +727,7 @@ impl ConfigManager {
             "elevenlabs" => config.elevenlabs_api_key.clone(),
             "telnyx" => config.telnyx_api_key.clone(),
             "xai" => config.xai_api_key.clone(),
+            "mistral" => config.mistral_api_key.clone(),
             _ => None,
         }
     }
@@ -740,6 +748,7 @@ impl ConfigManager {
                 "elevenlabs" => config.elevenlabs_api_key = key.clone(),
                 "telnyx" => config.telnyx_api_key = key.clone(),
                 "xai" => config.xai_api_key = key.clone(),
+                "mistral" => config.mistral_api_key = key.clone(),
                 _ => anyhow::bail!("Unknown provider: {provider}"),
             }
         }
@@ -770,6 +779,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_ELEVENLABS, &config.elevenlabs_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_TELNYX, &config.telnyx_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_XAI, &config.xai_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
         save_key_map(&self.keys_path, &key_map)
     }
 
@@ -843,6 +853,7 @@ impl ConfigManager {
         ("elevenlabs", KEY_ELEVENLABS),
         ("telnyx", KEY_TELNYX),
         ("xai", KEY_XAI),
+        ("mistral", KEY_MISTRAL),
     ];
 
     /// Export all configuration (including secrets) as a password-encrypted blob.

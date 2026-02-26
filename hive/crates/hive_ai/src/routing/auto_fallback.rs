@@ -31,6 +31,8 @@ pub enum ProviderType {
     LMStudio,
     GenericLocal,
     XAI,
+    Mistral,
+    Doubao,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -47,6 +49,8 @@ impl std::fmt::Display for ProviderType {
             Self::LMStudio => "lmstudio",
             Self::GenericLocal => "generic_local",
             Self::XAI => "xai",
+            Self::Mistral => "mistral",
+            Self::Doubao => "doubao",
         };
         f.write_str(s)
     }
@@ -198,15 +202,21 @@ fn default_fallback_chain() -> Vec<FallbackChainEntry> {
             cost_tier: ModelTier::Mid,
         },
         FallbackChainEntry {
-            provider: ProviderType::OpenRouter,
-            model: "anthropic/claude-sonnet-4".into(),
+            provider: ProviderType::Mistral,
+            model: "mistral-large-latest".into(),
             priority: 12,
             cost_tier: ModelTier::Mid,
         },
         FallbackChainEntry {
             provider: ProviderType::OpenRouter,
-            model: "google/gemini-pro-1.5".into(),
+            model: "anthropic/claude-sonnet-4".into(),
             priority: 13,
+            cost_tier: ModelTier::Mid,
+        },
+        FallbackChainEntry {
+            provider: ProviderType::OpenRouter,
+            model: "google/gemini-pro-1.5".into(),
+            priority: 14,
             cost_tier: ModelTier::Mid,
         },
         // Budget tier
@@ -290,6 +300,7 @@ impl AutoFallbackManager {
             ProviderType::Google,
             ProviderType::Groq,
             ProviderType::XAI,
+            ProviderType::Mistral,
             ProviderType::LiteLLM,
             ProviderType::HuggingFace,
             ProviderType::Ollama,

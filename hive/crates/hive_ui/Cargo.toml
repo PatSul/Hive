@@ -1,6 +1,6 @@
 [package]
 name = "hive_ui"
-version = "0.3.9"
+version = "0.3.13"
 edition = "2024"
 license = "MIT"
 
@@ -18,6 +18,7 @@ hive_assistant = { path = "../hive_assistant" }
 hive_blockchain = { path = "../hive_blockchain" }
 hive_integrations = { path = "../hive_integrations" }
 
+dirs.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 anyhow.workspace = true
@@ -27,7 +28,7 @@ chrono.workspace = true
 uuid.workspace = true
 tracing.workspace = true
 pulldown-cmark.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "rt"] }
 
 [dev-dependencies]
 tempfile = "3"

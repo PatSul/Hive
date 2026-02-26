@@ -4,6 +4,10 @@ use gpui_component::{Icon, IconName};
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
+    PluginImportOpen, PluginImportCancel, PluginImportConfirm,
+    PluginImportFromGitHub, PluginImportFromUrl, PluginImportFromLocal,
+    PluginImportToggleSkill, PluginRemove, PluginUpdate, PluginToggleExpand,
+    PluginToggleSkill,
     SkillsAddSource, SkillsClearSearch, SkillsCreate, SkillsInstall, SkillsRefresh,
     SkillsRemove, SkillsRemoveSource, SkillsSetCategory, SkillsSetTab,
     SkillsToggle,
@@ -121,6 +125,83 @@ pub struct SkillSource {
     pub skill_count: usize,
 }
 
+// ---------------------------------------------------------------------------
+// Plugin import types
+// ---------------------------------------------------------------------------
+
+/// Import flow state machine.
+#[derive(Debug, Clone)]
+pub enum ImportState {
+    /// Import dialog is closed.
+    Closed,
+    /// Showing method selection dropdown.
+    SelectMethod,
+    /// Showing GitHub owner/repo input.
+    InputGitHub(String),
+    /// Showing URL input.
+    InputUrl(String),
+    /// Showing local path input.
+    InputLocal(Option<String>),
+    /// Fetching plugin from source.
+    Fetching,
+    /// Showing preview of plugin to install.
+    Preview(ImportPreview),
+    /// Installing selected skills.
+    Installing,
+    /// Import complete (message, is_success).
+    Done(String, bool),
+}
+
+/// Import preview data (UI-friendly).
+#[derive(Debug, Clone)]
+pub struct ImportPreview {
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub skills: Vec<ImportSkillEntry>,
+    pub commands: Vec<ImportCommandEntry>,
+    pub security_warnings: Vec<String>,
+}
+
+/// A skill entry in the import preview with selection state.
+#[derive(Debug, Clone)]
+pub struct ImportSkillEntry {
+    pub name: String,
+    pub description: String,
+    pub selected: bool,
+}
+
+/// A command entry in the import preview with selection state.
+#[derive(Debug, Clone)]
+pub struct ImportCommandEntry {
+    pub name: String,
+    pub description: String,
+    pub selected: bool,
+}
+
+/// An installed plugin displayed in the Installed tab.
+#[derive(Debug, Clone)]
+pub struct UiInstalledPlugin {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub skills: Vec<UiPluginSkill>,
+    pub expanded: bool,
+    /// If set, a newer version is available.
+    pub update_available: Option<String>,
+}
+
+/// A skill within an installed plugin (UI view).
+#[derive(Debug, Clone)]
+pub struct UiPluginSkill {
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+}
+
 /// All data for the skills panel.
 #[derive(Debug, Clone)]
 pub struct SkillsData {
@@ -131,6 +212,9 @@ pub struct SkillsData {
     pub selected_category: Option<SkillCategory>,
     pub sources: Vec<SkillSource>,
     pub create_draft: CreateSkillDraft,
+    // Plugin import
+    pub installed_plugins: Vec<UiInstalledPlugin>,
+    pub import_state: ImportState,
 }
 
 impl SkillsData {
@@ -144,6 +228,8 @@ impl SkillsData {
             selected_category: None,
             sources: Vec::new(),
             create_draft: CreateSkillDraft::empty(),
+            installed_plugins: Vec::new(),
+            import_state: ImportState::Closed,
         }
     }
 
@@ -338,6 +424,8 @@ impl SkillsData {
             search_query: String::new(),
             selected_category: None,
             create_draft: CreateSkillDraft::empty(),
+            installed_plugins: Vec::new(),
+            import_state: ImportState::Closed,
         }
     }
 }
@@ -353,15 +441,24 @@ impl SkillsPanel {
     pub fn render(data: &SkillsData, theme: &HiveTheme) -> impl IntoElement {
         let enabled_count = data.installed.iter().filter(|s| s.enabled).count();
 
-        div()
+        let mut panel = div()
             .id("skills-panel")
             .flex()
             .flex_col()
             .size_full()
-            .child(render_header(enabled_count, data.installed.len(), theme))
-            .child(render_tab_bar(&data.active_tab, theme))
-            .child(render_search_field(&data.search_query, theme))
-            .child(render_tab_content(data, theme))
+            .child(render_header(enabled_count, data.installed.len(), theme));
+
+        // When import flow is active, show import screens instead of normal tabs
+        if !matches!(data.import_state, ImportState::Closed) {
+            panel = panel.child(render_import_flow(&data.import_state, theme));
+        } else {
+            panel = panel
+                .child(render_tab_bar(&data.active_tab, theme))
+                .child(render_search_field(&data.search_query, theme))
+                .child(render_tab_content(data, theme));
+        }
+
+        panel
     }
 }
 
@@ -381,6 +478,7 @@ fn render_header(enabled_count: usize, total_count: usize, theme: &HiveTheme) ->
         .child(header_icon(theme))
         .child(header_title_block(enabled_count, total_count, theme))
         .child(div().flex_1())
+        .child(import_button(theme))
         .child(refresh_button(theme))
         .into_any_element()
 }
@@ -438,6 +536,29 @@ fn installed_count_badge(enabled: usize, total: usize, theme: &HiveTheme) -> Any
         .text_size(theme.font_size_xs)
         .text_color(theme.accent_green)
         .child(format!("{enabled}/{total} active"))
+        .into_any_element()
+}
+
+fn import_button(theme: &HiveTheme) -> AnyElement {
+    div()
+        .id("skills-import")
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(theme.space_3)
+        .py(theme.space_1)
+        .rounded(theme.radius_md)
+        .bg(theme.accent_aqua)
+        .border_1()
+        .border_color(theme.accent_aqua)
+        .text_size(theme.font_size_sm)
+        .text_color(theme.text_on_accent)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.opacity(0.85))
+        .child("Import")
+        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+            window.dispatch_action(Box::new(PluginImportOpen), cx);
+        })
         .into_any_element()
 }
 
@@ -609,7 +730,7 @@ fn render_tab_content(data: &SkillsData, theme: &HiveTheme) -> AnyElement {
     match data.active_tab {
         SkillsTab::Installed => {
             let filtered = data.filtered_installed();
-            render_installed_tab(&filtered, theme)
+            render_installed_tab(&filtered, &data.installed_plugins, theme)
         }
         SkillsTab::Directory => {
             let filtered = data.filtered_directory();
@@ -624,8 +745,12 @@ fn render_tab_content(data: &SkillsData, theme: &HiveTheme) -> AnyElement {
 // Installed tab
 // ---------------------------------------------------------------------------
 
-fn render_installed_tab(skills: &[&InstalledSkill], theme: &HiveTheme) -> AnyElement {
-    if skills.is_empty() {
+fn render_installed_tab(
+    skills: &[&InstalledSkill],
+    plugins: &[UiInstalledPlugin],
+    theme: &HiveTheme,
+) -> AnyElement {
+    if skills.is_empty() && plugins.is_empty() {
         return render_empty_state(
             "\u{1F4E6}",
             "No skills installed",
@@ -643,6 +768,36 @@ fn render_installed_tab(skills: &[&InstalledSkill], theme: &HiveTheme) -> AnyEle
         .p(theme.space_4)
         .gap(theme.space_3);
 
+    // Plugin groups first
+    for plugin in plugins {
+        list = list.child(render_plugin_group(plugin, theme));
+    }
+
+    // Divider between plugins and individual skills (when both exist)
+    if !plugins.is_empty() && !skills.is_empty() {
+        list = list.child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .py(theme.space_2)
+                .child(
+                    div().flex_1().h(px(1.0)).bg(theme.border),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child("Individual Skills"),
+                )
+                .child(
+                    div().flex_1().h(px(1.0)).bg(theme.border),
+                ),
+        );
+    }
+
+    // Individual skills
     for skill in skills {
         list = list.child(render_installed_card(skill, theme));
     }
@@ -1425,6 +1580,786 @@ fn source_remove_button(source: &SkillSource, theme: &HiveTheme) -> Stateful<Div
             );
         })
         .child("Remove")
+}
+
+// ---------------------------------------------------------------------------
+// Import flow screens
+// ---------------------------------------------------------------------------
+
+fn render_import_flow(state: &ImportState, theme: &HiveTheme) -> AnyElement {
+    match state {
+        ImportState::Closed => div().into_any_element(),
+        ImportState::SelectMethod => render_import_method_dropdown(theme),
+        ImportState::InputGitHub(text) => render_import_input_github(text, theme),
+        ImportState::InputUrl(text) => render_import_input_url(text, theme),
+        ImportState::InputLocal(_path) => render_import_input_local(theme),
+        ImportState::Fetching => render_import_fetching(theme),
+        ImportState::Preview(preview) => render_import_preview(preview, theme),
+        ImportState::Installing => render_import_installing(theme),
+        ImportState::Done(msg, success) => render_import_done(msg, *success, theme),
+    }
+}
+
+fn render_import_method_dropdown(theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .p(theme.space_4)
+        .gap(theme.space_2)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .rounded(theme.radius_md)
+                .bg(theme.bg_surface)
+                .border_1()
+                .border_color(theme.border)
+                .overflow_hidden()
+                .child(import_method_row("import-from-github", "From GitHub...", theme, |_event, window, cx| {
+                    window.dispatch_action(Box::new(PluginImportFromGitHub { owner_repo: String::new() }), cx);
+                }))
+                .child(separator(theme))
+                .child(import_method_row("import-from-url", "From URL...", theme, |_event, window, cx| {
+                    window.dispatch_action(Box::new(PluginImportFromUrl { url: String::new() }), cx);
+                }))
+                .child(separator(theme))
+                .child(import_method_row("import-from-local", "From Local File...", theme, |_event, window, cx| {
+                    window.dispatch_action(Box::new(PluginImportFromLocal { path: String::new() }), cx);
+                })),
+        )
+        .child(import_cancel_button(theme))
+        .into_any_element()
+}
+
+fn import_method_row(
+    id: &str,
+    label: &str,
+    theme: &HiveTheme,
+    handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    div()
+        .id(SharedString::from(id.to_string()))
+        .flex()
+        .flex_row()
+        .items_center()
+        .px(theme.space_4)
+        .py(theme.space_3)
+        .text_size(theme.font_size_sm)
+        .text_color(theme.text_primary)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+        .on_mouse_down(MouseButton::Left, handler)
+        .child(label.to_string())
+        .into_any_element()
+}
+
+fn render_import_input_github(text: &str, theme: &HiveTheme) -> AnyElement {
+    let owner_repo = text.to_string();
+    render_import_input_screen(
+        "GitHub Repository (owner/repo)",
+        text,
+        "e.g. hive-plugins/code-review",
+        "Fetch",
+        "import-github-fetch",
+        theme,
+        move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(PluginImportFromGitHub {
+                    owner_repo: owner_repo.clone(),
+                }),
+                cx,
+            );
+        },
+    )
+}
+
+fn render_import_input_url(text: &str, theme: &HiveTheme) -> AnyElement {
+    let url = text.to_string();
+    render_import_input_screen(
+        "Plugin URL",
+        text,
+        "https://example.com/plugin.tar.gz",
+        "Fetch",
+        "import-url-fetch",
+        theme,
+        move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(PluginImportFromUrl {
+                    url: url.clone(),
+                }),
+                cx,
+            );
+        },
+    )
+}
+
+fn render_import_input_local(theme: &HiveTheme) -> AnyElement {
+    render_import_input_screen(
+        "Local File Path",
+        "",
+        "/path/to/plugin",
+        "Load",
+        "import-local-load",
+        theme,
+        move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(PluginImportFromLocal {
+                    path: String::new(),
+                }),
+                cx,
+            );
+        },
+    )
+}
+
+fn render_import_input_screen(
+    label: &str,
+    value: &str,
+    placeholder: &str,
+    action_label: &str,
+    action_id: &str,
+    theme: &HiveTheme,
+    handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let display_text = if value.is_empty() {
+        placeholder.to_string()
+    } else {
+        value.to_string()
+    };
+    let text_color = if value.is_empty() {
+        theme.text_muted
+    } else {
+        theme.text_primary
+    };
+
+    div()
+        .flex()
+        .flex_col()
+        .p(theme.space_4)
+        .gap(theme.space_3)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .p(theme.space_4)
+                .gap(theme.space_3)
+                .rounded(theme.radius_md)
+                .bg(theme.bg_surface)
+                .border_1()
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .text_size(theme.font_size_base)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(label.to_string()),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .px(theme.space_3)
+                        .py(theme.space_2)
+                        .rounded(theme.radius_md)
+                        .bg(theme.bg_primary)
+                        .border_1()
+                        .border_color(theme.border)
+                        .text_size(theme.font_size_sm)
+                        .text_color(text_color)
+                        .child(display_text),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(theme.space_2)
+                        .child(div().flex_1())
+                        .child(import_cancel_button(theme))
+                        .child(
+                            div()
+                                .id(SharedString::from(action_id.to_string()))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .px(theme.space_3)
+                                .py(theme.space_1)
+                                .rounded(theme.radius_md)
+                                .bg(theme.accent_aqua)
+                                .text_size(theme.font_size_sm)
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_on_accent)
+                                .cursor_pointer()
+                                .hover(|style: StyleRefinement| style.opacity(0.85))
+                                .on_mouse_down(MouseButton::Left, handler)
+                                .child(action_label.to_string()),
+                        ),
+                ),
+        )
+        .into_any_element()
+}
+
+fn render_import_fetching(theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .flex_1()
+        .gap(theme.space_3)
+        .p(theme.space_8)
+        .child(
+            div()
+                .text_size(theme.font_size_lg)
+                .text_color(theme.text_muted)
+                .child("\u{21BB}"),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_secondary)
+                .child("Fetching plugin..."),
+        )
+        .into_any_element()
+}
+
+fn render_import_installing(theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .flex_1()
+        .gap(theme.space_3)
+        .p(theme.space_8)
+        .child(
+            div()
+                .text_size(theme.font_size_lg)
+                .text_color(theme.text_muted)
+                .child("\u{21BB}"),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_secondary)
+                .child("Installing plugin..."),
+        )
+        .into_any_element()
+}
+
+fn render_import_preview(preview: &ImportPreview, theme: &HiveTheme) -> AnyElement {
+    let mut container = div()
+        .id("import-preview")
+        .flex()
+        .flex_col()
+        .flex_1()
+        .overflow_y_scroll()
+        .p(theme.space_4)
+        .gap(theme.space_3);
+
+    // Plugin info header card
+    container = container.child(
+        div()
+            .flex()
+            .flex_col()
+            .p(theme.space_4)
+            .gap(theme.space_2)
+            .rounded(theme.radius_md)
+            .bg(theme.bg_surface)
+            .border_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(theme.space_2)
+                    .child(
+                        div()
+                            .text_size(theme.font_size_lg)
+                            .text_color(theme.text_primary)
+                            .font_weight(FontWeight::BOLD)
+                            .child(preview.name.clone()),
+                    )
+                    .child(version_badge(&preview.version, theme)),
+            )
+            .child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(format!("by {}", preview.author)),
+            )
+            .child(
+                div()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.text_secondary)
+                    .child(preview.description.clone()),
+            ),
+    );
+
+    // Security warnings
+    if !preview.security_warnings.is_empty() {
+        let mut warnings_card = div()
+            .flex()
+            .flex_col()
+            .p(theme.space_3)
+            .gap(theme.space_2)
+            .rounded(theme.radius_md)
+            .bg(theme.bg_surface)
+            .border_1()
+            .border_color(theme.accent_yellow)
+            .child(
+                div()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.accent_yellow)
+                    .font_weight(FontWeight::BOLD)
+                    .child("\u{26A0} Security Warnings"),
+            );
+
+        for warning in &preview.security_warnings {
+            warnings_card = warnings_card.child(
+                div()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.accent_yellow)
+                    .child(format!("\u{2022} {}", warning)),
+            );
+        }
+
+        container = container.child(warnings_card);
+    }
+
+    // Skills list
+    let skill_count = preview.skills.len();
+    let mut skills_card = div()
+        .flex()
+        .flex_col()
+        .p(theme.space_3)
+        .gap(theme.space_2)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .text_size(theme.font_size_sm)
+                .text_color(theme.text_primary)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(format!("Skills ({skill_count}):")),
+        );
+
+    for (idx, skill) in preview.skills.iter().enumerate() {
+        skills_card = skills_card.child(import_preview_checkbox_row(
+            idx,
+            &skill.name,
+            &skill.description,
+            skill.selected,
+            theme,
+        ));
+    }
+
+    container = container.child(skills_card);
+
+    // Commands list
+    let cmd_count = preview.commands.len();
+    if cmd_count > 0 {
+        let mut cmds_card = div()
+            .flex()
+            .flex_col()
+            .p(theme.space_3)
+            .gap(theme.space_2)
+            .rounded(theme.radius_md)
+            .bg(theme.bg_surface)
+            .border_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.text_primary)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!("Commands ({cmd_count}):")),
+            );
+
+        for (idx, cmd) in preview.commands.iter().enumerate() {
+            let toggle_idx = preview.skills.len() + idx;
+            cmds_card = cmds_card.child(import_preview_checkbox_row(
+                toggle_idx,
+                &cmd.name,
+                &cmd.description,
+                cmd.selected,
+                theme,
+            ));
+        }
+
+        container = container.child(cmds_card);
+    }
+
+    // Action buttons
+    container = container.child(
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(theme.space_2)
+            .child(div().flex_1())
+            .child(import_cancel_button(theme))
+            .child(
+                div()
+                    .id("import-confirm")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px(theme.space_4)
+                    .py(theme.space_2)
+                    .rounded(theme.radius_md)
+                    .bg(theme.accent_aqua)
+                    .text_size(theme.font_size_sm)
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(theme.text_on_accent)
+                    .cursor_pointer()
+                    .hover(|style: StyleRefinement| style.opacity(0.85))
+                    .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                        window.dispatch_action(Box::new(PluginImportConfirm), cx);
+                    })
+                    .child("Install Selected"),
+            ),
+    );
+
+    container.into_any_element()
+}
+
+fn import_preview_checkbox_row(
+    index: usize,
+    name: &str,
+    description: &str,
+    selected: bool,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let checkbox_icon = if selected { "\u{2611}" } else { "\u{2610}" };
+    let checkbox_color = if selected {
+        theme.accent_aqua
+    } else {
+        theme.text_muted
+    };
+
+    div()
+        .id(SharedString::from(format!("import-toggle-{index}")))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_2)
+        .py(theme.space_1)
+        .rounded(theme.radius_sm)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(PluginImportToggleSkill { index }),
+                cx,
+            );
+        })
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(checkbox_color)
+                .child(checkbox_icon),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(1.0))
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(name.to_string()),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(description.to_string()),
+                ),
+        )
+        .into_any_element()
+}
+
+fn render_import_done(msg: &str, success: bool, theme: &HiveTheme) -> AnyElement {
+    let (color, icon) = if success {
+        (theme.accent_green, "\u{2705}")
+    } else {
+        (theme.accent_red, "\u{274C}")
+    };
+
+    div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .flex_1()
+        .gap(theme.space_3)
+        .p(theme.space_8)
+        .child(
+            div()
+                .text_size(px(32.0))
+                .child(icon),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(color)
+                .font_weight(FontWeight::MEDIUM)
+                .child(msg.to_string()),
+        )
+        .child(
+            div()
+                .id("import-done-ok")
+                .flex()
+                .items_center()
+                .justify_center()
+                .px(theme.space_4)
+                .py(theme.space_2)
+                .rounded(theme.radius_md)
+                .bg(theme.bg_surface)
+                .border_1()
+                .border_color(theme.border)
+                .text_size(theme.font_size_sm)
+                .text_color(theme.text_primary)
+                .cursor_pointer()
+                .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+                .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                    window.dispatch_action(Box::new(PluginImportCancel), cx);
+                })
+                .child("OK"),
+        )
+        .into_any_element()
+}
+
+fn import_cancel_button(theme: &HiveTheme) -> AnyElement {
+    div()
+        .id("import-cancel")
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(theme.space_3)
+        .py(theme.space_1)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .text_size(theme.font_size_sm)
+        .text_color(theme.text_secondary)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+            window.dispatch_action(Box::new(PluginImportCancel), cx);
+        })
+        .child("Cancel")
+        .into_any_element()
+}
+
+// ---------------------------------------------------------------------------
+// Plugin group (installed tab)
+// ---------------------------------------------------------------------------
+
+fn render_plugin_group(plugin: &UiInstalledPlugin, theme: &HiveTheme) -> AnyElement {
+    let expand_icon = if plugin.expanded { "\u{25BC}" } else { "\u{25B6}" };
+    let plugin_id = plugin.id.clone();
+    let plugin_id_remove = plugin.id.clone();
+
+    let mut card = div()
+        .flex()
+        .flex_col()
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border);
+
+    // Header row
+    let mut header = div()
+        .id(SharedString::from(format!("plugin-expand-{}", plugin.id)))
+        .flex()
+        .flex_row()
+        .items_center()
+        .p(theme.space_3)
+        .gap(theme.space_2)
+        .cursor_pointer()
+        .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(PluginToggleExpand {
+                    plugin_id: plugin_id.clone(),
+                }),
+                cx,
+            );
+        })
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(expand_icon),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.accent_aqua)
+                .font_weight(FontWeight::BOLD)
+                .child(plugin.name.clone()),
+        )
+        .child(version_badge(&plugin.version, theme))
+        .child(div().flex_1());
+
+    // Update button if available
+    if let Some(new_ver) = &plugin.update_available {
+        let update_id = plugin.id.clone();
+        header = header.child(
+            div()
+                .id(SharedString::from(format!("plugin-update-{}", plugin.id)))
+                .flex()
+                .items_center()
+                .px(theme.space_2)
+                .py(px(2.0))
+                .rounded(theme.radius_sm)
+                .bg(theme.accent_cyan)
+                .text_size(theme.font_size_xs)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_on_accent)
+                .cursor_pointer()
+                .hover(|style: StyleRefinement| style.opacity(0.85))
+                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                    window.dispatch_action(
+                        Box::new(PluginUpdate {
+                            plugin_id: update_id.clone(),
+                        }),
+                        cx,
+                    );
+                })
+                .child(format!("Update to v{new_ver}")),
+        );
+    }
+
+    // Remove button
+    header = header.child(
+        div()
+            .id(SharedString::from(format!("plugin-remove-{}", plugin.id)))
+            .px(theme.space_2)
+            .py(px(2.0))
+            .rounded(theme.radius_sm)
+            .text_size(theme.font_size_xs)
+            .text_color(theme.accent_red)
+            .cursor_pointer()
+            .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+            .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                window.dispatch_action(
+                    Box::new(PluginRemove {
+                        plugin_id: plugin_id_remove.clone(),
+                    }),
+                    cx,
+                );
+            })
+            .child("Remove"),
+    );
+
+    card = card.child(header);
+
+    // Expanded skills
+    if plugin.expanded {
+        card = card.child(separator(theme));
+        let mut skills_list = div()
+            .flex()
+            .flex_col()
+            .pl(theme.space_8)
+            .pr(theme.space_3)
+            .py(theme.space_2)
+            .gap(theme.space_1);
+
+        for skill in &plugin.skills {
+            skills_list = skills_list.child(render_plugin_skill_row(
+                &plugin.id,
+                skill,
+                theme,
+            ));
+        }
+
+        card = card.child(skills_list);
+    }
+
+    card.into_any_element()
+}
+
+fn render_plugin_skill_row(
+    plugin_id: &str,
+    skill: &UiPluginSkill,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let (toggle_bg, toggle_text) = if skill.enabled {
+        (theme.accent_green, "On")
+    } else {
+        (theme.bg_tertiary, "Off")
+    };
+
+    let pid = plugin_id.to_string();
+    let sname = skill.name.clone();
+
+    div()
+        .id(SharedString::from(format!(
+            "plugin-skill-{}-{}",
+            plugin_id, skill.name
+        )))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_2)
+        .py(theme.space_1)
+        .px(theme.space_2)
+        .rounded(theme.radius_sm)
+        .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .gap(px(1.0))
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(skill.name.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(skill.description.clone()),
+                ),
+        )
+        .child(
+            div()
+                .px(theme.space_2)
+                .py(px(2.0))
+                .rounded(theme.radius_sm)
+                .bg(toggle_bg)
+                .text_size(theme.font_size_xs)
+                .text_color(if skill.enabled {
+                    theme.text_on_accent
+                } else {
+                    theme.text_muted
+                })
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                    window.dispatch_action(
+                        Box::new(PluginToggleSkill {
+                            plugin_id: pid.clone(),
+                            skill_name: sname.clone(),
+                        }),
+                        cx,
+                    );
+                })
+                .child(toggle_text),
+        )
+        .into_any_element()
 }
 
 // ---------------------------------------------------------------------------

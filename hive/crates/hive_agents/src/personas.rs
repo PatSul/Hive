@@ -354,6 +354,7 @@ pub async fn execute_with_persona<E: AiExecutor>(
         temperature: Some(0.3),
         system_prompt: Some(system_prompt),
         tools: None,
+        cache_system_prompt: false,
     };
 
     let start = Instant::now();
@@ -473,7 +474,9 @@ mod tests {
                     prompt_tokens: 50,
                     completion_tokens: 100,
                     total_tokens: 150,
-                },
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,
@@ -697,7 +700,9 @@ mod tests {
             prompt_tokens: 1_000_000,
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
-        };
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            };
         let cost = estimate_persona_cost("claude-sonnet-4", &usage);
         // $3 input + $15 output = $18
         assert!((cost - 18.0).abs() < 0.01);

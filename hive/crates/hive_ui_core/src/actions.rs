@@ -74,6 +74,10 @@ actions!(
         // Skills panel
         SkillsRefresh,
         SkillsClearSearch,
+        // Plugin import actions
+        PluginImportOpen,
+        PluginImportCancel,
+        PluginImportConfirm,
         // Routing panel
         RoutingAddRule,
         // Token Launch panel
@@ -368,4 +372,65 @@ pub struct SkillsSetSearch {
 #[action(namespace = hive_workspace, no_json)]
 pub struct SkillsSetCategory {
     pub category: String,
+}
+
+// ---------------------------------------------------------------------------
+// Plugin import actions
+// ---------------------------------------------------------------------------
+
+/// Import a plugin from a GitHub repository (owner/repo format).
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginImportFromGitHub {
+    pub owner_repo: String,
+}
+
+/// Import a plugin from a URL.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginImportFromUrl {
+    pub url: String,
+}
+
+/// Import a plugin from a local path.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginImportFromLocal {
+    pub path: String,
+}
+
+/// Toggle a skill checkbox in the import preview.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginImportToggleSkill {
+    pub index: usize,
+}
+
+/// Remove an installed plugin by ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginRemove {
+    pub plugin_id: String,
+}
+
+/// Update an installed plugin to latest version.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginUpdate {
+    pub plugin_id: String,
+}
+
+/// Toggle expand/collapse of an installed plugin group.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginToggleExpand {
+    pub plugin_id: String,
+}
+
+/// Toggle a skill within an installed plugin.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PluginToggleSkill {
+    pub plugin_id: String,
+    pub skill_name: String,
 }

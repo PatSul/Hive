@@ -11,8 +11,11 @@ pub mod integration_tools;
 pub mod knowledge_acquisition;
 pub mod mcp_client;
 pub mod mcp_server;
+pub mod message_queue;
 pub mod persistence;
 pub mod personas;
+pub mod plugin_manager;
+pub mod plugin_types;
 pub mod queen;
 pub mod skill_authoring;
 pub mod skill_marketplace;
@@ -55,6 +58,12 @@ pub use skill_marketplace::{
     AvailableSkill, InstalledSkill, SecurityIssue, SecurityIssueType, Severity, SkillCategory,
     SkillDirectory, SkillMarketplace, SkillOrg, SkillSource,
 };
+pub use plugin_manager::PluginManager;
+pub use plugin_types::{
+    CachedVersion, InstalledCommand, InstalledPlugin, ParsedCommand, ParsedSkill,
+    PluginAuthor, PluginCache, PluginManifest, PluginPreview, PluginSkill, PluginSource,
+    PluginStore, UpdateAvailable,
+};
 pub use specs::{Spec, SpecEntry, SpecManager, SpecSection, SpecStatus};
 pub use standup::{AgentReport, DailyStandup, StandupService};
 pub use swarm::{
@@ -62,4 +71,9 @@ pub use swarm::{
     SwarmStatusCallback, TeamObjective, TeamResult, TeamStatus,
 };
 pub use voice::{VoiceAssistant, VoiceCommand, VoiceIntent, VoiceState, WakeWordConfig};
+pub use message_queue::{
+    AgentMessage, AgentMessageQueue, MessagePriority, SharedMessageQueue, classify_input,
+    shared_queue, strip_prefix,
+};
+pub use tool_use::builtin_registry_with_sandbox;
 pub use worktree::{MergeBranchResult, TeamWorktree, WorktreeManager};

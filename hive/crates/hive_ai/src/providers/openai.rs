@@ -404,7 +404,9 @@ impl AiProvider for OpenAIProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                }
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            }
             })
             .unwrap_or_default();
 
@@ -465,6 +467,7 @@ mod tests {
             temperature: Some(0.7),
             system_prompt: None,
             tools: None,
+            cache_system_prompt: false,
         }
     }
 

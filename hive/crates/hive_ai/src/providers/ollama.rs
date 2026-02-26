@@ -237,6 +237,8 @@ impl AiProvider for OllamaProvider {
                 prompt_tokens,
                 completion_tokens,
                 total_tokens: prompt_tokens + completion_tokens,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             finish_reason: FinishReason::Stop,
             thinking: None,
@@ -311,7 +313,9 @@ impl AiProvider for OllamaProvider {
                                     prompt_tokens: p,
                                     completion_tokens: c,
                                     total_tokens: p + c,
-                                })
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            })
                             } else {
                                 None
                             };

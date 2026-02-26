@@ -11,7 +11,7 @@ use crate::components::model_selector::{ModelSelected, ModelSelectorView};
 use hive_core::theme_manager::ThemeManager;
 use hive_ui_core::AppConfig;
 use hive_ui_core::{AppTheme, HiveTheme, ThemeChanged};
-use hive_ui_core::{ExportConfig, ImportConfig};
+use hive_ui_core::{AccountConnectPlatform, ExportConfig, ImportConfig};
 
 // ---------------------------------------------------------------------------
 // Actions
@@ -273,6 +273,9 @@ pub struct SettingsView {
     // Theme picker
     selected_theme: String,
     available_themes: Vec<String>,
+
+    // Focus handle — required so dispatch_action reaches our on_action handlers
+    focus_handle: FocusHandle,
 }
 
 impl EventEmitter<SettingsSaved> for SettingsView {}
@@ -522,6 +525,7 @@ impl SettingsView {
         }
 
         let selected_theme = cfg.theme.clone();
+        let focus_handle = cx.focus_handle();
 
         let view = Self {
             theme,
@@ -570,12 +574,18 @@ impl SettingsView {
             telegram_client_id_input,
             selected_theme,
             available_themes,
+            focus_handle,
         };
 
         // Initialize model selector with current provider availability
         view.sync_enabled_providers(cx);
 
         view
+    }
+
+    /// Return the focus handle so the workspace can focus this view.
+    pub fn focus_handle(&self) -> &FocusHandle {
+        &self.focus_handle
     }
 
     /// Replace the cached theme and trigger a re-render.
@@ -912,6 +922,7 @@ impl Render for SettingsView {
 
         div()
             .id("settings-scroll")
+            .track_focus(&self.focus_handle)
             .flex()
             .flex_col()
             .flex_1()
@@ -985,7 +996,6 @@ impl Render for SettingsView {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(1260.0))
                     .mx_auto()
                     .flex()
                     .flex_col()
@@ -1015,7 +1025,7 @@ impl Render for SettingsView {
                                     .flex_col()
                                     .gap(theme.space_4)
                                     .flex_1()
-                                    .min_w(px(520.0))
+                                    .min_w(px(340.0))
                                     .child(render_api_keys_section(
                                         key_count,
                                         anthropic_set,
@@ -1043,7 +1053,7 @@ impl Render for SettingsView {
                                     .flex_col()
                                     .gap(theme.space_4)
                                     .flex_1()
-                                    .min_w(px(420.0))
+                                    .min_w(px(320.0))
                                     .child(self.render_model_routing_section(cx))
                                     .child(self.render_budget_section(cx))
                                     .child(self.render_voice_tts_section(cx))
@@ -1165,7 +1175,7 @@ impl SettingsView {
                             .child("Default Model"),
                     )
                     .child(
-                        div().min_w(px(280.0)).child(self.model_selector.clone()),
+                        div().min_w(px(180.0)).child(self.model_selector.clone()),
                     ),
             )
             .child(switch_row(
@@ -1426,6 +1436,7 @@ impl SettingsView {
                                             .child("Connected")
                                             .into_any_element()
                                     } else {
+                                        let plat_name = platform.label().to_string();
                                         div()
                                             .id(ElementId::Name(
                                                 format!("connect-{}", platform.label()).into(),
@@ -1438,6 +1449,15 @@ impl SettingsView {
                                             .text_color(theme.bg_primary)
                                             .font_weight(FontWeight::BOLD)
                                             .cursor_pointer()
+                                            .hover(|s| s.opacity(0.85))
+                                            .on_click(move |_ev, window, cx| {
+                                                window.dispatch_action(
+                                                    Box::new(AccountConnectPlatform {
+                                                        platform: plat_name.clone(),
+                                                    }),
+                                                    cx,
+                                                );
+                                            })
                                             .child("Connect")
                                             .into_any_element()
                                     }),
@@ -1466,7 +1486,8 @@ impl SettingsView {
                                     .flex_col()
                                     .items_end()
                                     .gap(px(2.0))
-                                    .child(
+                                    .child({
+                                        let url = setup_url.to_string();
                                         div()
                                             .id(ElementId::Name(
                                                 format!("setup-link-{}", platform.label()).into(),
@@ -1475,8 +1496,11 @@ impl SettingsView {
                                             .text_color(theme.accent_cyan)
                                             .cursor_pointer()
                                             .hover(|s| s.text_color(theme.accent_aqua))
-                                            .child("Setup \u{2197}"),
-                                    )
+                                            .on_click(move |_ev, _window, cx| {
+                                                cx.open_url(&url);
+                                            })
+                                            .child("Setup \u{2197}")
+                                    })
                                     .child(
                                         div()
                                             .text_size(px(8.0))
@@ -1540,10 +1564,13 @@ impl SettingsView {
                             theme.bg_secondary
                         })
                     })
-                    .on_mouse_down(MouseButton::Left, move |_ev, _window, cx| {
-                        cx.dispatch_action(&ThemeChanged {
-                            theme_name: action_name.clone(),
-                        });
+                    .on_mouse_down(MouseButton::Left, move |_ev, window, cx| {
+                        window.dispatch_action(
+                            Box::new(ThemeChanged {
+                                theme_name: action_name.clone(),
+                            }),
+                            cx,
+                        );
                     })
                     .child(label)
                     .into_any_element()

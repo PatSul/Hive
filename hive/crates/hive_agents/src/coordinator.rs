@@ -235,6 +235,7 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                 "You are a project planning assistant. Return valid JSON only.".into(),
             ),
             tools: None,
+            cache_system_prompt: false,
         };
 
         let response = self.executor.execute(&request).await?;
@@ -457,7 +458,9 @@ mod tests {
                     prompt_tokens: 50,
                     completion_tokens: 100,
                     total_tokens: 150,
-                },
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,

@@ -11,6 +11,7 @@ use gpui::Global;
 use hive_agents::automation::AutomationService;
 use hive_agents::mcp_server::McpServer;
 use hive_agents::personas::PersonaRegistry;
+use hive_agents::plugin_manager::PluginManager;
 use hive_agents::skill_marketplace::SkillMarketplace;
 use hive_agents::skills::SkillsRegistry;
 use hive_agents::specs::SpecManager;
@@ -89,6 +90,10 @@ impl Global for AppSkills {}
 /// Global wrapper for the skill marketplace (install/remove, security scanning).
 pub struct AppMarketplace(pub SkillMarketplace);
 impl Global for AppMarketplace {}
+
+/// Global wrapper for the plugin manager (fetch/parse/version-check external plugins).
+pub struct AppPluginManager(pub PluginManager);
+impl Global for AppPluginManager {}
 
 /// Global wrapper for the built-in MCP tool server.
 pub struct AppMcpServer(pub McpServer);

@@ -15,6 +15,7 @@ use crate::providers::anthropic::AnthropicProvider;
 use crate::providers::gemini::GeminiProvider;
 use crate::providers::generic_local::GenericLocalProvider;
 use crate::providers::groq::GroqProvider;
+use crate::providers::mistral::MistralProvider;
 use crate::providers::xai::XaiProvider;
 use crate::providers::huggingface::HuggingFaceProvider;
 use crate::providers::litellm::LiteLLMProvider;
@@ -42,6 +43,7 @@ pub struct AiServiceConfig {
     pub groq_api_key: Option<String>,
     pub huggingface_api_key: Option<String>,
     pub xai_api_key: Option<String>,
+    pub mistral_api_key: Option<String>,
     pub litellm_url: Option<String>,
     pub litellm_api_key: Option<String>,
     pub ollama_url: String,
@@ -128,6 +130,15 @@ impl AiService {
             {
                 providers.insert(ProviderType::XAI, Arc::new(XaiProvider::new(key.clone())));
                 info!("xAI (Grok) provider registered");
+            }
+            if let Some(ref key) = config.mistral_api_key
+                && !key.is_empty()
+            {
+                providers.insert(
+                    ProviderType::Mistral,
+                    Arc::new(MistralProvider::new(key.clone())),
+                );
+                info!("Mistral provider registered");
             }
         }
 
@@ -361,6 +372,7 @@ impl AiService {
             temperature: None,
             system_prompt: None,
             tools,
+            cache_system_prompt: false,
         };
 
         info!(
@@ -411,6 +423,7 @@ impl AiService {
             temperature: None,
             system_prompt,
             tools,
+            cache_system_prompt: false,
         };
 
         info!("Starting stream to {:?} model={}", provider_type, resolved_model);
@@ -448,6 +461,7 @@ impl AiService {
             temperature: None,
             system_prompt,
             tools,
+            cache_system_prompt: false,
         };
         Some((provider, request))
     }
@@ -487,6 +501,7 @@ impl AiService {
             temperature: None,
             system_prompt: system_prompt.clone(),
             tools: tools.clone(),
+            cache_system_prompt: false,
         };
 
         let draft_request = ChatRequest {
@@ -497,6 +512,7 @@ impl AiService {
             system_prompt,
             // Don't pass tools to draft model — keep it simple and fast
             tools: None,
+            cache_system_prompt: false,
         };
 
         Some((draft_provider, draft_request, primary_provider, primary_request))
@@ -567,6 +583,8 @@ fn map_router_provider(rp: crate::routing::ProviderType) -> ProviderType {
         crate::routing::ProviderType::Google => ProviderType::Google,
         crate::routing::ProviderType::GenericLocal => ProviderType::GenericLocal,
         crate::routing::ProviderType::XAI => ProviderType::XAI,
+        crate::routing::ProviderType::Mistral => ProviderType::Mistral,
+        crate::routing::ProviderType::Doubao => ProviderType::Doubao,
     }
 }
 
@@ -583,6 +601,8 @@ fn map_to_router_provider(pt: ProviderType) -> crate::routing::ProviderType {
         ProviderType::LMStudio => crate::routing::ProviderType::LMStudio,
         ProviderType::GenericLocal => crate::routing::ProviderType::GenericLocal,
         ProviderType::XAI => crate::routing::ProviderType::XAI,
+        ProviderType::Mistral => crate::routing::ProviderType::Mistral,
+        ProviderType::Doubao => crate::routing::ProviderType::Doubao,
     }
 }
 
@@ -603,6 +623,7 @@ mod tests {
             google_api_key: None,
             groq_api_key: None,
             xai_api_key: None,
+            mistral_api_key: None,
             huggingface_api_key: None,
             litellm_url: None,
             litellm_api_key: None,

@@ -1029,6 +1029,8 @@ impl CapabilityRouter {
             crate::types::ProviderType::LMStudio => ProviderType::LMStudio,
             crate::types::ProviderType::GenericLocal => ProviderType::GenericLocal,
             crate::types::ProviderType::XAI => ProviderType::XAI,
+            crate::types::ProviderType::Mistral => ProviderType::Mistral,
+            crate::types::ProviderType::Doubao => ProviderType::Doubao,
         }
     }
 }

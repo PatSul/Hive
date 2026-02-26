@@ -12,6 +12,20 @@ static SQL_INJECTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ]
 });
 
+/// Policy that controls which security checks are applied.
+///
+/// When running inside a Docker container (`Sandboxed`), command checks are
+/// relaxed because the container itself provides isolation. Dangerous host
+/// commands like `rm -rf /` only affect the ephemeral container filesystem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SandboxPolicy {
+    /// Full security checks on the host (default).
+    #[default]
+    Host,
+    /// Relaxed command checks — execution happens inside an isolated container.
+    Sandboxed,
+}
+
 /// Security gateway that validates commands, URLs, file paths, and content.
 /// Ported from the Electron SecurityGateway.
 pub struct SecurityGateway {
@@ -19,6 +33,7 @@ pub struct SecurityGateway {
     risky_patterns: Vec<Regex>,
     allowed_domains: Vec<String>,
     blocked_path_prefixes: Vec<String>,
+    policy: SandboxPolicy,
 }
 
 impl SecurityGateway {
@@ -63,11 +78,30 @@ impl SecurityGateway {
                 "/etc/shadow".into(),
                 "/etc/passwd".into(),
             ],
+            policy: SandboxPolicy::Host,
         }
     }
 
+    /// Create a gateway with a specific sandbox policy.
+    pub fn with_policy(policy: SandboxPolicy) -> Self {
+        let mut gw = Self::new();
+        gw.policy = policy;
+        gw
+    }
+
+    /// Get the current sandbox policy.
+    pub fn policy(&self) -> SandboxPolicy {
+        self.policy
+    }
+
     /// Check if a shell command is safe to execute.
+    ///
+    /// When the policy is `Sandboxed`, command checks are skipped because
+    /// the container provides isolation.
     pub fn check_command(&self, command: &str) -> Result<(), String> {
+        if self.policy == SandboxPolicy::Sandboxed {
+            return Ok(());
+        }
         for pattern in &self.dangerous_commands {
             if pattern.is_match(command) {
                 return Err(format!("Blocked dangerous command: {command}"));

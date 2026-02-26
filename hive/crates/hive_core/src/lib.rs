@@ -50,7 +50,8 @@ pub use code_review::{
 };
 pub use config::HiveConfig;
 pub use context::{
-    ContextMessage, ContextSummary, ContextWindow, estimate_tokens, model_context_size,
+    CompactionResult, ContextMessage, ContextSummary, ContextWindow, estimate_tokens,
+    model_context_size,
 };
 pub use conversations::{Conversation, ConversationStore, ConversationSummary, StoredMessage};
 pub use enterprise::{
@@ -66,7 +67,7 @@ pub use notifications::{AppNotification, NotificationStore, NotificationType};
 pub use persistence::{ConversationRow, Database, LogRow, MemoryEntry, MessageRow, ModelCostRow};
 pub use scheduler::{CronSchedule, ScheduledJob, Scheduler};
 pub use secure_storage::SecureStorage;
-pub use security::SecurityGateway;
+pub use security::{SandboxPolicy, SecurityGateway};
 pub use session::SessionState;
 pub use channels::{AgentChannel, ChannelMessage, ChannelStore, ChannelThread, MessageAuthor};
 pub use theme_manager::{ThemeColors, ThemeDefinition, ThemeFonts, ThemeManager};
