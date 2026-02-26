@@ -3244,6 +3244,7 @@ name = "hive_app"
 version = "0.3.9"
 dependencies = [
  "anyhow",
+ "axum",
  "gpui",
  "gpui-component",
  "hive_agents",

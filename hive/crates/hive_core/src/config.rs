@@ -349,6 +349,24 @@ pub struct HiveConfig {
     pub slack_oauth_client_id: Option<String>,
     pub discord_oauth_client_id: Option<String>,
     pub telegram_oauth_client_id: Option<String>,
+
+    // Remote control
+    #[serde(default)]
+    pub remote_enabled: bool,
+    #[serde(default = "default_remote_local_port")]
+    pub remote_local_port: u16,
+    #[serde(default = "default_remote_web_port")]
+    pub remote_web_port: u16,
+    #[serde(default)]
+    pub remote_auto_start: bool,
+}
+
+fn default_remote_local_port() -> u16 {
+    9480
+}
+
+fn default_remote_web_port() -> u16 {
+    9481
 }
 
 impl Default for HiveConfig {
@@ -399,6 +417,10 @@ impl Default for HiveConfig {
             shield_enabled: true,
             shield: hive_shield::ShieldConfig::default(),
             xai_api_key: None,
+            remote_enabled: false,
+            remote_local_port: default_remote_local_port(),
+            remote_web_port: default_remote_web_port(),
+            remote_auto_start: false,
         }
     }
 }

@@ -578,6 +578,52 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppUpdater(updater));
     info!("UpdateService initialized (current: v{VERSION})");
 
+    // Remote control daemon — web UI for phone/tablet access.
+    //
+    // Runs on a dedicated background thread with its own tokio runtime to
+    // avoid conflicts with the GPUI event loop.  Only started when the
+    // user has explicitly enabled remote control in config.
+    if config.remote_enabled {
+        let remote_local_port = config.remote_local_port;
+        let remote_web_port = config.remote_web_port;
+        let data_dir = HiveConfig::base_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"));
+
+        std::thread::Builder::new()
+            .name("hive-remote".into())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Remote daemon tokio runtime");
+                rt.block_on(async {
+                    let daemon_config = hive_remote::daemon::DaemonConfig {
+                        data_dir,
+                        local_port: remote_local_port,
+                        web_port: remote_web_port,
+                        shutdown_grace_secs: 30,
+                    };
+                    match hive_remote::daemon::HiveDaemon::new(daemon_config) {
+                        Ok(daemon) => {
+                            let daemon = std::sync::Arc::new(tokio::sync::RwLock::new(daemon));
+                            let router = hive_remote::web_server::build_router(daemon);
+                            let addr = format!("0.0.0.0:{}", remote_web_port);
+                            match tokio::net::TcpListener::bind(&addr).await {
+                                Ok(listener) => {
+                                    info!("Remote control web UI at http://{}", addr);
+                                    let _ = axum::serve(listener, router).await;
+                                }
+                                Err(e) => error!("Failed to bind remote control port: {}", e),
+                            }
+                        }
+                        Err(e) => error!("Failed to start remote daemon: {}", e),
+                    }
+                });
+            })
+            .ok();
+        info!("Remote control daemon starting on port {}", config.remote_web_port);
+    }
+
     Ok(())
 }
 

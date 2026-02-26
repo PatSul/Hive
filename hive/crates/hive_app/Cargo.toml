@@ -24,6 +24,7 @@ hive_network = { path = "../hive_network" }
 hive_remote = { path = "../hive_remote" }
 
 gpui.workspace = true
+axum = { version = "0.8", default-features = false }
 tokio.workspace = true
 gpui-component.workspace = true
 anyhow.workspace = true
