@@ -156,6 +156,7 @@ impl HiveNode {
                     listen_addr: self.config.listen_addr.to_string(),
                     name: self.identity.name.clone(),
                     version: self.identity.version.clone(),
+                    relay_capable: false,
                 },
             };
             let discovery_shutdown = shutdown_tx.subscribe();

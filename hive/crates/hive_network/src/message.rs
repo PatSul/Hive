@@ -37,6 +37,12 @@ pub enum MessageKind {
     /// Generic state synchronization payload.
     StateSync,
 
+    // ── Remote relay ──────────────────────────────────────────────────
+    /// Request relayed through an intermediary peer.
+    RelayRequest,
+    /// Response to a relayed request.
+    RelayResponse,
+
     // ── Extensible ──────────────────────────────────────────────────
     /// User-defined message type for extensions.
     Custom(String),
@@ -57,6 +63,8 @@ impl MessageKind {
             Self::ChannelSync => "channel_sync".to_string(),
             Self::FleetLearn => "fleet_learn".to_string(),
             Self::StateSync => "state_sync".to_string(),
+            Self::RelayRequest => "relay_request".to_string(),
+            Self::RelayResponse => "relay_response".to_string(),
             Self::Custom(name) => format!("custom:{name}"),
         }
     }
@@ -172,6 +180,8 @@ mod tests {
             MessageKind::ChannelSync,
             MessageKind::FleetLearn,
             MessageKind::StateSync,
+            MessageKind::RelayRequest,
+            MessageKind::RelayResponse,
             MessageKind::Custom("my_extension".to_string()),
         ];
 
@@ -180,6 +190,23 @@ mod tests {
             let deserialized: MessageKind = serde_json::from_str(&json).unwrap();
             assert_eq!(&deserialized, kind);
         }
+    }
+
+    #[test]
+    fn test_relay_request_envelope_roundtrip() {
+        let env = Envelope::new(
+            PeerId::from_string("peer-a"),
+            Some(PeerId::from_string("peer-b")),
+            MessageKind::RelayRequest,
+            serde_json::json!({"target": "peer-c", "inner": "hello"}),
+        );
+
+        let json = env.to_json().unwrap();
+        let deserialized = Envelope::from_json(&json).unwrap();
+        assert_eq!(deserialized.kind, MessageKind::RelayRequest);
+        assert_eq!(deserialized.id, env.id);
+        assert_eq!(deserialized.from, env.from);
+        assert_eq!(deserialized.to, env.to);
     }
 
     #[test]
