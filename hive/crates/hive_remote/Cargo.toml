@@ -37,3 +37,6 @@ dirs.workspace = true
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util", "macros"] }
 tempfile = "3"
+http = "1"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

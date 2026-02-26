@@ -3450,6 +3450,8 @@ dependencies = [
  "hive_core",
  "hive_network",
  "hkdf",
+ "http",
+ "http-body-util",
  "qrcode",
  "rand 0.9.2",
  "serde",
