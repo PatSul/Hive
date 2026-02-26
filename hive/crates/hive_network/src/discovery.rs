@@ -25,6 +25,9 @@ pub struct Announcement {
     pub name: String,
     /// Software version.
     pub version: String,
+    /// Whether this peer can act as a relay for other peers.
+    #[serde(default)]
+    pub relay_capable: bool,
 }
 
 /// Event emitted when a peer is discovered on the LAN.
@@ -170,6 +173,7 @@ mod tests {
             listen_addr: "127.0.0.1:9470".to_string(),
             name: "test-node".to_string(),
             version: "0.1.0".to_string(),
+            relay_capable: false,
         };
 
         let json = serde_json::to_string(&announcement).unwrap();
@@ -189,11 +193,36 @@ mod tests {
                 listen_addr: "0.0.0.0:9470".to_string(),
                 name: "my-node".to_string(),
                 version: "0.1.0".to_string(),
+                relay_capable: false,
             },
         };
 
         assert_eq!(config.port, 9471);
         assert_eq!(config.interval, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_announcement_relay_capable() {
+        let announcement = Announcement {
+            peer_id: PeerId::from_string("relay-peer"),
+            listen_addr: "127.0.0.1:9470".to_string(),
+            name: "relay-node".to_string(),
+            version: "0.1.0".to_string(),
+            relay_capable: true,
+        };
+
+        let json = serde_json::to_string(&announcement).unwrap();
+        let deserialized: Announcement = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.relay_capable);
+    }
+
+    #[test]
+    fn test_announcement_backward_compat_no_relay_field() {
+        // Simulate an announcement from an older peer that doesn't include relay_capable.
+        let json = r#"{"peer_id":"old-peer","listen_addr":"127.0.0.1:9470","name":"old-node","version":"0.1.0"}"#;
+        let deserialized: Announcement = serde_json::from_str(json).unwrap();
+        assert!(!deserialized.relay_capable);
+        assert_eq!(deserialized.name, "old-node");
     }
 
     #[tokio::test]
@@ -207,6 +236,7 @@ mod tests {
             listen_addr: "127.0.0.1:9470".to_string(),
             name: "loopback-node".to_string(),
             version: "0.1.0".to_string(),
+            relay_capable: false,
         };
         let data = serde_json::to_vec(&announcement).unwrap();
 
