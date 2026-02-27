@@ -285,11 +285,15 @@ impl AiProvider for HiveGatewayProvider {
                 prompt_tokens: u.prompt_tokens.unwrap_or(0),
                 completion_tokens: u.completion_tokens.unwrap_or(0),
                 total_tokens: u.total_tokens.unwrap_or(0),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             })
             .unwrap_or(TokenUsage {
                 prompt_tokens: 0,
                 completion_tokens: 0,
                 total_tokens: 0,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             });
 
         Ok(ChatResponse {
@@ -412,6 +416,8 @@ impl AiProvider for HiveGatewayProvider {
                                         prompt_tokens: u.prompt_tokens.unwrap_or(0),
                                         completion_tokens: u.completion_tokens.unwrap_or(0),
                                         total_tokens: u.total_tokens.unwrap_or(0),
+                                        cache_creation_input_tokens: None,
+                                        cache_read_input_tokens: None,
                                     });
                                     let _ = tx
                                         .send(StreamChunk {
