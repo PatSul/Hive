@@ -585,6 +585,7 @@ fn map_router_provider(rp: crate::routing::ProviderType) -> ProviderType {
         crate::routing::ProviderType::XAI => ProviderType::XAI,
         crate::routing::ProviderType::Mistral => ProviderType::Mistral,
         crate::routing::ProviderType::Doubao => ProviderType::Doubao,
+        crate::routing::ProviderType::HiveGateway => ProviderType::HiveGateway,
     }
 }
 
@@ -603,6 +604,7 @@ fn map_to_router_provider(pt: ProviderType) -> crate::routing::ProviderType {
         ProviderType::XAI => crate::routing::ProviderType::XAI,
         ProviderType::Mistral => crate::routing::ProviderType::Mistral,
         ProviderType::Doubao => crate::routing::ProviderType::Doubao,
+        ProviderType::HiveGateway => crate::routing::ProviderType::HiveGateway,
     }
 }
 

@@ -25,6 +25,7 @@ pub mod openrouter;
 pub mod openrouter_catalog;
 pub mod xai;
 pub mod xai_catalog;
+pub mod hive_gateway;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
