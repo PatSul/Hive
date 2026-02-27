@@ -36,6 +36,7 @@ fn run_display_is_active() {
         tasks_total: 6,
         cost: 0.1,
         elapsed: "1m".into(),
+        tasks: vec![],
     };
     assert!(running.is_active());
 
@@ -48,6 +49,7 @@ fn run_display_is_active() {
         tasks_total: 4,
         cost: 0.0,
         elapsed: "0s".into(),
+        tasks: vec![],
     };
     assert!(pending.is_active());
 
@@ -60,6 +62,7 @@ fn run_display_is_active() {
         tasks_total: 4,
         cost: 0.2,
         elapsed: "2m".into(),
+        tasks: vec![],
     };
     assert!(!complete.is_active());
 }

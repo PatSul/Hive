@@ -1323,6 +1323,7 @@ impl HiveWorkspace {
                         .as_ref()
                         .map(|_| "recent".to_string())
                         .unwrap_or_else(|| "-".to_string()),
+                    tasks: vec![],
                 })
                 .collect();
 
@@ -1349,6 +1350,7 @@ impl HiveWorkspace {
                             "{}s",
                             (run.completed_at - run.started_at).num_seconds().max(0)
                         ),
+                        tasks: vec![],
                     })
                 })
                 .collect();
