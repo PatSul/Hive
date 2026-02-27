@@ -736,6 +736,9 @@ impl SettingsView {
             telegram_oauth_client_id: non_empty_trimmed(
                 self.telegram_client_id_input.read(cx).value().as_ref(),
             ),
+            // Knowledge base — read from config (no UI inputs yet)
+            notion_key: None,
+            obsidian_vault_path: None,
         }
     }
 
@@ -885,6 +888,9 @@ pub struct SettingsSnapshot {
     pub tts_enabled: bool,
     pub tts_auto_speak: bool,
     pub clawdtalk_enabled: bool,
+    // Knowledge base
+    pub notion_key: Option<String>,
+    pub obsidian_vault_path: Option<String>,
     // OAuth client IDs
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,

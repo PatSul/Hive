@@ -300,6 +300,12 @@ pub struct HiveConfig {
     pub clawdtalk_enabled: bool,
     pub clawdtalk_bot_pin: Option<String>,
 
+    // Knowledge base integrations
+    #[serde(default)]
+    pub obsidian_vault_path: Option<String>,
+    #[serde(default)]
+    pub notion_api_key: Option<String>,
+
     // Local AI / Proxy
     pub ollama_url: String,
     pub lmstudio_url: String,
@@ -441,6 +447,8 @@ impl Default for HiveConfig {
             remote_local_port: default_remote_local_port(),
             remote_web_port: default_remote_web_port(),
             remote_auto_start: false,
+            obsidian_vault_path: None,
+            notion_api_key: None,
         }
     }
 }
