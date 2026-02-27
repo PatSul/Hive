@@ -8,12 +8,67 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::broadcast;
 
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
 use crate::hivemind::{AiExecutor, default_model_for_tier};
 use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona};
 use crate::specs::Spec;
+
+// ---------------------------------------------------------------------------
+// Task Events — live progress reporting
+// ---------------------------------------------------------------------------
+
+/// Events emitted during coordinator task execution for live UI updates.
+#[derive(Clone, Debug, Serialize)]
+pub enum TaskEvent {
+    /// A new plan has been created with the given tasks.
+    PlanCreated {
+        plan_id: String,
+        tasks: Vec<TaskEventInfo>,
+    },
+    /// A specific task has started execution.
+    TaskStarted {
+        task_id: String,
+        description: String,
+        persona: String,
+    },
+    /// Progress update for a running task.
+    TaskProgress {
+        task_id: String,
+        progress: f32,
+        message: String,
+    },
+    /// A task completed successfully.
+    TaskCompleted {
+        task_id: String,
+        duration_ms: u64,
+        cost: f64,
+        output_preview: String,
+    },
+    /// A task failed with an error.
+    TaskFailed {
+        task_id: String,
+        error: String,
+    },
+    /// All tasks in the plan have finished.
+    AllComplete {
+        total_cost: f64,
+        total_duration_ms: u64,
+        success_count: usize,
+        failure_count: usize,
+    },
+}
+
+/// Summary info for a task in a plan, used in the `PlanCreated` event.
+#[derive(Clone, Debug, Serialize)]
+pub struct TaskEventInfo {
+    pub id: String,
+    pub description: String,
+    pub persona: String,
+    pub dependencies: Vec<String>,
+}
 
 // ---------------------------------------------------------------------------
 // Coordinator Config
@@ -186,14 +241,17 @@ pub struct Coordinator<E: AiExecutor> {
     pub config: CoordinatorConfig,
     executor: Arc<E>,
     registry: PersonaRegistry,
+    event_tx: broadcast::Sender<TaskEvent>,
 }
 
 impl<E: AiExecutor + 'static> Coordinator<E> {
     pub fn new(config: CoordinatorConfig, executor: E) -> Self {
+        let (event_tx, _) = broadcast::channel(64);
         Self {
             config,
             executor: Arc::new(executor),
             registry: PersonaRegistry::new(),
+            event_tx,
         }
     }
 
@@ -203,11 +261,18 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
         executor: E,
         registry: PersonaRegistry,
     ) -> Self {
+        let (event_tx, _) = broadcast::channel(64);
         Self {
             config,
             executor: Arc::new(executor),
             registry,
+            event_tx,
         }
+    }
+
+    /// Subscribe to live task events from this coordinator.
+    pub fn subscribe(&self) -> broadcast::Receiver<TaskEvent> {
+        self.event_tx.subscribe()
     }
 
     /// Use AI to decompose a specification into a task plan.
@@ -242,12 +307,34 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
         parse_task_plan(&response.content)
     }
 
+    /// Emit a task event, ignoring errors when there are no subscribers.
+    fn emit(&self, event: TaskEvent) {
+        let _ = self.event_tx.send(event);
+    }
+
     /// Execute a task plan, respecting dependency ordering and parallelism limits.
+    /// Emits `TaskEvent`s for live progress tracking via `subscribe()`.
     pub async fn execute_plan(&self, plan: &TaskPlan) -> CoordinatorResult {
         let start = Instant::now();
         let mut results: Vec<TaskResult> = Vec::new();
         let mut completed: HashSet<String> = HashSet::new();
         let mut remaining: Vec<PlannedTask> = plan.tasks.clone();
+
+        // Emit PlanCreated with all task info.
+        let plan_id = format!("plan-{}", start.elapsed().as_nanos());
+        self.emit(TaskEvent::PlanCreated {
+            plan_id: plan_id.clone(),
+            tasks: plan
+                .tasks
+                .iter()
+                .map(|t| TaskEventInfo {
+                    id: t.id.clone(),
+                    description: t.description.clone(),
+                    persona: t.persona.to_string(),
+                    dependencies: t.dependencies.clone(),
+                })
+                .collect(),
+        });
 
         // Process tasks in waves: each wave contains tasks whose dependencies
         // are all satisfied.
@@ -285,6 +372,13 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
             // non-Send future, preventing tokio::spawn. The wave structure
             // still provides correct dependency ordering across waves.
             for task in &batch {
+                // Emit TaskStarted before execution.
+                self.emit(TaskEvent::TaskStarted {
+                    task_id: task.id.clone(),
+                    description: task.description.clone(),
+                    persona: task.persona.to_string(),
+                });
+
                 let persona = self
                     .registry
                     .get(&task.persona)
@@ -317,6 +411,29 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                     error: output.error,
                 };
 
+                // Emit TaskCompleted or TaskFailed based on result.
+                if task_result.success {
+                    let preview = if task_result.output.len() > 200 {
+                        format!("{}...", &task_result.output[..200])
+                    } else {
+                        task_result.output.clone()
+                    };
+                    self.emit(TaskEvent::TaskCompleted {
+                        task_id: task_result.task_id.clone(),
+                        duration_ms: task_result.duration_ms,
+                        cost: task_result.cost,
+                        output_preview: preview,
+                    });
+                } else {
+                    self.emit(TaskEvent::TaskFailed {
+                        task_id: task_result.task_id.clone(),
+                        error: task_result
+                            .error
+                            .clone()
+                            .unwrap_or_else(|| "Unknown error".into()),
+                    });
+                }
+
                 completed.insert(task_result.task_id.clone());
                 results.push(task_result);
             }
@@ -331,6 +448,17 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
             .filter(|r| r.success && !r.output.is_empty())
             .map(|r| format!("[{}] {}: completed", r.task_id, r.persona))
             .collect();
+
+        let success_count = results.iter().filter(|r| r.success).count();
+        let failure_count = results.iter().filter(|r| !r.success).count();
+
+        // Emit AllComplete event.
+        self.emit(TaskEvent::AllComplete {
+            total_cost,
+            total_duration_ms,
+            success_count,
+            failure_count,
+        });
 
         CoordinatorResult {
             plan: plan.clone(),
@@ -747,5 +875,152 @@ mod tests {
     fn empty_plan_validates() {
         let plan = TaskPlan { tasks: vec![] };
         assert!(plan.validate().is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // TaskEvent tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn task_event_serialization() {
+        let event = TaskEvent::PlanCreated {
+            plan_id: "plan-1".into(),
+            tasks: vec![TaskEventInfo {
+                id: "t1".into(),
+                description: "Do something".into(),
+                persona: "Implement".into(),
+                dependencies: vec![],
+            }],
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("PlanCreated"));
+        assert!(json.contains("plan-1"));
+
+        let completed = TaskEvent::TaskCompleted {
+            task_id: "t1".into(),
+            duration_ms: 500,
+            cost: 0.05,
+            output_preview: "done".into(),
+        };
+        let json2 = serde_json::to_string(&completed).unwrap();
+        assert!(json2.contains("TaskCompleted"));
+        assert!(json2.contains("0.05"));
+    }
+
+    #[test]
+    fn task_event_broadcast_channel() {
+        let (tx, mut rx1) = broadcast::channel::<TaskEvent>(16);
+        let mut rx2 = tx.subscribe();
+
+        let event = TaskEvent::TaskStarted {
+            task_id: "t1".into(),
+            description: "Test task".into(),
+            persona: "Implement".into(),
+        };
+
+        tx.send(event.clone()).unwrap();
+
+        let received1 = rx1.try_recv().unwrap();
+        let received2 = rx2.try_recv().unwrap();
+
+        // Verify both receivers got the event.
+        assert!(matches!(received1, TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
+        assert!(matches!(received2, TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
+    }
+
+    #[test]
+    fn task_event_info_fields() {
+        let info = TaskEventInfo {
+            id: "task-42".into(),
+            description: "Investigate auth module".into(),
+            persona: "Investigate".into(),
+            dependencies: vec!["task-1".into(), "task-2".into()],
+        };
+        assert_eq!(info.id, "task-42");
+        assert_eq!(info.dependencies.len(), 2);
+    }
+
+    #[test]
+    fn coordinator_subscribe_returns_receiver() {
+        let executor = MockExecutor::new("output");
+        let coordinator = Coordinator::new(CoordinatorConfig::default(), executor);
+        let _rx = coordinator.subscribe();
+        // Just verify subscribe() works without panicking.
+    }
+
+    #[tokio::test]
+    async fn execute_plan_emits_events_in_order() {
+        let executor = MockExecutor::new("Task output");
+        let coordinator = Coordinator::new(CoordinatorConfig::default(), executor);
+        let mut rx = coordinator.subscribe();
+
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "t1".into(),
+                    description: "First task".into(),
+                    persona: PersonaKind::Investigate,
+                    dependencies: vec![],
+                    priority: 1,
+                },
+                PlannedTask {
+                    id: "t2".into(),
+                    description: "Second task".into(),
+                    persona: PersonaKind::Implement,
+                    dependencies: vec!["t1".into()],
+                    priority: 2,
+                },
+            ],
+        };
+
+        let _result = coordinator.execute_plan(&plan).await;
+
+        // Collect all events from the receiver.
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+
+        // Expected sequence: PlanCreated, TaskStarted(t1), TaskCompleted(t1),
+        //                    TaskStarted(t2), TaskCompleted(t2), AllComplete
+        assert!(events.len() >= 6, "Expected at least 6 events, got {}", events.len());
+
+        assert!(matches!(&events[0], TaskEvent::PlanCreated { .. }));
+        assert!(matches!(&events[1], TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
+        assert!(matches!(&events[2], TaskEvent::TaskCompleted { task_id, .. } if task_id == "t1"));
+        assert!(matches!(&events[3], TaskEvent::TaskStarted { task_id, .. } if task_id == "t2"));
+        assert!(matches!(&events[4], TaskEvent::TaskCompleted { task_id, .. } if task_id == "t2"));
+        assert!(matches!(&events[5], TaskEvent::AllComplete { success_count: 2, failure_count: 0, .. }));
+    }
+
+    #[tokio::test]
+    async fn execute_plan_emits_task_failed_event() {
+        let executor = MockExecutor::failing();
+        let coordinator = Coordinator::new(CoordinatorConfig::default(), executor);
+        let mut rx = coordinator.subscribe();
+
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "t1".into(),
+                description: "Will fail".into(),
+                persona: PersonaKind::Implement,
+                dependencies: vec![],
+                priority: 1,
+            }],
+        };
+
+        let _result = coordinator.execute_plan(&plan).await;
+
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+
+        // Expected: PlanCreated, TaskStarted, TaskFailed, AllComplete
+        assert!(events.len() >= 4, "Expected at least 4 events, got {}", events.len());
+        assert!(matches!(&events[0], TaskEvent::PlanCreated { .. }));
+        assert!(matches!(&events[1], TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
+        assert!(matches!(&events[2], TaskEvent::TaskFailed { task_id, .. } if task_id == "t1"));
+        assert!(matches!(&events[3], TaskEvent::AllComplete { success_count: 0, failure_count: 1, .. }));
     }
 }

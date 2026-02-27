@@ -40,7 +40,8 @@ pub use competence_detection::{
     GapType, SuggestedAction,
 };
 pub use coordinator::{
-    Coordinator, CoordinatorConfig, CoordinatorResult, PlannedTask, TaskPlan, TaskResult,
+    Coordinator, CoordinatorConfig, CoordinatorResult, PlannedTask, TaskEvent, TaskEventInfo,
+    TaskPlan, TaskResult,
 };
 pub use heartbeat::{AgentHeartbeat, HeartbeatService};
 pub use persistence::{AgentPersistenceService, AgentSnapshot, CompletedTask};
