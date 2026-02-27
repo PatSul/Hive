@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hive - AI Coding Assistant</title>
+    <meta name="description" content="Hive is an open-source, native AI coding assistant built in Rust. Fast, private, and extensible.">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="images/favicon.png">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container nav-content">
+            <a href="/" class="logo">
+                <span class="logo-icon">&#x1F41D;</span>
+                <span class="logo-text">Hive</span>
+            </a>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="pricing.html">Pricing</a>
+                <a href="https://github.com/AirglowStudio/hive" target="_blank">GitHub</a>
+                <a href="https://docs.hivecode.app" target="_blank">Docs</a>
+                <a href="login.html" class="btn btn-outline btn-sm">Log In</a>
+                <a href="signup.html" class="btn btn-primary btn-sm">Sign Up</a>
+            </div>
+            <button class="mobile-menu-toggle" aria-label="Toggle menu">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>AI Coding,<br><span class="accent">Supercharged.</span></h1>
+                <p class="hero-subtitle">
+                    Open-source native desktop assistant built in Rust.
+                    Multi-model AI, agent orchestration, and cloud sync &mdash;
+                    all without leaving your editor.
+                </p>
+                <div class="hero-actions">
+                    <a href="https://github.com/AirglowStudio/hive/releases" class="btn btn-primary btn-lg">
+                        Download for Free
+                    </a>
+                    <a href="pricing.html" class="btn btn-outline btn-lg">
+                        View Plans
+                    </a>
+                </div>
+                <p class="hero-note">Windows &middot; macOS &middot; Linux &middot; Free &amp; open source</p>
+            </div>
+            <div class="hero-visual">
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <span class="dot red"></span>
+                        <span class="dot yellow"></span>
+                        <span class="dot green"></span>
+                        <span class="terminal-title">Hive AI</span>
+                    </div>
+                    <div class="terminal-body">
+                        <div class="terminal-line">
+                            <span class="prompt">&gt;</span>
+                            <span class="typing">Refactor the auth module to use JWT tokens</span>
+                        </div>
+                        <div class="terminal-line response">
+                            <span class="ai-badge">Hive</span>
+                            I'll update the auth module. Here's my plan:
+                        </div>
+                        <div class="terminal-line response indent">
+                            <span class="task done">&#x2713;</span> Replace session cookies with JWT
+                        </div>
+                        <div class="terminal-line response indent">
+                            <span class="task done">&#x2713;</span> Add refresh token rotation
+                        </div>
+                        <div class="terminal-line response indent">
+                            <span class="task running">&#x25CB;</span> Update middleware extraction
+                        </div>
+                        <div class="terminal-line response indent">
+                            <span class="task pending">&#x25CB;</span> Write integration tests
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Everything you need to code faster</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F916;</div>
+                    <h3>Multi-Model AI</h3>
+                    <p>Route to the best model for each task. GPT-4o, Claude, Gemini, Groq, local models via Ollama &mdash; all from one interface.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F9E0;</div>
+                    <h3>Agent Orchestration</h3>
+                    <p>HiveMind breaks complex tasks into parallel sub-tasks. Watch agents work together in real-time with the live task tree.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F512;</div>
+                    <h3>Privacy First</h3>
+                    <p>PII scanning with Hive Shield. Your API keys stay on your machine. Zero-knowledge cloud sync with client-side encryption.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x26A1;</div>
+                    <h3>Native Speed</h3>
+                    <p>Built in Rust with GPUI. Sub-millisecond UI updates, minimal memory footprint, instant startup. No Electron bloat.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F4F1;</div>
+                    <h3>Hive Remote</h3>
+                    <p>Control your desktop AI from your phone. QR-code pairing with end-to-end encrypted relay. Code from anywhere.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F527;</div>
+                    <h3>Extensible Skills</h3>
+                    <p>Teach Hive new capabilities with skills. Community-driven, always free. Build your own with natural language.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="open-source">
+        <div class="container">
+            <div class="oss-content">
+                <h2>Open Source, <span class="accent">No Strings.</span></h2>
+                <p>
+                    Hive's desktop app is fully open source under MIT license.
+                    Every feature works with your own API keys for free, forever.
+                    Cloud services are optional upgrades for power users and teams.
+                </p>
+                <a href="https://github.com/AirglowStudio/hive" class="btn btn-outline btn-lg">
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <h2>Ready to code smarter?</h2>
+            <p>Download Hive for free or sign up for cloud services.</p>
+            <div class="cta-actions">
+                <a href="https://github.com/AirglowStudio/hive/releases" class="btn btn-primary btn-lg">Download</a>
+                <a href="pricing.html" class="btn btn-outline btn-lg">See Pricing</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container footer-content">
+            <div class="footer-brand">
+                <span class="logo-icon">&#x1F41D;</span>
+                <span class="logo-text">Hive</span>
+                <p>Built by <a href="https://airglow.studio">Airglow Studio</a></p>
+            </div>
+            <div class="footer-links">
+                <div class="footer-col">
+                    <h4>Product</h4>
+                    <a href="#features">Features</a>
+                    <a href="pricing.html">Pricing</a>
+                    <a href="https://github.com/AirglowStudio/hive/releases">Download</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Resources</h4>
+                    <a href="https://docs.hivecode.app">Documentation</a>
+                    <a href="https://github.com/AirglowStudio/hive">GitHub</a>
+                    <a href="https://github.com/AirglowStudio/hive/issues">Issues</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Account</h4>
+                    <a href="login.html">Log In</a>
+                    <a href="signup.html">Sign Up</a>
+                </div>
+            </div>
+        </div>
+        <div class="container footer-bottom">
+            <p>&copy; 2026 Airglow Studio. All rights reserved.</p>
+        </div>
+    </footer>
+    <script src="js/main.js"></script>
+</body>
+</html>

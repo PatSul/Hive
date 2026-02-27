@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing - Hive</title>
+    <meta name="description" content="Hive pricing plans. Free forever for individuals. Pro and Team plans for cloud services.">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="images/favicon.png">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container nav-content">
+            <a href="/" class="logo">
+                <span class="logo-icon">&#x1F41D;</span>
+                <span class="logo-text">Hive</span>
+            </a>
+            <div class="nav-links">
+                <a href="index.html#features">Features</a>
+                <a href="pricing.html" class="active">Pricing</a>
+                <a href="https://github.com/AirglowStudio/hive" target="_blank">GitHub</a>
+                <a href="https://docs.hivecode.app" target="_blank">Docs</a>
+                <a href="login.html" class="btn btn-outline btn-sm">Log In</a>
+                <a href="signup.html" class="btn btn-primary btn-sm">Sign Up</a>
+            </div>
+            <button class="mobile-menu-toggle" aria-label="Toggle menu">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </nav>
+
+    <section class="pricing-hero">
+        <div class="container">
+            <h1>Simple, honest pricing</h1>
+            <p class="pricing-subtitle">
+                Hive is free and open source. Cloud services are optional upgrades.
+                <br>Self-hosters welcome &mdash; no lock-in, ever.
+            </p>
+        </div>
+    </section>
+
+    <section class="pricing-cards">
+        <div class="container">
+            <div class="pricing-grid">
+                <!-- Free -->
+                <div class="price-card">
+                    <div class="price-header">
+                        <h3>Free</h3>
+                        <div class="price-amount">
+                            <span class="currency">$</span>
+                            <span class="amount">0</span>
+                            <span class="period">/forever</span>
+                        </div>
+                        <p class="price-desc">For individual developers</p>
+                    </div>
+                    <ul class="price-features">
+                        <li><span class="check">&#x2713;</span> Full desktop app (all features)</li>
+                        <li><span class="check">&#x2713;</span> All AI providers (your API keys)</li>
+                        <li><span class="check">&#x2713;</span> Agent orchestration</li>
+                        <li><span class="check">&#x2713;</span> Skills &amp; integrations</li>
+                        <li><span class="check">&#x2713;</span> Terminal &amp; file browser</li>
+                        <li><span class="check">&#x2713;</span> Hive Shield (PII scanning)</li>
+                        <li><span class="check">&#x2713;</span> Local AI support (Ollama)</li>
+                        <li class="disabled"><span class="x">&#x2717;</span> Cloud relay</li>
+                        <li class="disabled"><span class="x">&#x2717;</span> Cloud AI gateway</li>
+                        <li class="disabled"><span class="x">&#x2717;</span> Cloud sync</li>
+                    </ul>
+                    <a href="https://github.com/AirglowStudio/hive/releases" class="btn btn-outline btn-block">
+                        Download Free
+                    </a>
+                </div>
+
+                <!-- Pro -->
+                <div class="price-card featured">
+                    <div class="price-badge">Most Popular</div>
+                    <div class="price-header">
+                        <h3>Pro</h3>
+                        <div class="price-amount">
+                            <span class="currency">$</span>
+                            <span class="amount">8</span>
+                            <span class="period">/month</span>
+                        </div>
+                        <p class="price-desc">For power users who want cloud</p>
+                    </div>
+                    <ul class="price-features">
+                        <li><span class="check">&#x2713;</span> Everything in Free</li>
+                        <li><span class="check accent">&#x2713;</span> Hive Remote (phone control)</li>
+                        <li><span class="check accent">&#x2713;</span> Cloud AI gateway (all models)</li>
+                        <li><span class="check accent">&#x2713;</span> $50/mo token budget included</li>
+                        <li><span class="check accent">&#x2713;</span> Encrypted cloud sync (100 MB)</li>
+                        <li><span class="check accent">&#x2713;</span> Priority relay connections</li>
+                        <li class="disabled"><span class="x">&#x2717;</span> Team workspaces</li>
+                        <li class="disabled"><span class="x">&#x2717;</span> Cost dashboard</li>
+                        <li class="disabled"><span class="x">&#x2717;</span> Shared sync</li>
+                    </ul>
+                    <a href="signup.html?plan=pro" class="btn btn-primary btn-block" id="checkout-pro">
+                        Start Pro Trial
+                    </a>
+                    <p class="price-note">14-day free trial &middot; Cancel anytime</p>
+                </div>
+
+                <!-- Team -->
+                <div class="price-card">
+                    <div class="price-header">
+                        <h3>Team</h3>
+                        <div class="price-amount">
+                            <span class="currency">$</span>
+                            <span class="amount">20</span>
+                            <span class="period">/seat/month</span>
+                        </div>
+                        <p class="price-desc">For teams building together</p>
+                    </div>
+                    <ul class="price-features">
+                        <li><span class="check">&#x2713;</span> Everything in Pro</li>
+                        <li><span class="check accent">&#x2713;</span> Team workspaces</li>
+                        <li><span class="check accent">&#x2713;</span> Shared cloud sync (1 GB)</li>
+                        <li><span class="check accent">&#x2713;</span> Cost dashboard per member</li>
+                        <li><span class="check accent">&#x2713;</span> $200/mo team token budget</li>
+                        <li><span class="check accent">&#x2713;</span> Role-based access control</li>
+                        <li><span class="check accent">&#x2713;</span> Usage analytics</li>
+                        <li><span class="check accent">&#x2713;</span> Priority support</li>
+                    </ul>
+                    <a href="signup.html?plan=team" class="btn btn-outline btn-block" id="checkout-team">
+                        Start Team Trial
+                    </a>
+                    <p class="price-note">14-day free trial &middot; Cancel anytime</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="faq">
+        <div class="container">
+            <h2 class="section-title">Frequently Asked Questions</h2>
+            <div class="faq-grid">
+                <div class="faq-item">
+                    <h4>Is Hive really free?</h4>
+                    <p>Yes. The desktop app is fully open source under MIT license. Every feature works with your own API keys at no cost. Cloud services (relay, AI gateway, sync) are optional paid add-ons.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>Can I self-host the cloud services?</h4>
+                    <p>The desktop app is designed to work standalone. The cloud server is a separate product. You can always use your own API keys and local AI models without any cloud dependency.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>What AI models are supported?</h4>
+                    <p>GPT-4o, GPT-4o-mini, Claude 3.5 Sonnet, Claude 3 Haiku, Gemini Pro, Gemini Flash, LLaMA 3, Mixtral, and more. Plus local models via Ollama and LM Studio.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>How does the AI gateway pricing work?</h4>
+                    <p>Pro includes $50/month in AI tokens routed through our gateway. Team includes $200/month. You're billed at a flat 1.3x of the provider's cost. Usage beyond budget requires your own API keys.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>Is my data private?</h4>
+                    <p>Yes. Cloud sync uses client-side encryption (AES-256-GCM). We store opaque encrypted blobs &mdash; we can't read your data. Hive Shield scans for PII before anything leaves your machine.</p>
+                </div>
+                <div class="faq-item">
+                    <h4>What about skills and integrations?</h4>
+                    <p>Skills and integrations are always free for everyone. They're community-driven and anyone can create them. We believe extensibility should never be paywalled.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container footer-content">
+            <div class="footer-brand">
+                <span class="logo-icon">&#x1F41D;</span>
+                <span class="logo-text">Hive</span>
+                <p>Built by <a href="https://airglow.studio">Airglow Studio</a></p>
+            </div>
+            <div class="footer-links">
+                <div class="footer-col">
+                    <h4>Product</h4>
+                    <a href="index.html#features">Features</a>
+                    <a href="pricing.html">Pricing</a>
+                    <a href="https://github.com/AirglowStudio/hive/releases">Download</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Resources</h4>
+                    <a href="https://docs.hivecode.app">Documentation</a>
+                    <a href="https://github.com/AirglowStudio/hive">GitHub</a>
+                    <a href="https://github.com/AirglowStudio/hive/issues">Issues</a>
+                </div>
+                <div class="footer-col">
+                    <h4>Account</h4>
+                    <a href="login.html">Log In</a>
+                    <a href="signup.html">Sign Up</a>
+                </div>
+            </div>
+        </div>
+        <div class="container footer-bottom">
+            <p>&copy; 2026 Airglow Studio. All rights reserved.</p>
+        </div>
+    </footer>
+    <script src="js/main.js"></script>
+</body>
+</html>
