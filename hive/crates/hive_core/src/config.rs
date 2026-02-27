@@ -355,6 +355,16 @@ pub struct HiveConfig {
     pub discord_oauth_client_id: Option<String>,
     pub telegram_oauth_client_id: Option<String>,
 
+    // Cloud / Hive Gateway
+    #[serde(default)]
+    pub cloud_api_url: Option<String>,
+    #[serde(default)]
+    pub cloud_relay_url: Option<String>,
+    #[serde(default)]
+    pub cloud_jwt: Option<String>,
+    #[serde(default)]
+    pub cloud_tier: Option<String>,
+
     // Remote control
     #[serde(default)]
     pub remote_enabled: bool,
@@ -423,6 +433,10 @@ impl Default for HiveConfig {
             shield: hive_shield::ShieldConfig::default(),
             xai_api_key: None,
             mistral_api_key: None,
+            cloud_api_url: None,
+            cloud_relay_url: None,
+            cloud_jwt: None,
+            cloud_tier: None,
             remote_enabled: false,
             remote_local_port: default_remote_local_port(),
             remote_web_port: default_remote_web_port(),
