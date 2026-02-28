@@ -2030,6 +2030,56 @@ impl HiveWorkspace {
             augmented
         };
 
+        // 2c. Check for /command skill activation and inject instructions
+        let ai_messages = {
+            let mut msgs = ai_messages;
+            let trimmed_query = user_query_text.trim();
+            if trimmed_query.starts_with('/') {
+                let cmd_name = trimmed_query[1..]
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("");
+                let mut skill_instructions: Option<String> = None;
+
+                // Check built-in skills registry
+                if cx.has_global::<hive_ui_core::AppSkills>() {
+                    if let Ok(instructions) = cx.global::<hive_ui_core::AppSkills>().0.dispatch(cmd_name)
+                    {
+                        skill_instructions = Some(instructions.to_string());
+                    }
+                }
+                // Check user-created skills (file-based)
+                if skill_instructions.is_none() && cx.has_global::<AppSkillManager>() {
+                    if let Ok(Some(skill)) = cx.global::<AppSkillManager>().0.get(cmd_name) {
+                        if skill.enabled {
+                            skill_instructions = Some(skill.instructions.clone());
+                        }
+                    }
+                }
+
+                if let Some(instructions) = skill_instructions {
+                    let insert_idx = msgs
+                        .iter()
+                        .position(|m| m.role != hive_ai::types::MessageRole::System)
+                        .unwrap_or(0);
+                    msgs.insert(
+                        insert_idx,
+                        hive_ai::types::ChatMessage {
+                            role: hive_ai::types::MessageRole::System,
+                            content: format!(
+                                "# Active Skill: /{}\n\n{}",
+                                cmd_name, instructions
+                            ),
+                            timestamp: chrono::Utc::now(),
+                            tool_call_id: None,
+                            tool_calls: None,
+                        },
+                    );
+                }
+            }
+            msgs
+        };
+
         // 3. Build tool definitions from the built-in tool registry.
         let agent_defs = hive_agents::tool_use::builtin_tool_definitions();
         let tool_defs: Vec<AiToolDefinition> = agent_defs
