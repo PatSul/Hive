@@ -1894,6 +1894,9 @@ impl HiveWorkspace {
             }
 
             // Pull from HiveMemory (LanceDB vector search)
+            // Chunks go into all_context for ContextEngine curation;
+            // Durable memories are kept separate for a dedicated system message.
+            let mut memory_context = String::new();
             if cx.has_global::<AppHiveMemory>() {
                 let hive_mem = cx.global::<AppHiveMemory>().0.clone();
                 let query = user_query_text.clone();
@@ -1910,9 +1913,11 @@ impl HiveWorkspace {
                                 ));
                             }
                             for mem_result in &result.memories {
-                                all_context.push_str(&format!(
-                                    "From previous conversations: {}\n",
-                                    mem_result.content
+                                memory_context.push_str(&format!(
+                                    "- {} (importance: {:.0}, category: {})\n",
+                                    mem_result.content,
+                                    mem_result.importance,
+                                    mem_result.category
                                 ));
                             }
                         }
@@ -1964,14 +1969,37 @@ impl HiveWorkspace {
                 }
             }
 
+            let mut augmented = ai_messages.clone();
+            let insert_idx = augmented
+                .iter()
+                .position(|m| m.role != hive_ai::types::MessageRole::System)
+                .unwrap_or(0);
+
+            // Inject recalled memories as a dedicated system message
+            if !memory_context.trim().is_empty() {
+                augmented.insert(
+                    insert_idx,
+                    hive_ai::types::ChatMessage {
+                        role: hive_ai::types::MessageRole::System,
+                        content: format!(
+                            "# Recalled Memories\n\nRelevant context from previous conversations:\n{}",
+                            memory_context
+                        ),
+                        timestamp: chrono::Utc::now(),
+                        tool_call_id: None,
+                        tool_calls: None,
+                    },
+                );
+            }
+
+            // Inject retrieved code context
             if !all_context.trim().is_empty() {
-                let mut augmented = ai_messages.clone();
-                let insert_idx = augmented
+                let ctx_idx = augmented
                     .iter()
                     .position(|m| m.role != hive_ai::types::MessageRole::System)
                     .unwrap_or(0);
                 augmented.insert(
-                    insert_idx,
+                    ctx_idx,
                     hive_ai::types::ChatMessage {
                         role: hive_ai::types::MessageRole::System,
                         content: format!("# Retrieved Context\n\n{}", all_context),
@@ -1980,10 +2008,9 @@ impl HiveWorkspace {
                         tool_calls: None,
                     },
                 );
-                augmented
-            } else {
-                ai_messages
             }
+
+            augmented
         };
 
         // 3. Build tool definitions from the built-in tool registry.
