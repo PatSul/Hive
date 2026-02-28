@@ -1,3 +1,4 @@
+pub mod flush;
 mod hive_memory;
 mod indexer;
 pub(crate) mod store;
