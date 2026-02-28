@@ -718,6 +718,48 @@ impl HiveWorkspace {
         self.apply_project_context(&workspace_path, cx);
         self.files_data = FilesData::from_path(&self.current_project_root);
         self.switch_to_panel(Panel::Files, cx);
+
+        // Trigger background indexing of the workspace directory.
+        // Runs on a dedicated thread to avoid blocking the UI.
+        if cx.has_global::<AppHiveMemory>() {
+            let hive_mem = cx.global::<AppHiveMemory>().0.clone();
+            let project_root = self.current_project_root.clone();
+            std::thread::Builder::new()
+                .name("hive-indexer".into())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    if let Ok(rt) = rt {
+                        rt.block_on(async {
+                            let entries = hive_ai::memory::BackgroundIndexer::collect_indexable_files(
+                                &project_root,
+                            );
+                            let path_str = project_root.to_string_lossy().to_string();
+                            if let Ok(mem) = hive_mem.lock() {
+                                let mut count = 0usize;
+                                for entry_path in &entries {
+                                    if let Ok(content) = std::fs::read_to_string(entry_path) {
+                                        let rel = entry_path
+                                            .strip_prefix(&project_root)
+                                            .unwrap_or(entry_path)
+                                            .to_string_lossy()
+                                            .to_string();
+                                        if mem.index_file(&rel, &content).await.is_ok() {
+                                            count += 1;
+                                        }
+                                    }
+                                }
+                                info!(
+                                    "Background indexer: indexed {count}/{} files from {path_str}",
+                                    entries.len()
+                                );
+                            }
+                        });
+                    }
+                })
+                .ok();
+        }
     }
 
     pub fn set_active_panel(&mut self, panel: Panel) {

@@ -117,6 +117,40 @@ impl BackgroundIndexer {
         Ok(())
     }
 
+    /// Collect all indexable code file paths from a directory (public static helper).
+    /// Useful when the caller wants to drive indexing directly via HiveMemory.
+    pub fn collect_indexable_files(dir: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        Self::walk_static(dir, &mut files);
+        files
+    }
+
+    fn walk_static(dir: &Path, files: &mut Vec<PathBuf>) {
+        if !dir.is_dir() {
+            return;
+        }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if path.is_dir() {
+                if name.starts_with('.')
+                    || name == "node_modules"
+                    || name == "target"
+                    || name == "__pycache__"
+                {
+                    continue;
+                }
+                Self::walk_static(&path, files);
+            } else if Self::is_indexable(&path) {
+                files.push(path);
+            }
+        }
+    }
+
     fn is_indexable(path: &Path) -> bool {
         let ext = path
             .extension()
