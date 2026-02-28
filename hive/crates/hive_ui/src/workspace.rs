@@ -24,7 +24,7 @@ use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppKnowledge,
-    AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas,
+    AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppSkillManager,
     AppRagService, AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
@@ -1022,6 +1022,23 @@ impl HiveWorkspace {
                     enabled: skill.enabled,
                     integrity_hash: skill.integrity_hash.clone(),
                 });
+            }
+        }
+
+        // User-created skills from SkillManager (file-based).
+        if cx.has_global::<AppSkillManager>() {
+            let mgr = &cx.global::<AppSkillManager>().0;
+            if let Ok(user_skills) = mgr.list() {
+                for skill in user_skills {
+                    installed.push(UiSkill {
+                        id: format!("user:{}", skill.name),
+                        name: skill.name.clone(),
+                        description: skill.description.clone(),
+                        version: "custom".into(),
+                        enabled: skill.enabled,
+                        integrity_hash: String::new(),
+                    });
+                }
             }
         }
 

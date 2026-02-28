@@ -24,7 +24,7 @@ use hive_ui::globals::{
     AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppIde, AppIntegrationDb,
     AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
     AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
-    AppSecurity, AppSemanticSearch, AppShield, AppSkills, AppSpecs, AppStandupService,
+    AppSecurity, AppSemanticSearch, AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService,
     AppTts, AppUpdater, AppWallets,
 };
 use hive_ui::workspace::{
@@ -326,6 +326,15 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     // Skills registry — built-in /commands.
     cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::new()));
     info!("SkillsRegistry initialized (built-in commands)");
+
+    // File-based skill manager — user-created skills in ~/.hive/skills/
+    {
+        let skills_dir = HiveConfig::base_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))
+            .join("skills");
+        cx.set_global(AppSkillManager(hive_agents::skills::SkillManager::new(skills_dir)));
+        info!("SkillManager initialized (user skills)");
+    }
 
     // Skill marketplace — install/remove community skills with security scanning.
     cx.set_global(AppMarketplace(hive_agents::SkillMarketplace::new()));
