@@ -295,6 +295,174 @@ impl SkillsRegistry {
 }
 
 // ---------------------------------------------------------------------------
+// File-Based Skill Manager
+// ---------------------------------------------------------------------------
+
+/// A user-created skill stored as a markdown file with YAML frontmatter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSkill {
+    pub name: String,
+    pub description: String,
+    pub instructions: String,
+    pub enabled: bool,
+}
+
+/// Manages user skills persisted as markdown files in a directory.
+///
+/// Each skill is stored as `{name}.md` with YAML frontmatter:
+/// ```markdown
+/// ---
+/// name: my-skill
+/// description: Does something useful
+/// enabled: true
+/// ---
+/// Actual skill instructions here...
+/// ```
+pub struct SkillManager {
+    skills_dir: std::path::PathBuf,
+}
+
+impl SkillManager {
+    pub fn new(skills_dir: std::path::PathBuf) -> Self {
+        if !skills_dir.exists() {
+            std::fs::create_dir_all(&skills_dir).ok();
+        }
+        Self { skills_dir }
+    }
+
+    /// Create a new skill. Fails if injection patterns are detected.
+    pub fn create(&self, skill: &UserSkill) -> Result<()> {
+        let scan = scan_for_injection(&skill.instructions);
+        if !scan.safe {
+            bail!(
+                "Skill '{}' failed injection scan: {}",
+                skill.name,
+                scan.issues.join("; ")
+            );
+        }
+        self.write_skill_file(skill)
+    }
+
+    /// Update an existing skill. Fails if injection patterns are detected.
+    pub fn update(&self, skill: &UserSkill) -> Result<()> {
+        let path = self.skill_path(&skill.name);
+        if !path.exists() {
+            bail!("Skill '{}' not found", skill.name);
+        }
+        let scan = scan_for_injection(&skill.instructions);
+        if !scan.safe {
+            bail!(
+                "Skill '{}' failed injection scan: {}",
+                skill.name,
+                scan.issues.join("; ")
+            );
+        }
+        self.write_skill_file(skill)
+    }
+
+    /// Delete a skill by name.
+    pub fn delete(&self, name: &str) -> Result<()> {
+        let path = self.skill_path(name);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(())
+    }
+
+    /// Toggle a skill's enabled state.
+    pub fn toggle(&self, name: &str, enabled: bool) -> Result<()> {
+        let mut skill = self
+            .get(name)?
+            .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found", name))?;
+        skill.enabled = enabled;
+        self.write_skill_file(&skill)
+    }
+
+    /// Get a single skill by name.
+    pub fn get(&self, name: &str) -> Result<Option<UserSkill>> {
+        let path = self.skill_path(name);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = std::fs::read_to_string(&path)?;
+        self.parse_skill_file(&content).map(Some)
+    }
+
+    /// List all skills in the directory.
+    pub fn list(&self) -> Result<Vec<UserSkill>> {
+        let mut skills = Vec::new();
+        if !self.skills_dir.exists() {
+            return Ok(skills);
+        }
+        for entry in std::fs::read_dir(&self.skills_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md") {
+                let content = std::fs::read_to_string(&path)?;
+                if let Ok(skill) = self.parse_skill_file(&content) {
+                    skills.push(skill);
+                }
+            }
+        }
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(skills)
+    }
+
+    fn skill_path(&self, name: &str) -> std::path::PathBuf {
+        self.skills_dir.join(format!("{}.md", name))
+    }
+
+    fn write_skill_file(&self, skill: &UserSkill) -> Result<()> {
+        let content = format!(
+            "---\nname: {}\ndescription: {}\nenabled: {}\n---\n{}",
+            skill.name, skill.description, skill.enabled, skill.instructions
+        );
+        std::fs::write(self.skill_path(&skill.name), content)?;
+        Ok(())
+    }
+
+    fn parse_skill_file(&self, content: &str) -> Result<UserSkill> {
+        // Parse YAML frontmatter between --- delimiters
+        let trimmed = content.trim();
+        if !trimmed.starts_with("---") {
+            bail!("Missing YAML frontmatter");
+        }
+        let after_first = &trimmed[3..];
+        let end_idx = after_first
+            .find("---")
+            .ok_or_else(|| anyhow::anyhow!("Missing closing frontmatter delimiter"))?;
+        let frontmatter = &after_first[..end_idx].trim();
+        let instructions = after_first[end_idx + 3..].trim().to_string();
+
+        let mut name = String::new();
+        let mut description = String::new();
+        let mut enabled = true;
+
+        for line in frontmatter.lines() {
+            let line = line.trim();
+            if let Some(val) = line.strip_prefix("name:") {
+                name = val.trim().to_string();
+            } else if let Some(val) = line.strip_prefix("description:") {
+                description = val.trim().to_string();
+            } else if let Some(val) = line.strip_prefix("enabled:") {
+                enabled = val.trim().parse().unwrap_or(true);
+            }
+        }
+
+        if name.is_empty() {
+            bail!("Skill file missing name field");
+        }
+
+        Ok(UserSkill {
+            name,
+            description,
+            instructions,
+            enabled,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
