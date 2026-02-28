@@ -24,8 +24,8 @@ use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppKnowledge,
-    AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppRagService,
-    AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
+    AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas,
+    AppRagService, AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
 };
@@ -1888,6 +1888,33 @@ impl HiveWorkspace {
                         if !result.context.is_empty() {
                             all_context.push_str(&result.context);
                             all_context.push_str("\n\n");
+                        }
+                    }
+                }
+            }
+
+            // Pull from HiveMemory (LanceDB vector search)
+            if cx.has_global::<AppHiveMemory>() {
+                let hive_mem = cx.global::<AppHiveMemory>().0.clone();
+                let query = user_query_text.clone();
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                if let Ok(rt) = rt {
+                    if let Ok(mem) = hive_mem.lock() {
+                        if let Ok(result) = rt.block_on(mem.query(&query, 5)) {
+                            for chunk in &result.chunks {
+                                all_context.push_str(&format!(
+                                    "// From {}\n{}\n\n",
+                                    chunk.source_file, chunk.content
+                                ));
+                            }
+                            for mem_result in &result.memories {
+                                all_context.push_str(&format!(
+                                    "From previous conversations: {}\n",
+                                    mem_result.content
+                                ));
+                            }
                         }
                     }
                 }

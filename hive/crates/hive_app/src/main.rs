@@ -23,7 +23,7 @@ use hive_ui::globals::{
     AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppDatabase,
     AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppIde, AppIntegrationDb,
     AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
-    AppContextEngine, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
+    AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
     AppSecurity, AppSemanticSearch, AppShield, AppSkills, AppSpecs, AppStandupService,
     AppTts, AppUpdater, AppWallets,
 };
@@ -240,6 +240,53 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     let context_engine = hive_ai::ContextEngine::new();
     cx.set_global(AppContextEngine(std::sync::Arc::new(std::sync::Mutex::new(context_engine))));
     info!("ContextEngine initialized");
+
+    // HiveMemory — LanceDB-backed vector embeddings + chunking.
+    {
+        let memory_path = HiveConfig::base_dir()
+            .map(|d| d.join("hive_memory.lance"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("hive_memory.lance"));
+        let embedder: std::sync::Arc<dyn hive_ai::embeddings::EmbeddingProvider> = {
+            if let Some(ref key) = config.openai_api_key {
+                if !key.is_empty() {
+                    std::sync::Arc::new(hive_ai::embeddings::OpenAiEmbeddings::new(key.clone()))
+                } else {
+                    std::sync::Arc::new(hive_ai::embeddings::OllamaEmbeddings::new(
+                        config.ollama_url.clone(),
+                    ))
+                }
+            } else {
+                std::sync::Arc::new(hive_ai::embeddings::OllamaEmbeddings::new(
+                    config.ollama_url.clone(),
+                ))
+            }
+        };
+        let rt = tokio::runtime::Handle::try_current()
+            .or_else(|_| {
+                tokio::runtime::Runtime::new().map(|rt| {
+                    let handle = rt.handle().clone();
+                    // Leak the runtime so it lives for the app's duration.
+                    std::mem::forget(rt);
+                    handle
+                })
+            });
+        if let Ok(handle) = rt {
+            match handle.block_on(hive_ai::memory::HiveMemory::open(
+                &memory_path.to_string_lossy(),
+                embedder,
+            )) {
+                Ok(memory) => {
+                    cx.set_global(AppHiveMemory(std::sync::Arc::new(
+                        std::sync::Mutex::new(memory),
+                    )));
+                    info!("HiveMemory initialized (LanceDB)");
+                }
+                Err(e) => warn!("HiveMemory init failed: {e}"),
+            }
+        } else {
+            warn!("HiveMemory init skipped: no tokio runtime available");
+        }
+    }
 
     // Fleet Learning — cross-instance pattern detection.
     let fleet_db_path = HiveConfig::base_dir()

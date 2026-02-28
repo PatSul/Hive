@@ -17,6 +17,7 @@ use hive_agents::skills::SkillsRegistry;
 use hive_agents::specs::SpecManager;
 use crate::theme::HiveTheme;
 use hive_ai::context_engine::ContextEngine;
+use hive_ai::memory::HiveMemory;
 use hive_ai::rag::RagService;
 use hive_ai::semantic_search::SemanticSearchService;
 use hive_ai::service::AiService;
@@ -241,3 +242,7 @@ impl Global for AppStandupService {}
 /// Global wrapper for competence detector.
 pub struct AppCompetenceDetector(pub Arc<Mutex<CompetenceDetector>>);
 impl Global for AppCompetenceDetector {}
+
+/// Global wrapper for HiveMemory (LanceDB-backed vector embeddings + chunking).
+pub struct AppHiveMemory(pub Arc<Mutex<HiveMemory>>);
+impl Global for AppHiveMemory {}
