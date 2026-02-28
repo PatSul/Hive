@@ -13,10 +13,11 @@ use hive_agents::mcp_server::McpServer;
 use hive_agents::personas::PersonaRegistry;
 use hive_agents::plugin_manager::PluginManager;
 use hive_agents::skill_marketplace::SkillMarketplace;
-use hive_agents::skills::SkillsRegistry;
+use hive_agents::skills::{SkillManager, SkillsRegistry};
 use hive_agents::specs::SpecManager;
 use crate::theme::HiveTheme;
 use hive_ai::context_engine::ContextEngine;
+use hive_ai::memory::HiveMemory;
 use hive_ai::rag::RagService;
 use hive_ai::semantic_search::SemanticSearchService;
 use hive_ai::service::AiService;
@@ -86,6 +87,10 @@ impl Global for AppTts {}
 /// Global wrapper for the skills registry (/command dispatch, built-in skills).
 pub struct AppSkills(pub SkillsRegistry);
 impl Global for AppSkills {}
+
+/// Global wrapper for the file-based skill manager (user-created skills).
+pub struct AppSkillManager(pub SkillManager);
+impl Global for AppSkillManager {}
 
 /// Global wrapper for the skill marketplace (install/remove, security scanning).
 pub struct AppMarketplace(pub SkillMarketplace);
@@ -241,3 +246,7 @@ impl Global for AppStandupService {}
 /// Global wrapper for competence detector.
 pub struct AppCompetenceDetector(pub Arc<Mutex<CompetenceDetector>>);
 impl Global for AppCompetenceDetector {}
+
+/// Global wrapper for HiveMemory (LanceDB-backed vector embeddings + chunking).
+pub struct AppHiveMemory(pub Arc<Mutex<HiveMemory>>);
+impl Global for AppHiveMemory {}

@@ -25,6 +25,11 @@ tracing.workspace = true
 regex.workspace = true
 parking_lot.workspace = true
 
+lancedb = "0.26"
+arrow-array = "57"
+arrow-schema = "57"
+
 [dev-dependencies]
 bytes = "1"
 http = "1"
+tempfile = "3"
