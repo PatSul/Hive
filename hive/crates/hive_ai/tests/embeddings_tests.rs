@@ -1,4 +1,4 @@
-use hive_ai::embeddings::{EmbeddingProvider, MockEmbeddingProvider};
+use hive_ai::embeddings::{EmbeddingProvider, MockEmbeddingProvider, OpenAiEmbeddings};
 
 #[tokio::test]
 async fn test_mock_embedding_provider_returns_correct_dimensions() {
@@ -24,4 +24,24 @@ async fn test_embedding_provider_metadata() {
     let provider = MockEmbeddingProvider::new(384);
     assert_eq!(provider.dimensions(), 384);
     assert_eq!(provider.model_name(), "mock-384");
+}
+
+#[tokio::test]
+async fn test_openai_embeddings_unavailable_without_key() {
+    let provider = OpenAiEmbeddings::new(String::new());
+    assert!(!provider.is_available().await);
+}
+
+#[tokio::test]
+async fn test_openai_embeddings_metadata() {
+    let provider = OpenAiEmbeddings::new("sk-test".to_string());
+    assert_eq!(provider.model_name(), "text-embedding-3-small");
+    assert_eq!(provider.dimensions(), 1536);
+}
+
+#[tokio::test]
+async fn test_openai_embeddings_empty_key_returns_auth_error() {
+    let provider = OpenAiEmbeddings::new(String::new());
+    let result = provider.embed(&["test"]).await;
+    assert!(matches!(result, Err(hive_ai::embeddings::EmbeddingError::AuthError(_))));
 }
