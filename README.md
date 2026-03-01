@@ -15,12 +15,12 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.9-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.14-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
-  <img src="https://img.shields.io/badge/tests-3%2C046-brightgreen" alt="Tests" />
-  <img src="https://img.shields.io/badge/crates-16-blue" alt="Crates" />
+  <img src="https://img.shields.io/badge/tests-3%2C500%2B-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/crates-19-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-0-brightgreen" alt="Warnings" />
-  <img src="https://img.shields.io/badge/lines-150k%2B-informational" alt="Lines of Rust" />
+  <img src="https://img.shields.io/badge/lines-177k%2B-informational" alt="Lines of Rust" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
   <img src="https://img.shields.io/badge/UI-GPUI-blueviolet" alt="GPUI" />
 </p>
@@ -31,7 +31,7 @@
 
 Hive is a **native Rust desktop AI platform** built on [GPUI](https://gpui.rs) — no Electron, no web wrappers. It unifies a development environment, a personal assistant framework, and a security-first architecture into a single application. Instead of one chatbot, Hive runs a **multi-agent swarm** that can plan, build, test, and orchestrate workflows while learning your preferences over time — all while ensuring no secret or PII ever leaves your machine without approval.
 
-What makes Hive different: it **learns from every interaction** (locally, privately), it **detects its own knowledge gaps** and autonomously researches and acquires new skills, and it **federates** across instances for distributed swarm execution.
+What makes Hive different: it **learns from every interaction** (locally, privately), it **remembers context across conversations** via LanceDB vector memory, it **detects its own knowledge gaps** and autonomously researches and acquires new skills, and it **federates** across instances for distributed swarm execution.
 
 ---
 
@@ -44,12 +44,16 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 ### Development Excellence
 - Multi-agent swarm (Queen + teams)
 - 10 AI providers with capability-aware routing
+- **LanceDB vector memory** (chunks + durable memories)
+- **Embedding providers** (OpenAI + Ollama)
+- **Background code indexing** with change detection
 - Git worktree isolation per team
 - Full Git Ops (commits, PRs, branches, gitflow, LFS)
-- Context engine (TF-IDF scoring + RAG)
+- Context engine (TF-IDF scoring + RAG + vector search)
 - Cost tracking & budget enforcement
 - Code review & testing automation
-- Skills Marketplace (15 built-in skills from 5 sources)
+- Skills Marketplace (15 built-in + user-created skills)
+- **File-based SkillManager** with YAML frontmatter
 - Autonomous skill acquisition (self-teaching)
 - Automation workflows (cron, event, webhook triggers)
 - Docker & Kubernetes orchestration
@@ -60,6 +64,8 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - Git hosting (GitHub, GitLab, Bitbucket)
 - MCP client + server (19 tools)
 - P2P federation across instances
+- **Remote control** (WebSocket relay, QR pairing, web UI)
+- **Terminal CLI client** (chat, sync, config, models)
 
 </td>
 <td width="33%" valign="top">
@@ -83,6 +89,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - SecurityGateway command filtering
 - Encrypted storage (AES-256-GCM)
 - Provider trust-based access control
+- **Memory flush** — extract insights before context compaction
 - Local-first — no telemetry
 
 </td>
@@ -135,11 +142,74 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 | HuggingFace | |
 | Venice AI | |
 
-Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding. Venice API key can be configured in the Settings panel.
+Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding.
 
 ### Streaming
 
 All AI responses stream token-by-token through the UI. Streaming is implemented end-to-end: SSE parsing at the provider layer, async channel transport, and incremental UI rendering. Shell output streams in real time through async `mpsc` channels. WebSocket-based P2P transport supports bidirectional streaming between federated instances.
+
+---
+
+## Vector Memory & RAG
+
+Hive maintains **durable, searchable memory** across conversations using LanceDB — a columnar vector database that runs embedded (no external server).
+
+```
+User query
+    |
+    v
+EmbeddingProvider ─── OpenAI text-embedding-3-small (1536d)
+    |                  or Ollama nomic-embed-text (768d)
+    |                  with automatic fallback
+    v
+┌─────────────────────────────────────────────┐
+│              LanceDB MemoryStore             │
+│                                              │
+│  chunks table          memories table        │
+│  ┌──────────────┐      ┌──────────────────┐  │
+│  │ source_file  │      │ content          │  │
+│  │ content      │      │ category         │  │
+│  │ embedding    │      │ importance       │  │
+│  │ start_line   │      │ embedding        │  │
+│  │ end_line     │      │ conversation_id  │  │
+│  └──────────────┘      │ decay_exempt     │  │
+│                        └──────────────────┘  │
+└─────────────────────────────────────────────┘
+    |                          |
+    v                          v
+Code search results       Recalled memories
+    |                          |
+    v                          v
+# Retrieved Context       # Recalled Memories
+(injected as system msg)  (dedicated system msg)
+```
+
+### How It Works
+
+| Component | Purpose |
+|---|---|
+| **EmbeddingProvider** | Async trait with OpenAI, Ollama, and Mock implementations. Auto-detects available provider at startup. |
+| **MemoryStore** | LanceDB wrapper managing two tables — `chunks` (indexed code) and `memories` (durable insights). Vector similarity search via nearest-neighbor queries. |
+| **HiveMemory** | Unified API combining MemoryStore + embeddings. 50-line chunks with 10-line overlap for code indexing. Combined query returns both code chunks and recalled memories. |
+| **BackgroundIndexer** | Walks project directories recursively, skips binary/hidden/vendor dirs, tracks file hashes for incremental re-indexing. Triggered on workspace open. |
+| **MemoryExtractor** | Pre-compaction flush: builds an LLM prompt to extract key insights from a conversation before context window is compacted. Parses JSON response, filters by importance threshold. |
+
+### Memory Categories
+
+Memories are categorized for relevance scoring:
+
+- **UserPreference** — Coding style, tooling choices, formatting preferences
+- **CodePattern** — Recurring patterns and architectural decisions
+- **TaskProgress** — What was done, what's pending
+- **Decision** — Technical decisions and their rationale
+- **General** — Catch-all for other durable insights
+
+### Injection Flow
+
+On every message send:
+1. **Code chunks** from the indexed workspace are injected into `# Retrieved Context` (curated by ContextEngine)
+2. **Recalled memories** from previous conversations are injected as a separate `# Recalled Memories` system message with importance scores and categories
+3. Both are available to the AI alongside the conversation history
 
 ---
 
@@ -211,6 +281,22 @@ When no existing skill is found, the **SkillAuthoringPipeline** creates one:
 
 All auto-generated skills are logged to CollectiveMemory for auditability. The pipeline fails gracefully at every step — a failed scan or test never installs a broken skill.
 
+### File-Based User Skills
+
+Users can create custom skills stored as markdown files with YAML frontmatter in `~/.hive/skills/`:
+
+```markdown
+---
+name: my-review-skill
+description: Reviews code for common bugs
+enabled: true
+---
+You are a code review assistant. Check for null pointer
+dereferences, off-by-one errors, and resource leaks.
+```
+
+The **SkillManager** provides CRUD operations (create, update, delete, toggle) with injection scanning on every write. User skills are dispatched via `/command` alongside built-in skills.
+
 ---
 
 ## Personal Assistant
@@ -249,7 +335,7 @@ Hive routes command execution paths through `SecurityGateway` checks and blocks 
 
 ### Local-First
 
-- All data in `~/.hive/` — config, conversations, learning data, collective memory, kanban boards
+- All data in `~/.hive/` — config, conversations, learning data, collective memory, kanban boards, vector memory
 - Encrypted key storage (AES-256-GCM + Argon2id key derivation)
 - **No telemetry. No analytics. No cloud dependency.**
 - Cloud providers used only for AI inference when you choose cloud models — and even then, HiveShield scans every request
@@ -294,6 +380,7 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 |---|---|
 | **Automation Workflows** | Multi-step workflows with triggers (manual, cron schedule, event, webhook) and 6 action types (run command, send message, call API, create task, send notification, execute skill). YAML-based definitions in `~/.hive/workflows/`. Visual drag-and-drop workflow builder in the UI. |
 | **Skills Marketplace** | Browse, install, remove, and toggle skills from 5 sources (ClawdHub, Anthropic, OpenAI, Google, Community). Create custom skills. Add remote skill sources. 15 built-in skills including 9 integration skills (/slack, /jira, /notion, /db, /docker, /k8s, /deploy, /browse, /index-docs). Security scanning on install. |
+| **User Skills** | File-based custom skills in `~/.hive/skills/` with YAML frontmatter. Full CRUD via SkillManager with injection scanning. Dispatched via `/command` in chat. |
 | **Autonomous Skill Creation** | When Hive encounters an unfamiliar domain, it searches existing skill sources first, then researches documentation and authors a new skill if nothing sufficient exists. See [Autonomous Skill Acquisition](#autonomous-skill-acquisition). |
 | **Personas** | Named agent personalities with custom system prompts, prompt overrides per task type, and configurable model preferences. |
 | **Auto-Commit** | Watches for staged changes and generates AI-powered commit messages. |
@@ -311,6 +398,57 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 | **Browser Automation** | Chrome DevTools Protocol over WebSocket: navigation, screenshots, JavaScript evaluation, DOM manipulation. |
 | **CLI Service** | Built-in commands (`/doctor`, `/clear`, etc.) and system health checks. |
 | **Local AI Detection** | Auto-discovers Ollama, LM Studio, and llama.cpp running on localhost. |
+
+---
+
+## Remote Control
+
+Hive can be controlled from any device on your network — phone, tablet, or another computer — via a built-in web server with real-time streaming.
+
+| Feature | Details |
+|---|---|
+| **HiveDaemon** | Background service holding canonical session state (active panel, conversation, agent runs). Broadcasts events to all connected clients. |
+| **Web Server** | Axum-based HTTP server with embedded static assets. REST API endpoints: `/api/state`, `/api/chat`, `/api/panels`, `/api/agents`. |
+| **WebSocket Streaming** | Real-time bidirectional communication for chat streaming, agent status, and panel updates. |
+| **QR Pairing** | Secure device pairing via QR code using X25519 elliptic-curve key exchange + AES-GCM encryption. No passwords needed. |
+| **Session Journal** | JSONL-based persistence of daemon events for crash recovery and audit. |
+| **Event Types** | SendMessage, SwitchPanel, StartAgentTask, CancelAgentTask, StreamChunk, StreamComplete, AgentStatus, StateSnapshot, PanelData. |
+
+---
+
+## Terminal Client (CLI)
+
+A full-featured terminal client for interacting with Hive without the GUI:
+
+```bash
+hive chat                    # Interactive chat TUI with streaming
+hive chat --model claude-3   # Chat with a specific model
+hive models                  # List available AI models
+hive status                  # Show account tier, usage, sync status
+hive sync push               # Push data to cloud
+hive sync pull               # Pull data from cloud
+hive config                  # View all config
+hive config key value        # Set a config value
+hive login                   # Authenticate with Hive Cloud
+hive remote                  # Show remote connection status
+```
+
+Built with Ratatui for a polished terminal UI with keyboard navigation, scrolling, and real-time streaming display.
+
+---
+
+## Hive Cloud
+
+Optional cloud services for users who want cross-device sync, cloud AI routing, and team features:
+
+| Feature | Details |
+|---|---|
+| **HiveGateway** | Cloud AI proxy — routes requests through Hive's infrastructure for users without their own API keys. Configurable in Settings. |
+| **Cloud Sync** | Push/pull config, conversations, and learning data across devices via encrypted blob storage. |
+| **Admin TUI** | Terminal dashboard (`hive-admin`) with 6 tabs: Dashboard, Users, Gateway, Relay, Sync, Teams. Real-time refresh. |
+| **Relay** | Event relay service for remote control across networks (not just LAN). |
+
+Cloud features are entirely optional. Hive works fully offline with local models.
 
 ---
 
@@ -371,6 +509,7 @@ All state persists between sessions. Nothing is lost on restart.
 | **Conversations** | SQLite + JSON files | `~/.hive/memory.db` + `~/.hive/conversations/{id}.json` |
 | **Messages** | SQLite | `~/.hive/memory.db` |
 | **Conversation search** | SQLite FTS5 | `~/.hive/memory.db` (Porter stemming + unicode61) |
+| **Vector memory** | LanceDB | `~/.hive/memory.lance` |
 | **Cost records** | SQLite | `~/.hive/memory.db` |
 | **Application logs** | SQLite | `~/.hive/memory.db` |
 | **Collective memory** | SQLite (WAL mode) | `~/.hive/memory.db` |
@@ -378,33 +517,37 @@ All state persists between sessions. Nothing is lost on restart.
 | **Kanban boards** | JSON | `~/.hive/kanban.json` |
 | **Config & API keys** | JSON + encrypted vault | `~/.hive/config.json` |
 | **Session state** | JSON | `~/.hive/session.json` (window size, crash recovery) |
+| **Session journal** | JSONL | `~/.hive/session_journal.jsonl` (remote daemon events) |
 | **Knowledge cache** | HTML/text files | `~/.hive/knowledge/` |
 | **Workflows** | YAML definitions | `~/.hive/workflows/` |
 | **Installed skills** | Managed by Skills Marketplace | `~/.hive/skills/` |
+| **User skills** | Markdown + YAML frontmatter | `~/.hive/skills/{name}.md` |
 
 On startup, Hive automatically backfills any JSON-only conversations into SQLite and builds FTS5 search indexes. Path traversal protection on all file operations. SQLite databases use WAL mode with `NORMAL` synchronous and foreign key enforcement.
 
 ---
 
-## Architecture — 16-Crate Workspace
+## Architecture — 19-Crate Workspace
 
 ```
 hive/crates/
 ├── hive_app           Binary entry point — window, tray, build.rs (winres)
 │                      3 files · 965 lines
 ├── hive_ui            Workspace shell, chat service, learning bridge, title/status bars
-│                      21 files · 10,818 lines
+│                      21 files · 11,000+ lines
 ├── hive_ui_core       Theme, actions, globals, sidebar, welcome screen
-│                      6 files · 895 lines
+│                      6 files · 900+ lines
 ├── hive_ui_panels     All panel implementations (20+ panels)
-│                      42 files · 26,256 lines
+│                      42 files · 26,000+ lines
 ├── hive_core          Config, SecurityGateway, persistence (SQLite), Kanban, channels, scheduling
-│                      18 files · 9,808 lines
-├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine, RAG
-│                      41 files · 19,732 lines
+│                      18 files · 9,800+ lines
+├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine,
+│                      RAG, embeddings (OpenAI + Ollama), LanceDB memory, background indexer
+│                      50+ files · 22,000+ lines
 ├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (19 tools), skills,
-│                      personas, knowledge acquisition, competence detection, skill authoring
-│                      26 files · 21,963 lines
+│                      SkillManager (file-based CRUD), personas, knowledge acquisition,
+│                      competence detection, skill authoring
+│                      28+ files · 23,000+ lines
 ├── hive_shield        PII detection, secrets scanning, vulnerability assessment, access control
 │                      6 files · 2,005 lines
 ├── hive_learn         Outcome tracking, routing learner, preference model, prompt evolution
@@ -422,8 +565,14 @@ hive/crates/
 ├── hive_integrations  Google, Microsoft, GitHub, GitLab, Bitbucket, messaging, databases,
 │                      cloud platforms, DevOps, knowledge bases, project management, OAuth2
 │                      55 files · 33,007 lines
-└── hive_network       P2P federation, WebSocket transport, UDP discovery, peer registry, sync
-                       11 files · 2,765 lines
+├── hive_network       P2P federation, WebSocket transport, UDP discovery, peer registry, sync
+│                      11 files · 2,765 lines
+├── hive_remote        Background daemon, WebSocket relay, QR pairing, web UI, REST API
+│                      9 files · 943 lines  (+ 1,916 lines tests)
+├── hive_admin         Cloud admin TUI dashboard (6 tabs: dashboard, users, gateway, relay, sync, teams)
+│                      11 files · 905 lines  [binary: hive-admin]
+└── hive_cli           Terminal AI client (chat, sync, config, models, login, remote, status)
+                       12 files · 938 lines  [binary: hive]
 ```
 
 ### Dependency Flow
@@ -443,7 +592,11 @@ hive_app
         ├── hive_docs
         ├── hive_blockchain
         ├── hive_integrations
-        └── hive_network
+        ├── hive_network
+        └── hive_remote ──── hive_core, hive_ai, hive_agents, hive_network
+
+hive_admin (standalone binary)
+hive_cli   (standalone binary) ── hive_core
 ```
 
 ---
@@ -458,7 +611,7 @@ All panels are wired to live backend data. No mock data in the production path. 
 | History | Conversation history browser | `~/.hive/conversations/` |
 | Files | Project file browser with create/delete/navigate | Filesystem via `hive_fs` |
 | Specs | Specification management | `AppSpecs` global |
-| Agents | Multi-agent swarm orchestration | `AppAgents` global |
+| Agents | Multi-agent swarm orchestration with task tree drill-down | `AppAgents` global |
 | Workflows | Visual workflow builder (drag-and-drop nodes) | `AppWorkflows` global |
 | Channels | Agent messaging channels (Telegram/Slack-style) | `AppChannels` global |
 | Kanban | Persistent task board with drag-and-drop | `~/.hive/kanban.json` |
@@ -466,14 +619,14 @@ All panels are wired to live backend data. No mock data in the production path. 
 | Logs | Application logs viewer with level filtering | Tracing subscriber |
 | Costs | AI cost tracking and budget with CSV export | `CostTracker` |
 | Git Ops | Full git workflow: staging, commits, push, PRs, branches, gitflow, LFS | `git2` + CLI |
-| Skills | Skill marketplace: browse, install, remove, toggle, create (5 sources) | `SkillMarketplace` |
+| Skills | Skill marketplace: browse, install, remove, toggle, create (5 sources + user skills) | `SkillMarketplace` + `SkillManager` |
 | Routing | Model routing configuration | `ModelRouter` |
 | Models | Model registry browser | Provider catalogs |
 | Learning | Self-improvement dashboard with metrics, preferences, insights | `LearningService` |
 | Shield | Security scanning status | `HiveShield` |
 | Assistant | Personal assistant: email, calendar, reminders | `AssistantService` |
 | Token Launch | Token deployment wizard with chain selection | `hive_blockchain` |
-| Settings | Application configuration with persist-on-save | `HiveConfig` |
+| Settings | Application configuration with persist-on-save, cloud account fields | `HiveConfig` |
 | Help | Documentation and guides | Static content |
 
 ---
@@ -486,7 +639,7 @@ Hive is built for production robustness:
 - **Zero compiler warnings** — The full workspace compiles with `cargo build --workspace` producing 0 errors and 0 warnings.
 - **Clippy clean** — All `cargo clippy` lints addressed: no collapsible ifs, no unnecessary closures, no naming conflicts.
 - **Documented APIs** — Public structs, enums, traits, and functions have `///` documentation comments describing purpose and behavior.
-- **3,046 tests** — Unit and integration tests across the workspace, all passing.
+- **3,500+ tests** — Unit and integration tests across the workspace, all passing. Includes LanceDB vector memory tests, embedding provider tests, skill CRUD tests, and full lifecycle integration tests.
 
 ---
 
@@ -530,7 +683,19 @@ sudo pacman -S vulkan-icd-loader vulkan-tools
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-2. **Platform-specific dependencies:**
+2. **protoc** (Protocol Buffers compiler) — required by LanceDB:
+   ```bash
+   # macOS
+   brew install protobuf
+
+   # Ubuntu/Debian
+   sudo apt install protobuf-compiler
+
+   # Windows (via scoop)
+   scoop bucket add extras && scoop install extras/protobuf
+   ```
+
+3. **Platform-specific dependencies:**
 
    <details>
    <summary><strong>Windows</strong></summary>
@@ -609,11 +774,11 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.9 |
-| Crates | 16 |
-| Rust source files | 280 |
-| Lines of Rust | 150,285 |
-| Tests | 3,046 |
+| Version | 0.3.14 |
+| Crates | 19 |
+| Rust source files | 371 |
+| Lines of Rust | 177,455 |
+| Tests | 3,500+ |
 | Compiler warnings | 0 |
 | Clippy warnings | 0 |
 | Memory footprint | < 50 MB |
@@ -623,6 +788,24 @@ Configure provider preferences, model routing rules, budget limits, and security
 ---
 
 ## Changelog
+
+### v0.3.14
+
+**Vector Memory + File-Based Skills + Remote Control + CLI**
+
+- **LanceDB Vector Memory** — Persistent, searchable memory across conversations using LanceDB embedded vector database. Two-table design: `chunks` (indexed code with 50-line overlapping windows) and `memories` (durable insights with importance scoring and categories).
+- **Embedding Providers** — `EmbeddingProvider` trait with OpenAI (text-embedding-3-small, 1536d) and Ollama (nomic-embed-text, 768d) implementations. Auto-detects available provider at startup with graceful fallback.
+- **Background Indexer** — Recursive directory scanner that indexes workspace code files on project open. Tracks file hashes for incremental re-indexing. Skips binary, hidden, and vendor directories.
+- **Memory Injection** — On every message, recalled memories are injected as a dedicated system message (separate from code context) with importance scores and categories.
+- **Memory Flush** — Pre-compaction extraction: builds LLM prompts to extract key insights from conversations before the context window is compacted. Filters by importance threshold.
+- **File-Based SkillManager** — User-created skills stored as markdown with YAML frontmatter in `~/.hive/skills/`. Full CRUD (create, update, delete, toggle) with injection scanning on every write.
+- **Skill Dispatch** — `/command` routing checks both built-in SkillsRegistry and file-based SkillManager, injecting skill instructions as a system message.
+- **SkillManager in Skills Panel** — User skills appear alongside built-in and marketplace skills in the UI.
+- **Remote Control** (`hive_remote`) — Background daemon with Axum web server, WebSocket streaming, QR device pairing (X25519 + AES-GCM), and session journal persistence.
+- **Terminal CLI** (`hive_cli`) — Full terminal client with 7 commands: chat (streaming TUI), models, status, sync, config, login, remote.
+- **Admin TUI** (`hive_admin`) — Cloud admin dashboard with 6 tabs for managing users, gateway, relay, sync, and teams.
+- **Hive Cloud** — HiveGateway cloud AI proxy, cloud sync module, and account management fields in Settings.
+- **Agent Task Events** — Coordinator emits live TaskEvents; Agents panel has task tree drill-down.
 
 ### v0.3.9
 
@@ -638,7 +821,6 @@ Configure provider preferences, model routing rules, budget limits, and security
 - Shield settings persist across restarts via HiveConfig
 - Model age display in Models Browser (days/months/years since release)
 - Dual licensing: AGPL-3.0 for app/agents, MIT for library crates
-- Removed old static site (replaced by Next.js marketing site)
 
 ### v0.3.4
 
@@ -661,10 +843,6 @@ Configure provider preferences, model routing rules, budget limits, and security
 - **Plugin system**: PluginRegistry with `with_defaults()` auto-loading ReminderPlugin — first production AssistantPlugin implementation
 - **Blockchain labeling**: Deploy functions now clearly labeled as simulation mode with SIM_ prefixed identifiers and `simulated: true` field
 - **Real ERC-20 bytecode**: Replaced placeholder with compiled Solidity 0.8.20 minimal ERC-20 contract
-- **Integration stub improvements**: WiringReport tracks handler wiring success/failure, stubs return `"status": "not_connected"` for better UX
-- **Code quality**: Fixed ~30 runtime unwrap() calls, added model-specific cost estimation table, benchmark staleness warning, proper error handling throughout
-- **Website performance**: Added loading.tsx skeletons, Suspense boundaries, dynamic imports for heavy components, honeycomb animation throttling (prefers-reduced-motion, IntersectionObserver, 30fps mobile), image dimension fixes, sizes props
-- **Website consistency**: Corrected all stats (15 skills, 21 panels, 10 providers), fixed copyright to Airglow LLC, absolute anchor paths, Fragment key fix, localStorage error handling, ESLint config, PWA manifest fields, apple-touch-icon PNG
 
 ### v0.3.2
 
@@ -674,13 +852,6 @@ Configure provider preferences, model routing rules, budget limits, and security
 - Replaced `deploy_trigger` stub with real deployment dispatch (deploy.sh, Makefile targets, or `gh workflow run`)
 - Implemented real CLI doctor checks — `check_disk_space()` reads filesystem stats via `statvfs`, `check_network()` performs DNS resolution
 - Implemented MCP SSE transport — HTTP POST for requests, Server-Sent Events for streaming responses
-- Fixed README accuracy: version bump to 0.3.2, corrected error handling claims, clarified blockchain simulation mode
-- Website: added favicon, robots.txt, sitemap.xml, og:image, manifest.json, JSON-LD structured data
-- Website: custom 404 and error pages with Hive branding
-- Website: enabled Next.js image optimization (removed `unoptimized: true`)
-- Website: added mobile docs navigation (floating bottom sheet)
-- Website: accessibility fixes — skip-to-content link, aria-hidden on decorative SVGs, aria-expanded on FAQ, focus-visible styles
-- Website: SEO meta tags — metadataBase, canonical URLs, og:image, twitter:image, theme-color
 
 ### v0.3.1
 
@@ -691,70 +862,30 @@ Configure provider preferences, model routing rules, budget limits, and security
 - Fixed all 9 integration skill `/commands` to reference correct tool names
 - Added `IntegrationServices` struct for clean dependency injection of Arc services
 - Added `block_on_async()` helper for sync→async bridging in tool handlers
-- DocsIndexer graceful fallback when not configured
 
 ### v0.3.0
 
 **Integration Platform + Capability-Aware AI Routing**
 
-New capabilities:
-- **Integration Platform** — 13 new external service integrations, all with real API clients, connection pooling, and comprehensive test coverage:
-  - **Git Hosting**: GitLab (REST API) and Bitbucket (REST API v2.0) alongside existing GitHub integration
-  - **Cloud Platforms**: AWS (EC2, S3, Lambda, CloudWatch), Azure (VMs, Blob Storage, Functions, Monitor), GCP (Compute, Cloud Storage, Cloud Functions, Logging)
-  - **Databases**: PostgreSQL, MySQL, and SQLite with query execution, schema introspection, and connection pooling
-  - **DevOps**: Docker (full container lifecycle, image management, network/volume ops) and Kubernetes (pods, deployments, services, namespaces, log streaming)
-  - **Knowledge Bases**: Notion (pages, databases, blocks, search) and Obsidian (vault management, frontmatter parsing, wikilink resolution)
-  - **Project Management**: Jira (issues, projects, sprints, transitions), Linear (issues, teams, cycles, labels), Asana (tasks, projects, sections, tags)
-  - **Browser Automation**: Headless Chrome with navigation, screenshots, JS evaluation, and DOM interaction
-  - **Documentation Indexer**: Multi-format document indexing with TF-IDF search
-
-- **Capability-Aware AI Routing** — New `CapabilityRouter` (1,365 lines) that ranks AI models by task-specific strengths across 12 task types (coding, math, creative writing, analysis, etc.) with 19 model profiles. Integrated into `ModelRouter` via `route_with_capabilities()` and wired through `AiService.resolve_provider_smart()`.
-
-- **Speculative Decoding** — Guess-and-check optimization for faster AI responses. A smaller, faster model generates draft tokens that are verified by the target model in parallel.
-
-- **9 New Integration Skills** — `/slack`, `/jira`, `/notion`, `/db`, `/docker`, `/k8s`, `/deploy`, `/browse`, `/index-docs` — each providing natural-language access to their respective services.
-
-- **13 New MCP Integration Tools** — `send_message`, `create_issue`, `list_issues`, `search_knowledge`, `query_database`, `describe_schema`, `docker_list`, `docker_logs`, `k8s_pods`, `cloud_resources`, `browse_url`, `search_docs`, `deploy_trigger` — exposing integration capabilities to external MCP clients. All tools are wired to live service backends at startup.
-
-Stats: 280 source files, 150,285 lines of Rust, 3,046 tests, 0 warnings.
+- **Integration Platform** — 13 new external service integrations with real API clients and connection pooling
+- **Capability-Aware AI Routing** — `CapabilityRouter` (1,365 lines) ranking AI models by task-specific strengths across 12 task types with 19 model profiles
+- **Speculative Decoding** — Guess-and-check optimization for faster AI responses
+- **9 New Integration Skills** — `/slack`, `/jira`, `/notion`, `/db`, `/docker`, `/k8s`, `/deploy`, `/browse`, `/index-docs`
+- **13 New MCP Integration Tools** — exposing integration capabilities to external MCP clients
 
 ### v0.2.0
 
 **Autonomous Skill Acquisition + Production Hardening**
 
-New capabilities:
-- **Knowledge Acquisition Agent** — Fetches documentation from 23+ allowlisted domains, parses HTML to clean text with code block extraction, caches locally with SHA-256 dedup and 7-day TTL, synthesizes via AI, and injects into the context engine.
-- **Competence Detection** — Self-awareness layer that scores confidence (0.0-1.0) across skill match, pattern overlap, memory recall, and AI assessment. Identifies gap types and triggers learning automatically.
-- **Skill Authoring Pipeline** — Search-first approach: queries existing skills, AI-scores for sufficiency (>= 7/10). Falls through to research, generate, security-scan, test, and install only when needed.
-- **P2P Federation** (`hive_network`) — UDP broadcast peer discovery, WebSocket transport, 12 typed message kinds, channel sync, fleet learning, persistent peer registry.
-- **Blockchain / Web3** (`hive_blockchain`) — EVM multi-chain (7 networks) and Solana wallet management with real JSON-RPC calls, token deployment with cost estimation, encrypted key storage.
-- **Docker Sandbox** — Real Docker CLI integration with full container lifecycle management and simulation fallback.
-
-Production hardening:
-- Eliminated ~800+ `.unwrap()` calls across 13 crates with proper error handling.
-- Wired all 11 UI panels from sample/placeholder data to real backend services (monitor reads real CPU/memory/disk, kanban persists to disk, assistant wired to connected accounts, shield/skills/routing/learning read from live globals).
-- Fixed all clippy warnings (collapsible ifs, never-loop, unused imports, naming conflicts).
-- Added doc comments to public APIs across core crates.
-- Added serde derives to Kanban types for JSON persistence.
-- **SQLite persistence** for conversations, messages, cost records, and application logs (`memory.db`).
-- **FTS5 full-text search** across all conversations with Porter stemming and unicode61 tokenizer.
-- **JSON→SQLite backfill** automatically imports file-based conversations into SQLite on startup.
-- **Persistent logs** stored in SQLite with level filtering, pagination, and retention management.
-- **Window size persistence** restored across sessions via `session.json`.
-- Dead code cleanup: removed stale structs, narrowed annotations to field-level.
-
-Stats: 256 source files, 127,665 lines of Rust, 2,544 tests, 0 warnings.
-
-### v0.2.1 – v0.2.3
-
-- Auto-update feature across all platforms
-- Speculative decoding (guess-and-check) for faster AI responses
-- Auto-release pipeline fixes
-- Bug fixes and stability improvements
+- Knowledge Acquisition Agent, Competence Detection, Skill Authoring Pipeline
+- P2P Federation, Blockchain/Web3, Docker Sandbox
+- Eliminated ~800+ `.unwrap()` calls with proper error handling
+- SQLite persistence, FTS5 search, persistent logs
+- 2,544 tests, 0 warnings
 
 ### v0.1.0
 
-Initial release with 16-crate architecture, multi-agent swarm (Queen + HiveMind + Coordinator), 11 AI providers, HiveShield security (PII detection, secrets scanning, vulnerability assessment), self-improvement engine (5 feedback loops), ClawdHub skill marketplace, personal assistant (email, calendar, reminders), 20+ UI panels, automation workflows, and full Git Ops.
+Initial release with 16-crate architecture, multi-agent swarm, 11 AI providers, HiveShield security, self-improvement engine, skill marketplace, personal assistant, 20+ UI panels, automation workflows, and full Git Ops.
 
 ---
 
