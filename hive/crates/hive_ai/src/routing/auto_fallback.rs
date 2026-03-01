@@ -33,6 +33,7 @@ pub enum ProviderType {
     XAI,
     Mistral,
     Doubao,
+    HiveGateway,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -51,6 +52,7 @@ impl std::fmt::Display for ProviderType {
             Self::XAI => "xai",
             Self::Mistral => "mistral",
             Self::Doubao => "doubao",
+            Self::HiveGateway => "hive_gateway",
         };
         f.write_str(s)
     }

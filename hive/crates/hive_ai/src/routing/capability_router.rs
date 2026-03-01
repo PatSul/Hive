@@ -1031,6 +1031,7 @@ impl CapabilityRouter {
             crate::types::ProviderType::XAI => ProviderType::XAI,
             crate::types::ProviderType::Mistral => ProviderType::Mistral,
             crate::types::ProviderType::Doubao => ProviderType::Doubao,
+            crate::types::ProviderType::HiveGateway => ProviderType::HiveGateway,
         }
     }
 }

@@ -11,6 +11,8 @@ pub mod canvas;
 pub mod channels;
 /// Code review management with comments, file changes, and review workflows.
 pub mod code_review;
+/// Client-side cloud sync (blob push/pull) for Hive Cloud subscribers.
+pub mod cloud_sync;
 /// Application configuration, API key management, and hot-reload support.
 pub mod config;
 /// Context window management for token-aware conversation pruning.

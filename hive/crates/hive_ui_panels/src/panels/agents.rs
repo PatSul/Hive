@@ -44,12 +44,18 @@ pub struct RunDisplay {
     pub tasks_total: usize,
     pub cost: f64,
     pub elapsed: String,
+    pub tasks: Vec<crate::components::task_tree::TaskDisplay>,
 }
 
 impl RunDisplay {
     /// Whether this run is still in progress.
     pub fn is_active(&self) -> bool {
         self.status == "Running" || self.status == "Pending"
+    }
+
+    /// Whether this run has task-level detail available for drill-down.
+    pub fn has_task_detail(&self) -> bool {
+        !self.tasks.is_empty()
     }
 }
 
@@ -191,6 +197,7 @@ impl AgentsPanelData {
                 tasks_total: 12,
                 cost: 0.42,
                 elapsed: "3m 22s".into(),
+                tasks: vec![],
             }],
             run_history: vec![
                 RunDisplay {
@@ -202,6 +209,7 @@ impl AgentsPanelData {
                     tasks_total: 5,
                     cost: 0.18,
                     elapsed: "1m 47s".into(),
+                    tasks: vec![],
                 },
             ],
             workflow_source_dir: ".hive/workflows".into(),

@@ -24,8 +24,8 @@ use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppKnowledge,
-    AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppRagService,
-    AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
+    AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppSkillManager,
+    AppRagService, AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
 };
@@ -718,6 +718,48 @@ impl HiveWorkspace {
         self.apply_project_context(&workspace_path, cx);
         self.files_data = FilesData::from_path(&self.current_project_root);
         self.switch_to_panel(Panel::Files, cx);
+
+        // Trigger background indexing of the workspace directory.
+        // Runs on a dedicated thread to avoid blocking the UI.
+        if cx.has_global::<AppHiveMemory>() {
+            let hive_mem = cx.global::<AppHiveMemory>().0.clone();
+            let project_root = self.current_project_root.clone();
+            std::thread::Builder::new()
+                .name("hive-indexer".into())
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    if let Ok(rt) = rt {
+                        rt.block_on(async {
+                            let entries = hive_ai::memory::BackgroundIndexer::collect_indexable_files(
+                                &project_root,
+                            );
+                            let path_str = project_root.to_string_lossy().to_string();
+                            if let Ok(mem) = hive_mem.lock() {
+                                let mut count = 0usize;
+                                for entry_path in &entries {
+                                    if let Ok(content) = std::fs::read_to_string(entry_path) {
+                                        let rel = entry_path
+                                            .strip_prefix(&project_root)
+                                            .unwrap_or(entry_path)
+                                            .to_string_lossy()
+                                            .to_string();
+                                        if mem.index_file(&rel, &content).await.is_ok() {
+                                            count += 1;
+                                        }
+                                    }
+                                }
+                                info!(
+                                    "Background indexer: indexed {count}/{} files from {path_str}",
+                                    entries.len()
+                                );
+                            }
+                        });
+                    }
+                })
+                .ok();
+        }
     }
 
     pub fn set_active_panel(&mut self, panel: Panel) {
@@ -1025,6 +1067,23 @@ impl HiveWorkspace {
             }
         }
 
+        // User-created skills from SkillManager (file-based).
+        if cx.has_global::<AppSkillManager>() {
+            let mgr = &cx.global::<AppSkillManager>().0;
+            if let Ok(user_skills) = mgr.list() {
+                for skill in user_skills {
+                    installed.push(UiSkill {
+                        id: format!("user:{}", skill.name),
+                        name: skill.name.clone(),
+                        description: skill.description.clone(),
+                        version: "custom".into(),
+                        enabled: skill.enabled,
+                        integrity_hash: String::new(),
+                    });
+                }
+            }
+        }
+
         // Marketplace-installed skills.
         let mut installed_triggers: Vec<String> = Vec::new();
         if cx.has_global::<AppMarketplace>() {
@@ -1323,6 +1382,7 @@ impl HiveWorkspace {
                         .as_ref()
                         .map(|_| "recent".to_string())
                         .unwrap_or_else(|| "-".to_string()),
+                    tasks: vec![],
                 })
                 .collect();
 
@@ -1349,6 +1409,7 @@ impl HiveWorkspace {
                             "{}s",
                             (run.completed_at - run.started_at).num_seconds().max(0)
                         ),
+                        tasks: vec![],
                     })
                 })
                 .collect();
@@ -1891,6 +1952,38 @@ impl HiveWorkspace {
                 }
             }
 
+            // Pull from HiveMemory (LanceDB vector search)
+            // Chunks go into all_context for ContextEngine curation;
+            // Durable memories are kept separate for a dedicated system message.
+            let mut memory_context = String::new();
+            if cx.has_global::<AppHiveMemory>() {
+                let hive_mem = cx.global::<AppHiveMemory>().0.clone();
+                let query = user_query_text.clone();
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                if let Ok(rt) = rt {
+                    if let Ok(mem) = hive_mem.lock() {
+                        if let Ok(result) = rt.block_on(mem.query(&query, 5)) {
+                            for chunk in &result.chunks {
+                                all_context.push_str(&format!(
+                                    "// From {}\n{}\n\n",
+                                    chunk.source_file, chunk.content
+                                ));
+                            }
+                            for mem_result in &result.memories {
+                                memory_context.push_str(&format!(
+                                    "- {} (importance: {:.0}, category: {})\n",
+                                    mem_result.content,
+                                    mem_result.importance,
+                                    mem_result.category
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
             // Pull from Knowledge Hub (Obsidian vaults + Notion workspaces)
             if cx.has_global::<AppKnowledge>() {
                 let kb = cx.global::<AppKnowledge>().0.clone();
@@ -1935,14 +2028,37 @@ impl HiveWorkspace {
                 }
             }
 
+            let mut augmented = ai_messages.clone();
+            let insert_idx = augmented
+                .iter()
+                .position(|m| m.role != hive_ai::types::MessageRole::System)
+                .unwrap_or(0);
+
+            // Inject recalled memories as a dedicated system message
+            if !memory_context.trim().is_empty() {
+                augmented.insert(
+                    insert_idx,
+                    hive_ai::types::ChatMessage {
+                        role: hive_ai::types::MessageRole::System,
+                        content: format!(
+                            "# Recalled Memories\n\nRelevant context from previous conversations:\n{}",
+                            memory_context
+                        ),
+                        timestamp: chrono::Utc::now(),
+                        tool_call_id: None,
+                        tool_calls: None,
+                    },
+                );
+            }
+
+            // Inject retrieved code context
             if !all_context.trim().is_empty() {
-                let mut augmented = ai_messages.clone();
-                let insert_idx = augmented
+                let ctx_idx = augmented
                     .iter()
                     .position(|m| m.role != hive_ai::types::MessageRole::System)
                     .unwrap_or(0);
                 augmented.insert(
-                    insert_idx,
+                    ctx_idx,
                     hive_ai::types::ChatMessage {
                         role: hive_ai::types::MessageRole::System,
                         content: format!("# Retrieved Context\n\n{}", all_context),
@@ -1951,10 +2067,59 @@ impl HiveWorkspace {
                         tool_calls: None,
                     },
                 );
-                augmented
-            } else {
-                ai_messages
             }
+
+            augmented
+        };
+
+        // 2c. Check for /command skill activation and inject instructions
+        let ai_messages = {
+            let mut msgs = ai_messages;
+            let trimmed_query = user_query_text.trim();
+            if trimmed_query.starts_with('/') {
+                let cmd_name = trimmed_query[1..]
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("");
+                let mut skill_instructions: Option<String> = None;
+
+                // Check built-in skills registry
+                if cx.has_global::<hive_ui_core::AppSkills>() {
+                    if let Ok(instructions) = cx.global::<hive_ui_core::AppSkills>().0.dispatch(cmd_name)
+                    {
+                        skill_instructions = Some(instructions.to_string());
+                    }
+                }
+                // Check user-created skills (file-based)
+                if skill_instructions.is_none() && cx.has_global::<AppSkillManager>() {
+                    if let Ok(Some(skill)) = cx.global::<AppSkillManager>().0.get(cmd_name) {
+                        if skill.enabled {
+                            skill_instructions = Some(skill.instructions.clone());
+                        }
+                    }
+                }
+
+                if let Some(instructions) = skill_instructions {
+                    let insert_idx = msgs
+                        .iter()
+                        .position(|m| m.role != hive_ai::types::MessageRole::System)
+                        .unwrap_or(0);
+                    msgs.insert(
+                        insert_idx,
+                        hive_ai::types::ChatMessage {
+                            role: hive_ai::types::MessageRole::System,
+                            content: format!(
+                                "# Active Skill: /{}\n\n{}",
+                                cmd_name, instructions
+                            ),
+                            timestamp: chrono::Utc::now(),
+                            tool_call_id: None,
+                            tool_calls: None,
+                        },
+                    );
+                }
+            }
+            msgs
         };
 
         // 3. Build tool definitions from the built-in tool registry.

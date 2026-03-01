@@ -1,3 +1,5 @@
+pub mod embeddings;
+pub mod memory;
 pub mod context_engine;
 pub mod cost;
 pub mod discovery;

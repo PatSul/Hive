@@ -78,6 +78,14 @@ pub struct SettingsData {
     pub tts_provider: String,
     pub tts_speed: f32,
     pub clawdtalk_enabled: bool,
+    // Cloud account
+    pub cloud_logged_in: bool,
+    pub cloud_email: Option<String>,
+    pub cloud_tier: Option<String>,
+    pub cloud_token_used: Option<i64>,
+    pub cloud_token_budget: Option<i64>,
+    pub cloud_sync_last: Option<String>,
+    pub cloud_relay_connected: bool,
 }
 
 impl Default for SettingsData {
@@ -113,6 +121,13 @@ impl Default for SettingsData {
             tts_provider: "qwen3".into(),
             tts_speed: 1.0,
             clawdtalk_enabled: false,
+            cloud_logged_in: false,
+            cloud_email: None,
+            cloud_tier: None,
+            cloud_token_used: None,
+            cloud_token_budget: None,
+            cloud_sync_last: None,
+            cloud_relay_connected: false,
         }
     }
 }
@@ -167,6 +182,13 @@ impl SettingsData {
             tts_provider: cfg.tts_provider.clone(),
             tts_speed: cfg.tts_speed,
             clawdtalk_enabled: cfg.clawdtalk_enabled,
+            cloud_logged_in: cfg.cloud_jwt.as_ref().is_some_and(|t| !t.is_empty()),
+            cloud_email: None,
+            cloud_tier: cfg.cloud_tier.clone(),
+            cloud_token_used: None,
+            cloud_token_budget: None,
+            cloud_sync_last: None,
+            cloud_relay_connected: false,
         }
     }
 
@@ -714,6 +736,9 @@ impl SettingsView {
             telegram_oauth_client_id: non_empty_trimmed(
                 self.telegram_client_id_input.read(cx).value().as_ref(),
             ),
+            // Knowledge base — read from config (no UI inputs yet)
+            notion_key: None,
+            obsidian_vault_path: None,
         }
     }
 
@@ -863,6 +888,9 @@ pub struct SettingsSnapshot {
     pub tts_enabled: bool,
     pub tts_auto_speak: bool,
     pub clawdtalk_enabled: bool,
+    // Knowledge base
+    pub notion_key: Option<String>,
+    pub obsidian_vault_path: Option<String>,
     // OAuth client IDs
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,

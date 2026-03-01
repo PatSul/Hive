@@ -1,0 +1,22 @@
+[package]
+name = "hive_admin"
+version = "0.1.0"
+edition = "2021"
+description = "Hive Cloud admin terminal dashboard"
+
+[[bin]]
+name = "hive-admin"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

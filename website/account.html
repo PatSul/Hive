@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account - Hive</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="images/favicon.png">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container nav-content">
+            <a href="/" class="logo">
+                <span class="logo-icon">&#x1F41D;</span>
+                <span class="logo-text">Hive</span>
+            </a>
+            <div class="nav-links">
+                <a href="index.html#features">Features</a>
+                <a href="pricing.html">Pricing</a>
+                <button class="btn btn-outline btn-sm" id="logout-btn">Log Out</button>
+            </div>
+        </div>
+    </nav>
+
+    <section class="account-section">
+        <div class="container">
+            <div class="account-header">
+                <h1>Your Account</h1>
+                <p id="account-email" class="text-muted">Loading...</p>
+            </div>
+
+            <div class="account-grid">
+                <!-- Plan card -->
+                <div class="account-card">
+                    <h3>Plan</h3>
+                    <div class="stat-value" id="account-tier">Free</div>
+                    <p class="text-muted" id="plan-desc">Using your own API keys</p>
+                    <a href="pricing.html" class="btn btn-outline btn-sm" style="margin-top: 16px;">Upgrade</a>
+                </div>
+
+                <!-- Usage card -->
+                <div class="account-card">
+                    <h3>AI Gateway Usage</h3>
+                    <div class="usage-bar-container">
+                        <div class="usage-bar" id="usage-bar" style="width: 0%;"></div>
+                    </div>
+                    <p class="text-muted">
+                        <span id="tokens-used">0</span> / <span id="tokens-budget">0</span> tokens this month
+                    </p>
+                </div>
+
+                <!-- Sync card -->
+                <div class="account-card">
+                    <h3>Cloud Sync</h3>
+                    <div class="stat-value" id="sync-status">Not configured</div>
+                    <p class="text-muted" id="sync-detail">Connect from the Hive desktop app</p>
+                </div>
+
+                <!-- Desktop connection -->
+                <div class="account-card">
+                    <h3>Connect Desktop App</h3>
+                    <p class="text-muted">Paste this token into Hive settings to link your account:</p>
+                    <div class="token-box">
+                        <code id="jwt-display">Log in to get your token</code>
+                        <button class="btn btn-sm btn-outline" id="copy-token" title="Copy">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <style>
+        .account-section { padding: 120px 0 60px; }
+        .account-header { margin-bottom: 40px; }
+        .account-header h1 { font-size: 2rem; font-weight: 700; }
+        .text-muted { color: var(--text-muted); }
+        .account-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+        .account-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 28px;
+        }
+        .account-card h3 { font-size: 0.9rem; color: var(--text-muted); font-weight: 600; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-value { font-size: 1.8rem; font-weight: 700; color: var(--accent); margin-bottom: 6px; }
+        .usage-bar-container {
+            background: var(--bg-input); border-radius: 6px; height: 8px;
+            overflow: hidden; margin-bottom: 10px;
+        }
+        .usage-bar { background: var(--accent); height: 100%; border-radius: 6px; transition: width 0.5s; }
+        .token-box {
+            display: flex; align-items: center; gap: 8px; margin-top: 12px;
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 10px 14px;
+        }
+        .token-box code {
+            flex: 1; font-family: var(--mono); font-size: 0.78rem;
+            color: var(--text-dim); overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        @media (max-width: 640px) { .account-grid { grid-template-columns: 1fr; } }
+    </style>
+
+    <script>
+        const API_BASE = 'https://hive-cloud.fly.dev';
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const token = localStorage.getItem('hive_access_token');
+            if (!token) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Show token for desktop app connection
+            const jwtDisplay = document.getElementById('jwt-display');
+            jwtDisplay.textContent = token.substring(0, 20) + '...';
+
+            document.getElementById('copy-token').addEventListener('click', () => {
+                navigator.clipboard.writeText(token).then(() => {
+                    document.getElementById('copy-token').textContent = 'Copied!';
+                    setTimeout(() => { document.getElementById('copy-token').textContent = 'Copy'; }, 2000);
+                });
+            });
+
+            // Fetch account info
+            try {
+                const res = await fetch(`${API_BASE}/account/info`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('account-email').textContent = data.email || '';
+                    document.getElementById('account-tier').textContent = (data.tier || 'free').charAt(0).toUpperCase() + (data.tier || 'free').slice(1);
+                    if (data.tier === 'pro') {
+                        document.getElementById('plan-desc').textContent = 'Pro plan — cloud services enabled';
+                    } else if (data.tier === 'team') {
+                        document.getElementById('plan-desc').textContent = 'Team plan — collaboration enabled';
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch account info:', e);
+            }
+
+            // Fetch usage
+            try {
+                const res = await fetch(`${API_BASE}/account/usage`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('tokens-used').textContent = (data.total_tokens || 0).toLocaleString();
+                    document.getElementById('tokens-budget').textContent = (data.budget_tokens || 0).toLocaleString();
+                    const pct = data.budget_tokens > 0 ? Math.min(100, (data.total_tokens / data.budget_tokens) * 100) : 0;
+                    document.getElementById('usage-bar').style.width = pct + '%';
+                }
+            } catch (e) {
+                console.error('Failed to fetch usage:', e);
+            }
+        });
+
+        // Logout
+        document.getElementById('logout-btn')?.addEventListener('click', () => {
+            localStorage.removeItem('hive_access_token');
+            localStorage.removeItem('hive_refresh_token');
+            window.location.href = 'login.html';
+        });
+    </script>
+</body>
+</html>

@@ -300,6 +300,12 @@ pub struct HiveConfig {
     pub clawdtalk_enabled: bool,
     pub clawdtalk_bot_pin: Option<String>,
 
+    // Knowledge base integrations
+    #[serde(default)]
+    pub obsidian_vault_path: Option<String>,
+    #[serde(default)]
+    pub notion_api_key: Option<String>,
+
     // Local AI / Proxy
     pub ollama_url: String,
     pub lmstudio_url: String,
@@ -354,6 +360,16 @@ pub struct HiveConfig {
     pub slack_oauth_client_id: Option<String>,
     pub discord_oauth_client_id: Option<String>,
     pub telegram_oauth_client_id: Option<String>,
+
+    // Cloud / Hive Gateway
+    #[serde(default)]
+    pub cloud_api_url: Option<String>,
+    #[serde(default)]
+    pub cloud_relay_url: Option<String>,
+    #[serde(default)]
+    pub cloud_jwt: Option<String>,
+    #[serde(default)]
+    pub cloud_tier: Option<String>,
 
     // Remote control
     #[serde(default)]
@@ -423,10 +439,16 @@ impl Default for HiveConfig {
             shield: hive_shield::ShieldConfig::default(),
             xai_api_key: None,
             mistral_api_key: None,
+            cloud_api_url: None,
+            cloud_relay_url: None,
+            cloud_jwt: None,
+            cloud_tier: None,
             remote_enabled: false,
             remote_local_port: default_remote_local_port(),
             remote_web_port: default_remote_web_port(),
             remote_auto_start: false,
+            obsidian_vault_path: None,
+            notion_api_key: None,
         }
     }
 }
