@@ -43,7 +43,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 
 ### Development Excellence
 - Multi-agent swarm (Queen + teams)
-- 10 AI providers with capability-aware routing
+- 15 AI providers with capability-aware routing
 - **LanceDB vector memory** (chunks + durable memories)
 - **Embedding providers** (OpenAI + Ollama)
 - **Background code indexing** with change detection
@@ -130,7 +130,7 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 
 ### AI Providers
 
-11 providers with **capability-aware routing** and fallback:
+15 providers with **capability-aware routing** and fallback:
 
 | Cloud | Local |
 |---|---|
@@ -139,10 +139,14 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 | Google (Gemini) | Generic OpenAI-compatible |
 | OpenRouter (100+ models) | LiteLLM proxy |
 | Groq (fast inference) | |
-| HuggingFace | |
+| xAI (Grok) | |
 | Venice AI | |
+| Mistral | |
+| Doubao | |
+| HuggingFace | |
+| HiveGateway (cloud proxy) | |
 
-Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding.
+Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding. Venice uses OpenAI-compatible SSE streaming via `/api/v1/chat/completions`.
 
 ### Streaming
 

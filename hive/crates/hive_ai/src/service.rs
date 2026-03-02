@@ -16,6 +16,7 @@ use crate::providers::gemini::GeminiProvider;
 use crate::providers::generic_local::GenericLocalProvider;
 use crate::providers::groq::GroqProvider;
 use crate::providers::mistral::MistralProvider;
+use crate::providers::venice::VeniceProvider;
 use crate::providers::xai::XaiProvider;
 use crate::providers::huggingface::HuggingFaceProvider;
 use crate::providers::litellm::LiteLLMProvider;
@@ -44,6 +45,7 @@ pub struct AiServiceConfig {
     pub huggingface_api_key: Option<String>,
     pub xai_api_key: Option<String>,
     pub mistral_api_key: Option<String>,
+    pub venice_api_key: Option<String>,
     pub litellm_url: Option<String>,
     pub litellm_api_key: Option<String>,
     pub ollama_url: String,
@@ -139,6 +141,15 @@ impl AiService {
                     Arc::new(MistralProvider::new(key.clone())),
                 );
                 info!("Mistral provider registered");
+            }
+            if let Some(ref key) = config.venice_api_key
+                && !key.is_empty()
+            {
+                providers.insert(
+                    ProviderType::Venice,
+                    Arc::new(VeniceProvider::new(key.clone())),
+                );
+                info!("Venice provider registered");
             }
         }
 
@@ -585,6 +596,7 @@ fn map_router_provider(rp: crate::routing::ProviderType) -> ProviderType {
         crate::routing::ProviderType::XAI => ProviderType::XAI,
         crate::routing::ProviderType::Mistral => ProviderType::Mistral,
         crate::routing::ProviderType::Doubao => ProviderType::Doubao,
+        crate::routing::ProviderType::Venice => ProviderType::Venice,
         crate::routing::ProviderType::HiveGateway => ProviderType::HiveGateway,
     }
 }
@@ -604,6 +616,7 @@ fn map_to_router_provider(pt: ProviderType) -> crate::routing::ProviderType {
         ProviderType::XAI => crate::routing::ProviderType::XAI,
         ProviderType::Mistral => crate::routing::ProviderType::Mistral,
         ProviderType::Doubao => crate::routing::ProviderType::Doubao,
+        ProviderType::Venice => crate::routing::ProviderType::Venice,
         ProviderType::HiveGateway => crate::routing::ProviderType::HiveGateway,
     }
 }
@@ -626,6 +639,7 @@ mod tests {
             groq_api_key: None,
             xai_api_key: None,
             mistral_api_key: None,
+            venice_api_key: None,
             huggingface_api_key: None,
             litellm_url: None,
             litellm_api_key: None,

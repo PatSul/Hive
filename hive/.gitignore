@@ -1,1 +1,9 @@
 /target/
+
+# Root-level temp/debug files (from dev sessions)
+/*.txt
+/*.png
+/*.json
+/*.ps1
+/*.py
+/test_runner.rs

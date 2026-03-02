@@ -375,6 +375,9 @@ impl HiveWorkspace {
             if cfg.mistral_api_key.is_some() {
                 providers.insert(hive_ai::types::ProviderType::Mistral);
             }
+            if cfg.venice_api_key.is_some() {
+                providers.insert(hive_ai::types::ProviderType::Venice);
+            }
             if cfg.groq_api_key.is_some() {
                 providers.insert(hive_ai::types::ProviderType::Groq);
             }

@@ -193,6 +193,7 @@ const KEY_ELEVENLABS: &str = "api_key_elevenlabs";
 const KEY_TELNYX: &str = "api_key_telnyx";
 const KEY_XAI: &str = "api_key_xai";
 const KEY_MISTRAL: &str = "api_key_mistral";
+const KEY_VENICE: &str = "api_key_venice";
 
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
@@ -353,6 +354,10 @@ pub struct HiveConfig {
     #[serde(skip)]
     pub mistral_api_key: Option<String>,
 
+    // Venice
+    #[serde(skip)]
+    pub venice_api_key: Option<String>,
+
     // OAuth client IDs — user-provided per-platform
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,
@@ -439,6 +444,7 @@ impl Default for HiveConfig {
             shield: hive_shield::ShieldConfig::default(),
             xai_api_key: None,
             mistral_api_key: None,
+            venice_api_key: None,
             cloud_api_url: None,
             cloud_relay_url: None,
             cloud_jwt: None,
@@ -738,6 +744,7 @@ impl ConfigManager {
             config.telnyx_api_key = get_secure_key(ss, &key_map, KEY_TELNYX);
             config.xai_api_key = get_secure_key(ss, &key_map, KEY_XAI);
             config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
+            config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
         }
     }
 
@@ -772,6 +779,7 @@ impl ConfigManager {
             "telnyx" => config.telnyx_api_key.clone(),
             "xai" => config.xai_api_key.clone(),
             "mistral" => config.mistral_api_key.clone(),
+            "venice" => config.venice_api_key.clone(),
             _ => None,
         }
     }
@@ -793,6 +801,7 @@ impl ConfigManager {
                 "telnyx" => config.telnyx_api_key = key.clone(),
                 "xai" => config.xai_api_key = key.clone(),
                 "mistral" => config.mistral_api_key = key.clone(),
+                "venice" => config.venice_api_key = key.clone(),
                 _ => anyhow::bail!("Unknown provider: {provider}"),
             }
         }
@@ -824,6 +833,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_TELNYX, &config.telnyx_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_XAI, &config.xai_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         save_key_map(&self.keys_path, &key_map)
     }
 
@@ -898,6 +908,7 @@ impl ConfigManager {
         ("telnyx", KEY_TELNYX),
         ("xai", KEY_XAI),
         ("mistral", KEY_MISTRAL),
+        ("venice", KEY_VENICE),
     ];
 
     /// Export all configuration (including secrets) as a password-encrypted blob.

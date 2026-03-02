@@ -23,6 +23,8 @@ pub mod openai_catalog;
 pub(crate) mod openai_sse;
 pub mod openrouter;
 pub mod openrouter_catalog;
+pub mod venice;
+pub mod venice_catalog;
 pub mod xai;
 pub mod xai_catalog;
 pub mod hive_gateway;

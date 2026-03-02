@@ -168,6 +168,7 @@ pub enum ProviderType {
     XAI,
     Mistral,
     Doubao,
+    Venice,
     HiveGateway,
 }
 
@@ -187,6 +188,7 @@ impl std::fmt::Display for ProviderType {
             Self::XAI => write!(f, "xai"),
             Self::Mistral => write!(f, "mistral"),
             Self::Doubao => write!(f, "doubao"),
+            Self::Venice => write!(f, "venice"),
             Self::HiveGateway => write!(f, "hive_gateway"),
         }
     }
