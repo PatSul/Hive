@@ -1,6 +1,6 @@
 [package]
 name = "hive_admin"
-version = "0.3.15"
+version = "0.3.16"
 edition = "2021"
 description = "Hive Cloud admin terminal dashboard"
 
