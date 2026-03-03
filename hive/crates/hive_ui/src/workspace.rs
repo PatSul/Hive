@@ -2,6 +2,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{Icon, IconName};
 use gpui_component::scroll::ScrollableElement;
+use gpui_component::theme::Theme as GpuiTheme;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -208,6 +209,7 @@ impl HiveWorkspace {
             Self::resolve_theme_by_name(&theme_name)
         };
         cx.set_global(AppTheme(theme.clone()));
+        Self::sync_gpui_theme(&theme, cx);
 
         // Read default model from config if available.
         let default_model = if cx.has_global::<AppConfig>() {
@@ -591,6 +593,18 @@ impl HiveWorkspace {
         // Always enforce text/bg contrast regardless of theme source.
         theme.ensure_contrast();
         theme
+    }
+
+    /// Sync HiveTheme text/background colors into gpui-component's Theme global
+    /// so that built-in components (Input, etc.) render with correct colors.
+    fn sync_gpui_theme(theme: &HiveTheme, cx: &mut App) {
+        if cx.has_global::<GpuiTheme>() {
+            let gpui_theme = GpuiTheme::global_mut(cx);
+            gpui_theme.foreground = theme.text_primary;
+            gpui_theme.muted_foreground = theme.text_muted;
+            gpui_theme.background = theme.bg_primary;
+            gpui_theme.input = theme.bg_surface;
+        }
     }
 
     fn resolve_project_root_from_session(session: &SessionState) -> PathBuf {
@@ -1955,56 +1969,12 @@ impl HiveWorkspace {
                 }
             }
 
-            // Pull from HiveMemory (LanceDB vector search)
-            // Chunks go into all_context for ContextEngine curation;
-            // Durable memories are kept separate for a dedicated system message.
-            let mut memory_context = String::new();
-            if cx.has_global::<AppHiveMemory>() {
-                let hive_mem = cx.global::<AppHiveMemory>().0.clone();
-                let query = user_query_text.clone();
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build();
-                if let Ok(rt) = rt {
-                    if let Ok(mem) = hive_mem.lock() {
-                        if let Ok(result) = rt.block_on(mem.query(&query, 5)) {
-                            for chunk in &result.chunks {
-                                all_context.push_str(&format!(
-                                    "// From {}\n{}\n\n",
-                                    chunk.source_file, chunk.content
-                                ));
-                            }
-                            for mem_result in &result.memories {
-                                memory_context.push_str(&format!(
-                                    "- {} (importance: {:.0}, category: {})\n",
-                                    mem_result.content,
-                                    mem_result.importance,
-                                    mem_result.category
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Pull from Knowledge Hub (Obsidian vaults + Notion workspaces)
-            if cx.has_global::<AppKnowledge>() {
-                let kb = cx.global::<AppKnowledge>().0.clone();
-                if kb.provider_count() > 0 {
-                    let query = user_query_text.clone();
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build();
-                    if let Ok(rt) = rt {
-                        let kb_context = rt.block_on(kb.get_context_all(&query));
-                        if !kb_context.trim().is_empty() {
-                            all_context.push_str("# Knowledge Base Context\n\n");
-                            all_context.push_str(&kb_context);
-                            all_context.push_str("\n\n");
-                        }
-                    }
-                }
-            }
+            // HiveMemory (LanceDB) and Knowledge Hub queries are async and
+            // cannot safely block_on() the GPUI UI thread. Context from RAG
+            // and ContextEngine (synchronous) is still injected below.
+            // TODO: move HiveMemory + KnowledgeHub queries into the async
+            //       spawn block so they run off the UI thread.
+            let memory_context = String::new();
 
             // For now, we seed the ContextEngine with whatever RAG found, plus we can index the current directory.
             if cx.has_global::<AppContextEngine>() {
@@ -6306,6 +6276,7 @@ impl HiveWorkspace {
 
         // Update the global so child views can read the new theme.
         cx.set_global(AppTheme(new_theme.clone()));
+        Self::sync_gpui_theme(&new_theme, cx);
 
         // Persist the theme name to config.
         if cx.has_global::<AppConfig>() {
