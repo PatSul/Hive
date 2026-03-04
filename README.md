@@ -15,10 +15,10 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.14-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.15-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-3%2C500%2B-brightgreen" alt="Tests" />
-  <img src="https://img.shields.io/badge/crates-19-blue" alt="Crates" />
+  <img src="https://img.shields.io/badge/crates-20-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-0-brightgreen" alt="Warnings" />
   <img src="https://img.shields.io/badge/lines-177k%2B-informational" alt="Lines of Rust" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
@@ -531,7 +531,7 @@ On startup, Hive automatically backfills any JSON-only conversations into SQLite
 
 ---
 
-## Architecture — 19-Crate Workspace
+## Architecture — 20-Crate Workspace
 
 ```
 hive/crates/
@@ -573,6 +573,8 @@ hive/crates/
 │                      11 files · 2,765 lines
 ├── hive_remote        Background daemon, WebSocket relay, QR pairing, web UI, REST API
 │                      9 files · 943 lines  (+ 1,916 lines tests)
+├── hive_cloud         Cloud Axum backend, WebSocket Relay Hub, JWT Auth, Stripe billing
+│                      4 files · 300+ lines [binary: hive_cloud]
 ├── hive_admin         Cloud admin TUI dashboard (6 tabs: dashboard, users, gateway, relay, sync, teams)
 │                      11 files · 905 lines  [binary: hive-admin]
 └── hive_cli           Terminal AI client (chat, sync, config, models, login, remote, status)
@@ -600,6 +602,7 @@ hive_app
         └── hive_remote ──── hive_core, hive_ai, hive_agents, hive_network
 
 hive_admin (standalone binary)
+hive_cloud (standalone binary) ── hive_core, hive_remote
 hive_cli   (standalone binary) ── hive_core
 ```
 
@@ -778,10 +781,10 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.14 |
-| Crates | 19 |
-| Rust source files | 371 |
-| Lines of Rust | 177,455 |
+| Version | 0.3.15 |
+| Crates | 20 |
+| Rust source files | 375 |
+| Lines of Rust | 180,600+ |
 | Tests | 3,500+ |
 | Compiler warnings | 0 |
 | Clippy warnings | 0 |
@@ -792,6 +795,15 @@ Configure provider preferences, model routing rules, budget limits, and security
 ---
 
 ## Changelog
+
+### v0.3.15
+
+**Hive Cloud Backend + Live Task Tree GPUI**
+
+- **Cloud Foundation** (`hive_cloud`) — New centralized Axum backend for web-based relay, federated authentication (JWT), and subscription administration (Stripe).
+- **Cloud Relay Hub** — WebSocket hub in `hive-cloud` for real-time E2E message routing between nodes. Replaces P2P LAN limitations with true remote web connectivity.
+- **Relay Client Integration** — `hive_remote` updated to authenticate against `hive_cloud` via JWT for secure relay tunneling.
+- **Live Task Tree UI** — New hierarchical, collapsible `TaskTreeView` GPUI component. Coordinator now emits `TaskEvent`s (Started, Progress, Completed, Failed) natively, enabling beautiful "parallel wave" visualizations for multi-agent execution.
 
 ### v0.3.14
 
