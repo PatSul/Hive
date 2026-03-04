@@ -18,6 +18,7 @@ use hive_agents::specs::SpecManager;
 use crate::theme::HiveTheme;
 use hive_ai::context_engine::ContextEngine;
 use hive_ai::memory::HiveMemory;
+use hive_ai::quick_index::QuickIndex;
 use hive_ai::rag::RagService;
 use hive_ai::semantic_search::SemanticSearchService;
 use hive_ai::service::AiService;
@@ -248,5 +249,22 @@ pub struct AppCompetenceDetector(pub Arc<Mutex<CompetenceDetector>>);
 impl Global for AppCompetenceDetector {}
 
 /// Global wrapper for HiveMemory (LanceDB-backed vector embeddings + chunking).
-pub struct AppHiveMemory(pub Arc<Mutex<HiveMemory>>);
+/// Uses `tokio::sync::Mutex` so the guard can be held across `.await` points
+/// (HiveMemory's methods are all async).
+pub struct AppHiveMemory(pub Arc<tokio::sync::Mutex<HiveMemory>>);
 impl Global for AppHiveMemory {}
+
+/// Global wrapper for project knowledge files (HIVE.md, README.md, etc.).
+///
+/// Populated by `KnowledgeFileScanner::scan()` when the workspace opens or
+/// switches project roots. Re-scanned on each chat message for freshness.
+pub struct AppKnowledgeFiles(pub Vec<hive_ai::knowledge_files::KnowledgeSource>);
+impl Global for AppKnowledgeFiles {}
+
+/// Global wrapper for the fast-path project index.
+///
+/// Built synchronously on project open (<3 seconds). Provides immediate
+/// project context (file tree, symbols, deps, git log) for AI queries
+/// while the deeper RAG/vector index runs in the background.
+pub struct AppQuickIndex(pub Arc<QuickIndex>);
+impl Global for AppQuickIndex {}

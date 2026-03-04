@@ -6,6 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use gpui::*;
+use gpui_component::{Icon, IconName};
+use hive_ui_core::{AppTheme, HiveTheme};
+
 use hive_agents::TaskEventInfo;
 
 // ---------------------------------------------------------------------------
@@ -148,3 +152,166 @@ impl TaskTreeState {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// GPUI View
+// ---------------------------------------------------------------------------
+
+pub struct TaskTreeView {
+    pub state: TaskTreeState,
+}
+
+impl TaskTreeView {
+    pub fn new(state: TaskTreeState) -> Self {
+        Self { state }
+    }
+}
+
+impl Render for TaskTreeView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
+        } else {
+            HiveTheme::dark()
+        };
+
+        // Render header
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .w_full()
+            .p(theme.space_2)
+            .bg(theme.bg_surface)
+            .rounded(theme.radius_sm)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(theme.space_2)
+                    .child(
+                        Icon::new(if self.state.collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .size_4()
+                        .text_color(theme.text_muted),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_sm)
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(theme.text_primary)
+                            .child(self.state.title.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(format!("{:.1}%", self.state.progress() * 100.0)),
+            );
+
+        if self.state.collapsed {
+            return div().w_full().child(header);
+        }
+
+        // Render tasks in a parallel wave list format
+        let tasks_list = self.state.tasks.iter().map(|task| {
+            let (icon, color) = match &task.status {
+                TaskDisplayStatus::Pending => (IconName::Info, theme.text_muted),
+                TaskDisplayStatus::Running => (IconName::Loader, theme.accent_cyan),
+                TaskDisplayStatus::Completed => (IconName::CircleCheck, theme.accent_green),
+                TaskDisplayStatus::Failed(_) => (IconName::CircleX, theme.accent_red),
+            };
+
+            let row = div()
+                .flex()
+                .items_center()
+                .w_full()
+                .p(theme.space_2)
+                .gap(theme.space_3)
+                .bg(theme.bg_secondary)
+                .child(Icon::new(icon).size_4().text_color(color))
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .text_size(theme.font_size_sm)
+                                .text_color(theme.text_primary)
+                                .child(task.description.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .gap(theme.space_2)
+                                .text_size(theme.font_size_xs)
+                                .text_color(theme.text_muted)
+                                .child(format!("@{}", task.persona))
+                                .children(task.duration_ms.map(|ms| format!("{}ms", ms)))
+                                .children(task.cost.map(|c| format!("${:.4}", c))),
+                        ),
+                );
+
+            if task.expanded {
+                if let Some(err) = match &task.status {
+                    TaskDisplayStatus::Failed(e) => Some(e.clone()),
+                    _ => None,
+                } {
+                    div()
+                        .w_full()
+                        .flex_col()
+                        .child(row)
+                        .child(
+                            div()
+                                .w_full()
+                                .p(theme.space_2)
+                                .text_size(theme.font_size_xs)
+                                .text_color(theme.accent_red)
+                                .bg(theme.bg_surface)
+                                .child(err),
+                        )
+                } else if let Some(preview) = &task.output_preview {
+                    div()
+                        .w_full()
+                        .flex_col()
+                        .child(row)
+                        .child(
+                            div()
+                                .w_full()
+                                .p(theme.space_2)
+                                .text_size(theme.font_size_xs)
+                                .text_color(theme.text_muted)
+                                .bg(theme.bg_surface)
+                                .child(preview.clone()),
+                        )
+                } else {
+                    row
+                }
+            } else {
+                row
+            }
+        });
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(theme.space_1)
+            .child(header)
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .pl(theme.space_4) // Indent the subtasks
+                    .gap(theme.space_1)
+                    .children(tasks_list),
+            )
+    }
+}
+

@@ -24,6 +24,7 @@ chrono.workspace = true
 tracing.workspace = true
 regex.workspace = true
 parking_lot.workspace = true
+git2.workspace = true
 
 lancedb = "0.26"
 arrow-array = "57"

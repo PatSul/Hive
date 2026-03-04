@@ -46,6 +46,8 @@ pub enum SourceType {
     Pattern,
     /// Learned user preferences injected as context.
     LearnedPreference,
+    /// Project knowledge files (HIVE.md, README.md, etc.).
+    ProjectKnowledge,
 }
 
 /// A single context source with its content and metadata.
@@ -189,6 +191,19 @@ impl ContextEngine {
             path: "learned::preferences".to_string(),
             content: preferences_text.to_string(),
             source_type: SourceType::LearnedPreference,
+            last_modified: Utc::now(),
+        });
+    }
+
+    /// Add a project knowledge file (HIVE.md, README.md, etc.) as a context source.
+    pub fn add_project_knowledge(&mut self, label: &str, content: &str) {
+        if content.is_empty() {
+            return;
+        }
+        self.add_source(ContextSource {
+            path: format!("knowledge::{}", label),
+            content: content.to_string(),
+            source_type: SourceType::ProjectKnowledge,
             last_modified: Utc::now(),
         });
     }
@@ -453,6 +468,12 @@ impl ContextEngine {
         if source.source_type == SourceType::Test && looks_like_code_query {
             score += 0.1;
             reasons.push("test file for code query (+0.1)".to_string());
+        }
+
+        // Boost: project knowledge files always rank highly (+1.0).
+        if source.source_type == SourceType::ProjectKnowledge {
+            score += 1.0;
+            reasons.push("project knowledge file (+1.0)".to_string());
         }
 
         RelevanceScore {
@@ -797,6 +818,9 @@ mod tests {
             SourceType::Dependency,
             SourceType::Config,
             SourceType::Test,
+            SourceType::Pattern,
+            SourceType::LearnedPreference,
+            SourceType::ProjectKnowledge,
         ];
 
         for variant in &variants {
