@@ -6,3 +6,4 @@ pub mod web_api;
 pub mod pairing;
 pub mod qr;
 pub mod protocol;
+pub mod client;

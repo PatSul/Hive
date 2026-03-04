@@ -278,7 +278,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             )) {
                 Ok(memory) => {
                     cx.set_global(AppHiveMemory(std::sync::Arc::new(
-                        std::sync::Mutex::new(memory),
+                        tokio::sync::Mutex::new(memory),
                     )));
                     info!("HiveMemory initialized (LanceDB)");
                 }
