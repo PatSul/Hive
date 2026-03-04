@@ -25,8 +25,9 @@ use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppKnowledge,
-    AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications, AppPersonas, AppSkillManager,
-    AppRagService, AppContextEngine, AppSecurity, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
+    AppKnowledgeFiles, AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications,
+    AppPersonas, AppQuickIndex, AppSkillManager, AppRagService, AppContextEngine, AppSecurity,
+    AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
     // Types
     HiveTheme, Panel, Sidebar,
 };
@@ -99,6 +100,68 @@ use crate::titlebar::Titlebar;
 // ---------------------------------------------------------------------------
 // Workspace
 // ---------------------------------------------------------------------------
+
+/// Async helper: query HiveMemory + KnowledgeHub off the UI thread and inject
+/// the results as system messages into a [`ChatRequest`].  Falls back silently
+/// if either service is unavailable or returns an error.
+async fn enrich_request_with_memory(
+    request: &mut ChatRequest,
+    hive_mem: &Option<std::sync::Arc<tokio::sync::Mutex<hive_ai::memory::HiveMemory>>>,
+    knowledge_hub: &Option<std::sync::Arc<hive_integrations::knowledge::KnowledgeHub>>,
+    query_text: &str,
+) {
+    let mut extra_context = String::new();
+    let mut memory_ctx = String::new();
+
+    // Query HiveMemory (LanceDB vector store)
+    if let Some(ref hm) = *hive_mem {
+        let mem = hm.lock().await;
+        if let Ok(result) = mem.query(query_text, 5).await {
+            for chunk in &result.chunks {
+                extra_context.push_str(&format!(
+                    "// From {}\n{}\n\n",
+                    chunk.source_file, chunk.content
+                ));
+            }
+            for mem_result in &result.memories {
+                memory_ctx.push_str(&format!(
+                    "- {} (importance: {:.0}, category: {})\n",
+                    mem_result.content, mem_result.importance, mem_result.category
+                ));
+            }
+        }
+    }
+
+    // Query KnowledgeHub (Obsidian, Notion, etc.)
+    if let Some(ref kb) = *knowledge_hub {
+        let kb_context = kb.get_context_all(query_text).await;
+        if !kb_context.trim().is_empty() {
+            extra_context.push_str("# Knowledge Base Context\n\n");
+            extra_context.push_str(&kb_context);
+            extra_context.push_str("\n\n");
+        }
+    }
+
+    // Inject memory context as system messages
+    if !memory_ctx.is_empty() {
+        request.messages.insert(0, hive_ai::types::ChatMessage {
+            role: hive_ai::types::MessageRole::System,
+            content: format!("## Recalled Memories\n\n{}", memory_ctx),
+            timestamp: chrono::Utc::now(),
+            tool_call_id: None,
+            tool_calls: None,
+        });
+    }
+    if !extra_context.is_empty() {
+        request.messages.insert(0, hive_ai::types::ChatMessage {
+            role: hive_ai::types::MessageRole::System,
+            content: format!("## Additional Context\n\n{}", extra_context),
+            timestamp: chrono::Utc::now(),
+            tool_call_id: None,
+            tool_calls: None,
+        });
+    }
+}
 
 /// Helper types for background assistant data fetching.
 #[derive(Debug)]
@@ -306,6 +369,29 @@ impl HiveWorkspace {
             project_name,
             project_root.display()
         );
+
+        // Scan for project knowledge files (HIVE.md, README.md, etc.) and
+        // store them as a global for injection into the AI context window.
+        let knowledge_sources = hive_ai::KnowledgeFileScanner::scan(&project_root);
+        if !knowledge_sources.is_empty() {
+            info!(
+                "Loaded {} project knowledge file(s) from {}",
+                knowledge_sources.len(),
+                project_root.display()
+            );
+        }
+        cx.set_global(AppKnowledgeFiles(knowledge_sources));
+
+        // Build the fast-path project index (<3s) for immediate AI context.
+        let quick_index = hive_ai::quick_index::QuickIndex::build(&project_root);
+        info!(
+            "QuickIndex: {} files, {} symbols, {} deps in {:?}",
+            quick_index.file_tree.total_files,
+            quick_index.key_symbols.len(),
+            quick_index.dependencies.len(),
+            quick_index.indexed_at.elapsed()
+        );
+        cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
 
         // Create the interactive chat input entity.
         let chat_input = cx.new(|cx| ChatInputView::new(window, cx));
@@ -717,6 +803,28 @@ impl HiveWorkspace {
             self.status_bar.active_project = self.project_label();
             self.session_dirty = true;
             self.save_session(cx);
+
+            // Re-scan knowledge files for the new project root.
+            let knowledge_sources = hive_ai::KnowledgeFileScanner::scan(&self.current_project_root);
+            if !knowledge_sources.is_empty() {
+                info!(
+                    "Re-scanned {} project knowledge file(s) for {}",
+                    knowledge_sources.len(),
+                    self.current_project_root.display()
+                );
+            }
+            cx.set_global(AppKnowledgeFiles(knowledge_sources));
+
+            // Rebuild the fast-path project index for the new project root.
+            let quick_index = hive_ai::quick_index::QuickIndex::build(&self.current_project_root);
+            info!(
+                "QuickIndex rebuilt: {} files, {} symbols, {} deps",
+                quick_index.file_tree.total_files,
+                quick_index.key_symbols.len(),
+                quick_index.dependencies.len()
+            );
+            cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
+
             cx.notify();
         } else if self.current_project_name.is_empty() {
             self.current_project_name = Self::project_name_from_path(&self.current_project_root);
@@ -753,25 +861,24 @@ impl HiveWorkspace {
                                 &project_root,
                             );
                             let path_str = project_root.to_string_lossy().to_string();
-                            if let Ok(mem) = hive_mem.lock() {
-                                let mut count = 0usize;
-                                for entry_path in &entries {
-                                    if let Ok(content) = std::fs::read_to_string(entry_path) {
-                                        let rel = entry_path
-                                            .strip_prefix(&project_root)
-                                            .unwrap_or(entry_path)
-                                            .to_string_lossy()
-                                            .to_string();
-                                        if mem.index_file(&rel, &content).await.is_ok() {
-                                            count += 1;
-                                        }
+                            let mem = hive_mem.lock().await;
+                            let mut count = 0usize;
+                            for entry_path in &entries {
+                                if let Ok(content) = std::fs::read_to_string(entry_path) {
+                                    let rel = entry_path
+                                        .strip_prefix(&project_root)
+                                        .unwrap_or(entry_path)
+                                        .to_string_lossy()
+                                        .to_string();
+                                    if mem.index_file(&rel, &content).await.is_ok() {
+                                        count += 1;
                                     }
                                 }
-                                info!(
-                                    "Background indexer: indexed {count}/{} files from {path_str}",
-                                    entries.len()
-                                );
                             }
+                            info!(
+                                "Background indexer: indexed {count}/{} files from {path_str}",
+                                entries.len()
+                            );
                         });
                     }
                 })
@@ -1969,11 +2076,9 @@ impl HiveWorkspace {
                 }
             }
 
-            // HiveMemory (LanceDB) and Knowledge Hub queries are async and
-            // cannot safely block_on() the GPUI UI thread. Context from RAG
-            // and ContextEngine (synchronous) is still injected below.
-            // TODO: move HiveMemory + KnowledgeHub queries into the async
-            //       spawn block so they run off the UI thread.
+            // HiveMemory + KnowledgeHub are async — queried in the spawn
+            // blocks below. memory_context stays empty here; the real
+            // enrichment happens off the UI thread via enrich_request().
             let memory_context = String::new();
 
             // For now, we seed the ContextEngine with whatever RAG found, plus we can index the current directory.
@@ -1983,7 +2088,18 @@ impl HiveWorkspace {
                     if !all_context.is_empty() {
                         ctx_engine.add_file("rag_results.txt", &all_context);
                     }
-                    
+
+                    // Seed engine with project knowledge files so they
+                    // participate in TF-IDF scoring alongside RAG results.
+                    if cx.has_global::<AppKnowledgeFiles>() {
+                        for ks in &cx.global::<AppKnowledgeFiles>().0 {
+                            let label = ks.path.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "knowledge".to_string());
+                            ctx_engine.add_project_knowledge(&label, &ks.content);
+                        }
+                    }
+
                     // Also attempt to add semantic search history? Or use it directly.
                     // For the sake of the wiring task, we use ContextEngine to curate.
                     let budget = hive_ai::context_engine::ContextBudget {
@@ -2002,6 +2118,58 @@ impl HiveWorkspace {
             }
 
             let mut augmented = ai_messages.clone();
+
+            // Inject project knowledge files (HIVE.md, README.md, etc.) as the
+            // highest-priority system context. Re-scan on each message for freshness.
+            {
+                let fresh_sources = hive_ai::KnowledgeFileScanner::scan(&self.current_project_root);
+                let knowledge_text = hive_ai::KnowledgeFileScanner::format_for_context(&fresh_sources);
+
+                // Update the global so other systems see the latest state.
+                cx.set_global(AppKnowledgeFiles(fresh_sources));
+
+                if !knowledge_text.trim().is_empty() {
+                    let kf_idx = augmented
+                        .iter()
+                        .position(|m| m.role != hive_ai::types::MessageRole::System)
+                        .unwrap_or(0);
+                    augmented.insert(
+                        kf_idx,
+                        hive_ai::types::ChatMessage {
+                            role: hive_ai::types::MessageRole::System,
+                            content: knowledge_text,
+                            timestamp: chrono::Utc::now(),
+                            tool_call_id: None,
+                            tool_calls: None,
+                        },
+                    );
+                }
+            }
+
+            // Inject fast-path project index as lightweight project context.
+            // This gives the AI immediate awareness of the project structure,
+            // key symbols, dependencies, and recent git activity -- available
+            // even before the deeper RAG index has populated.
+            if cx.has_global::<AppQuickIndex>() {
+                let quick_ctx = cx.global::<AppQuickIndex>().0.to_context_string();
+                if !quick_ctx.trim().is_empty() {
+                    let qi_idx = augmented
+                        .iter()
+                        .position(|m| m.role != hive_ai::types::MessageRole::System)
+                        .unwrap_or(0);
+                    augmented.insert(
+                        qi_idx,
+                        hive_ai::types::ChatMessage {
+                            role: hive_ai::types::MessageRole::System,
+                            content: quick_ctx,
+                            timestamp: chrono::Utc::now(),
+                            tool_call_id: None,
+                            tool_calls: None,
+                        },
+                    );
+                }
+            }
+
             let insert_idx = augmented
                 .iter()
                 .position(|m| m.role != hive_ai::types::MessageRole::System)
@@ -2170,6 +2338,22 @@ impl HiveWorkspace {
         let provider_for_loop = provider.clone();
         let request_for_loop = request.clone();
 
+        // Clone async-capable globals for capture by the spawn blocks.
+        let hive_mem_for_async: Option<std::sync::Arc<tokio::sync::Mutex<hive_ai::memory::HiveMemory>>> =
+            if cx.has_global::<AppHiveMemory>() {
+                Some(cx.global::<AppHiveMemory>().0.clone())
+            } else {
+                None
+            };
+        let knowledge_hub_for_async: Option<std::sync::Arc<hive_integrations::knowledge::KnowledgeHub>> =
+            if cx.has_global::<AppKnowledge>() {
+                let kb = cx.global::<AppKnowledge>().0.clone();
+                if kb.provider_count() > 0 { Some(kb) } else { None }
+            } else {
+                None
+            };
+        let query_for_memory = user_query_text.clone();
+
         let task = if use_speculative {
             // Speculative decoding path: dual-stream from draft + primary.
             let speculative_setup = cx.global::<AppAiService>().0.prepare_speculative_stream(
@@ -2180,9 +2364,16 @@ impl HiveWorkspace {
                 &spec_config,
             );
 
-            if let Some((draft_provider, draft_request, primary_provider, primary_request)) = speculative_setup {
+            if let Some((draft_provider, mut draft_request, primary_provider, mut primary_request)) = speculative_setup {
                 let spec_config_clone = spec_config.clone();
+                let hm = hive_mem_for_async.clone();
+                let kb = knowledge_hub_for_async.clone();
+                let qm = query_for_memory.clone();
                 cx.spawn(async move |_this, app: &mut AsyncApp| {
+                    // Enrich both draft and primary requests with memory/knowledge.
+                    enrich_request_with_memory(&mut draft_request, &hm, &kb, &qm).await;
+                    enrich_request_with_memory(&mut primary_request, &hm, &kb, &qm).await;
+
                     match speculative::speculative_stream(
                         draft_provider,
                         draft_request,
@@ -2250,8 +2441,11 @@ impl HiveWorkspace {
                         }
                         Err(e) => {
                             error!("Speculative stream error: {e}");
-                            // Fall back to normal stream
-                            match provider.stream_chat(&request).await {
+                            // Fall back to normal stream (already enriched via
+                            // the same hm/kb/qm captured by this spawn block).
+                            let mut fallback_req = request.clone();
+                            enrich_request_with_memory(&mut fallback_req, &hm, &kb, &qm).await;
+                            match provider.stream_chat(&fallback_req).await {
                                 Ok(rx) => {
                                     let _ = chat_svc.update(app, |svc, cx| {
                                         svc.attach_tool_stream(rx, model_for_attach, provider_for_loop, request_for_loop, cx);
@@ -2268,8 +2462,13 @@ impl HiveWorkspace {
                 })
             } else {
                 // Speculative setup failed, fall back to normal
+                let hm = hive_mem_for_async.clone();
+                let kb = knowledge_hub_for_async.clone();
+                let qm = query_for_memory.clone();
                 cx.spawn(async move |_this, app: &mut AsyncApp| {
-                    match provider.stream_chat(&request).await {
+                    let mut enriched_request = request.clone();
+                    enrich_request_with_memory(&mut enriched_request, &hm, &kb, &qm).await;
+                    match provider.stream_chat(&enriched_request).await {
                         Ok(rx) => {
                             let _ = chat_svc.update(app, |svc, cx| {
                                 svc.attach_tool_stream(rx, model_for_attach, provider_for_loop, request_for_loop, cx);
@@ -2287,7 +2486,14 @@ impl HiveWorkspace {
         } else {
             // Normal (non-speculative) path
             cx.spawn(async move |_this, app: &mut AsyncApp| {
-                match provider.stream_chat(&request).await {
+                let mut enriched_request = request.clone();
+                enrich_request_with_memory(
+                    &mut enriched_request,
+                    &hive_mem_for_async,
+                    &knowledge_hub_for_async,
+                    &query_for_memory,
+                ).await;
+                match provider.stream_chat(&enriched_request).await {
                     Ok(rx) => {
                         let _ = chat_svc.update(app, |svc, cx| {
                             svc.attach_tool_stream(

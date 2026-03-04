@@ -18,3 +18,4 @@ hive_network = { path = "../hive_network" }
 
 gpui.workspace = true
 gpui-component.workspace = true
+tokio = { workspace = true, features = ["sync"] }

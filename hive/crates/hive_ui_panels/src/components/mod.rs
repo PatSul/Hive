@@ -21,6 +21,6 @@ pub use model_selector::{ModelSelected, ModelSelectorView, render_model_badge};
 pub use split_pane::{PaneLayout, SplitDirection, TilingState, render_split_pane};
 pub use thinking_indicator::{ThinkingPhase, render_thinking_indicator};
 pub use toast::{ToastKind, render_toast};
-pub use task_tree::{TaskDisplay, TaskDisplayStatus, TaskTreeState};
+pub use task_tree::{TaskDisplay, TaskDisplayStatus, TaskTreeState, TaskTreeView};
 pub use wallet_card::render_wallet_card;
 pub use wizard_stepper::render_wizard_stepper;
