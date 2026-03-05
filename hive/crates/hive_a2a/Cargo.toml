@@ -34,3 +34,5 @@ hive_ai = { path = "../hive_ai" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+tower = { version = "0.5", features = ["util"] }
+http = "1"

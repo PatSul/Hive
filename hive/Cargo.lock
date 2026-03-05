@@ -5046,6 +5046,7 @@ dependencies = [
  "hive_agents",
  "hive_ai",
  "hive_core",
+ "http 1.4.0",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
