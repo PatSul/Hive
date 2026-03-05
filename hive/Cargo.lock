@@ -5054,6 +5054,7 @@ dependencies = [
  "toml 0.8.23",
  "tower",
  "tower-http",
+ "url",
  "uuid 1.20.0",
 ]
 
