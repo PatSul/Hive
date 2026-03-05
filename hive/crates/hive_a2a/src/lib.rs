@@ -14,6 +14,6 @@ pub mod agent_card;
 pub mod bridge;
 pub mod client;
 pub mod remote_agent;
-// pub mod task_handler;
+pub mod task_handler;
 // pub mod streaming;
 // pub mod server;
