@@ -741,6 +741,47 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         info!("Remote control daemon starting on port {}", config.remote_web_port);
     }
 
+    // A2A (Agent-to-Agent) protocol server — exposes Hive agents as A2A skills.
+    //
+    // Runs on a dedicated background thread with its own tokio runtime,
+    // following the same pattern as the P2P network and remote control daemon.
+    // Config is loaded from ~/.hive/a2a.toml (created with defaults on first run).
+    {
+        let a2a_config_path = HiveConfig::base_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))
+            .join("a2a.toml");
+
+        match hive_a2a::A2aConfig::load_or_create(&a2a_config_path) {
+            Ok(a2a_config) => {
+                if a2a_config.server.enabled {
+                    let bind_addr = a2a_config.bind_addr();
+
+                    std::thread::Builder::new()
+                        .name("hive-a2a".into())
+                        .spawn(move || {
+                            let rt = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .expect("A2A server tokio runtime");
+                            rt.block_on(async {
+                                if let Err(e) = hive_a2a::start_server(a2a_config).await {
+                                    error!("[A2A] Server error: {}", e);
+                                }
+                            });
+                        })
+                        .ok();
+
+                    info!("A2A server starting on {}", bind_addr);
+                } else {
+                    info!("A2A server disabled in config");
+                }
+            }
+            Err(e) => {
+                warn!("A2A config load failed (non-fatal): {}", e);
+            }
+        }
+    }
+
     Ok(())
 }
 

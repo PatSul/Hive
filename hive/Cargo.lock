@@ -5143,6 +5143,7 @@ dependencies = [
  "axum 0.8.8",
  "gpui",
  "gpui-component",
+ "hive_a2a",
  "hive_agents",
  "hive_ai",
  "hive_assistant",
