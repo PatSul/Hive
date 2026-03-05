@@ -11,7 +11,7 @@ pub mod auth;
 
 // Modules added in subsequent tasks:
 pub mod agent_card;
-// pub mod bridge;
+pub mod bridge;
 // pub mod task_handler;
 // pub mod streaming;
 // pub mod server;
