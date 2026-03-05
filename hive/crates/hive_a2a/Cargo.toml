@@ -1,0 +1,33 @@
+[package]
+name = "hive_a2a"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# A2A protocol
+a2a-rs = { version = "0.1", features = ["http-server", "http-client", "auth"] }
+
+# HTTP server + middleware
+axum = { version = "0.7", features = ["macros"] }
+tower = { version = "0.5", features = ["timeout", "limit"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
+# Workspace shared deps
+tokio = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Internal crates
+hive_agents = { path = "../hive_agents" }
+hive_core = { path = "../hive_core" }
+hive_ai = { path = "../hive_ai" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
