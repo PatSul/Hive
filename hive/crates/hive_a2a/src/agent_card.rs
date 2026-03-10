@@ -25,12 +25,8 @@ pub const SKILL_QUEEN: &str = "queen";
 pub const SKILL_SINGLE: &str = "single";
 
 /// All supported skill IDs in declaration order.
-pub const SUPPORTED_SKILLS: [&str; 4] = [
-    SKILL_HIVEMIND,
-    SKILL_COORDINATOR,
-    SKILL_QUEEN,
-    SKILL_SINGLE,
-];
+pub const SUPPORTED_SKILLS: [&str; 4] =
+    [SKILL_HIVEMIND, SKILL_COORDINATOR, SKILL_QUEEN, SKILL_SINGLE];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,7 +136,10 @@ pub fn build_hive_agent_info(config: &A2aConfig) -> SimpleAgentInfo {
              Coordinator, Queen, and Single-Agent orchestration over A2A."
                 .to_string(),
         )
-        .with_provider("AIrglow Studio".to_string(), "https://hivecode.app".to_string())
+        .with_provider(
+            "AIrglow Studio".to_string(),
+            "https://hivecode.app".to_string(),
+        )
         .with_version(env!("CARGO_PKG_VERSION").to_string())
         .with_streaming()
         .with_state_transition_history()

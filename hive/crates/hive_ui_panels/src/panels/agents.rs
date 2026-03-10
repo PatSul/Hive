@@ -1,7 +1,12 @@
 use gpui::*;
+use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
-use hive_ui_core::{AgentsReloadWorkflows, AgentsRunWorkflow};
+use hive_ui_core::{
+    AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents, AgentsReloadWorkflows,
+    AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent,
+    AgentsSelectRemoteSkill,
+};
 use hive_ui_core::HiveTheme;
 
 // ---------------------------------------------------------------------------
@@ -28,6 +33,7 @@ impl PersonaDisplay {
             "critique" => IconName::Info,
             "debug" => IconName::TriangleAlert,
             "code_review" => IconName::Eye,
+            "remote_a2a" => IconName::Globe,
             _ => IconName::Bot,
         }
     }
@@ -74,15 +80,46 @@ pub struct WorkflowDisplay {
     pub last_run: Option<String>,
 }
 
+/// Display information for a configured outbound A2A agent.
+#[derive(Debug, Clone)]
+pub struct RemoteAgentDisplay {
+    pub name: String,
+    pub url: String,
+    pub description: String,
+    pub discovered: bool,
+    pub api_key_configured: bool,
+    pub version: Option<String>,
+    pub skills: Vec<String>,
+}
+
+/// Display information for a remote A2A task run.
+#[derive(Debug, Clone)]
+pub struct RemoteTaskDisplay {
+    pub agent_name: String,
+    pub task_id: String,
+    pub state: String,
+    pub skill_id: Option<String>,
+    pub output: String,
+    pub completed_at: String,
+    pub error: Option<String>,
+}
+
 /// All data needed to render the agents panel.
 #[derive(Debug, Clone)]
 pub struct AgentsPanelData {
     pub personas: Vec<PersonaDisplay>,
+    pub remote_agents: Vec<RemoteAgentDisplay>,
+    pub selected_remote_agent: Option<String>,
+    pub selected_remote_skill: Option<String>,
+    pub remote_status: Option<String>,
+    pub remote_busy: bool,
+    pub remote_run_history: Vec<RemoteTaskDisplay>,
     pub workflows: Vec<WorkflowDisplay>,
     pub active_runs: Vec<RunDisplay>,
     pub run_history: Vec<RunDisplay>,
     pub workflow_source_dir: String,
     pub workflow_hint: Option<String>,
+    pub remote_hint: Option<String>,
 }
 
 impl AgentsPanelData {
@@ -90,11 +127,18 @@ impl AgentsPanelData {
     pub fn empty() -> Self {
         Self {
             personas: Vec::new(),
+            remote_agents: Vec::new(),
+            selected_remote_agent: None,
+            selected_remote_skill: None,
+            remote_status: None,
+            remote_busy: false,
+            remote_run_history: Vec::new(),
             workflows: Vec::new(),
             active_runs: Vec::new(),
             run_history: Vec::new(),
             workflow_source_dir: ".hive/workflows".into(),
             workflow_hint: None,
+            remote_hint: None,
         }
     }
 
@@ -152,6 +196,29 @@ impl AgentsPanelData {
                     active: false,
                 },
             ],
+            remote_agents: vec![RemoteAgentDisplay {
+                name: "Remote Builder".into(),
+                url: "http://localhost:8088".into(),
+                description: "Executes focused build and review tasks over A2A.".into(),
+                discovered: true,
+                api_key_configured: true,
+                version: Some("1.2.3".into()),
+                skills: vec!["build".into(), "review".into()],
+            }],
+            selected_remote_agent: Some("Remote Builder".into()),
+            selected_remote_skill: Some("review".into()),
+            remote_status: Some("1 remote agent ready for manual runs".into()),
+            remote_busy: false,
+            remote_run_history: vec![RemoteTaskDisplay {
+                agent_name: "Remote Builder".into(),
+                task_id: "remote-task-1".into(),
+                state: "Completed".into(),
+                skill_id: Some("review".into()),
+                output: "Reviewed the current patch set and returned a short finding summary."
+                    .into(),
+                completed_at: "2026-02-13 13:50".into(),
+                error: None,
+            }],
             workflows: vec![
                 WorkflowDisplay {
                     id: "builtin:hive-dogfood-v1".into(),
@@ -214,6 +281,7 @@ impl AgentsPanelData {
             ],
             workflow_source_dir: ".hive/workflows".into(),
             workflow_hint: Some("2 workflows loaded (1 active)".into()),
+            remote_hint: Some("Configured in ~/.hive/a2a.toml".into()),
         }
     }
 }
@@ -226,7 +294,11 @@ impl AgentsPanelData {
 pub struct AgentsPanel;
 
 impl AgentsPanel {
-    pub fn render(data: &AgentsPanelData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &AgentsPanelData,
+        remote_prompt_input: &Entity<InputState>,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         div()
             .id("agents-panel")
             .flex()
@@ -236,6 +308,7 @@ impl AgentsPanel {
             .p(theme.space_4)
             .gap(theme.space_4)
             .child(render_header(data, theme))
+            .child(render_remote_agents_section(data, remote_prompt_input, theme))
             .child(render_workflows_section(data, theme))
             .child(render_active_runs_section(&data.active_runs, theme))
             .child(render_run_history_section(&data.run_history, theme))
@@ -261,6 +334,7 @@ fn render_header(data: &AgentsPanelData, theme: &HiveTheme) -> AnyElement {
                 .child(header_icon(theme))
                 .child(header_title(theme))
                 .child(div().flex_1())
+                .child(refresh_remote_agents_button(theme))
                 .child(reload_workflows_button(theme)),
         )
         .child(
@@ -273,6 +347,29 @@ fn render_header(data: &AgentsPanelData, theme: &HiveTheme) -> AnyElement {
                     }),
                 ),
         )
+        .into_any_element()
+}
+
+fn refresh_remote_agents_button(theme: &HiveTheme) -> AnyElement {
+    div()
+        .id("agents-refresh-remote")
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(theme.space_3)
+        .py(theme.space_1)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .text_size(theme.font_size_sm)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.text_primary)
+        .hover(|style| style.bg(theme.bg_tertiary))
+        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+            window.dispatch_action(Box::new(AgentsRefreshRemoteAgents), cx);
+        })
+        .child("Refresh Remote Agents")
         .into_any_element()
 }
 
@@ -328,6 +425,669 @@ fn reload_workflows_button(theme: &HiveTheme) -> AnyElement {
             window.dispatch_action(Box::new(AgentsReloadWorkflows), cx);
         })
         .child("Reload Workflows")
+        .into_any_element()
+}
+
+// ---------------------------------------------------------------------------
+// Remote A2A Agents
+// ---------------------------------------------------------------------------
+
+fn render_remote_agents_section(
+    data: &AgentsPanelData,
+    remote_prompt_input: &Entity<InputState>,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .child(section_title("Remote A2A Agents", data.remote_agents.len(), theme));
+
+    if let Some(hint) = &data.remote_hint {
+        section = section.child(section_note(hint.clone(), theme));
+    }
+
+    if let Some(status) = &data.remote_status {
+        section = section.child(remote_status_banner(status, data.remote_busy, theme));
+    }
+
+    if data.remote_agents.is_empty() {
+        return section
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(theme.space_1)
+                    .p(theme.space_4)
+                    .rounded(theme.radius_md)
+                    .bg(theme.bg_surface)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .text_size(theme.font_size_sm)
+                            .text_color(theme.text_secondary)
+                            .child("No configured remote A2A agents."),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .child(
+                                "Add agent entries to ~/.hive/a2a.toml, then click Refresh Remote Agents.",
+                            ),
+                    ),
+            )
+            .into_any_element();
+    }
+
+    let mut list = div().flex().flex_col().gap(theme.space_2);
+    for agent in &data.remote_agents {
+        list = list.child(render_remote_agent_card(
+            agent,
+            data.selected_remote_agent.as_deref() == Some(agent.name.as_str()),
+            theme,
+        ));
+    }
+
+    section
+        .child(list)
+        .child(render_remote_prompt_card(data, remote_prompt_input, theme))
+        .child(render_remote_run_history_section(
+            &data.remote_run_history,
+            theme,
+        ))
+        .into_any_element()
+}
+
+fn render_remote_agent_card(
+    agent: &RemoteAgentDisplay,
+    selected: bool,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let border_color = if selected {
+        theme.accent_cyan
+    } else {
+        theme.border
+    };
+    let discover_color = if agent.discovered {
+        theme.accent_green
+    } else {
+        theme.accent_yellow
+    };
+    let select_agent_name = agent.name.clone();
+    let discover_agent_name = agent.name.clone();
+
+    let mut card = div()
+        .id(ElementId::Name(
+            format!("remote-agent-{}", agent.name.replace(' ', "-")).into(),
+        ))
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .p(theme.space_3)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(border_color)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(
+                    Icon::new(IconName::Globe)
+                        .size_4()
+                        .text_color(theme.accent_cyan),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_base)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(agent.name.clone()),
+                )
+                .child(
+                    div()
+                        .px(theme.space_2)
+                        .py(px(2.0))
+                        .rounded(theme.radius_full)
+                        .bg(theme.bg_primary)
+                        .text_size(theme.font_size_xs)
+                        .text_color(discover_color)
+                        .child(if agent.discovered {
+                            "Discovered"
+                        } else {
+                            "Needs Discovery"
+                        }),
+                )
+                .child(
+                    div()
+                        .px(theme.space_2)
+                        .py(px(2.0))
+                        .rounded(theme.radius_full)
+                        .bg(theme.bg_primary)
+                        .text_size(theme.font_size_xs)
+                        .text_color(if agent.api_key_configured {
+                            theme.accent_green
+                        } else {
+                            theme.text_muted
+                        })
+                        .child(if agent.api_key_configured {
+                            "Auth"
+                        } else {
+                            "No Key"
+                        }),
+                )
+                .child(div().flex_1())
+                .child(
+                    control_button(
+                        if selected { "Selected" } else { "Select" },
+                        if selected {
+                            theme.accent_green
+                        } else {
+                            theme.accent_aqua
+                        },
+                        theme.text_on_accent,
+                        move |_event, window, cx| {
+                            window.dispatch_action(
+                                Box::new(AgentsSelectRemoteAgent {
+                                    agent_name: select_agent_name.clone(),
+                                }),
+                                cx,
+                            );
+                        },
+                        theme,
+                    ),
+                )
+                .child(
+                    control_button(
+                        "Discover",
+                        theme.bg_primary,
+                        theme.text_primary,
+                        move |_event, window, cx| {
+                            window.dispatch_action(
+                                Box::new(AgentsDiscoverRemoteAgent {
+                                    agent_name: discover_agent_name.clone(),
+                                }),
+                                cx,
+                            );
+                        },
+                        theme,
+                    ),
+                ),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_sm)
+                .text_color(theme.text_secondary)
+                .child(agent.description.clone()),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(agent.url.clone()),
+        );
+
+    if let Some(version) = agent.version.as_ref() {
+        card = card.child(
+            div()
+                .px(theme.space_2)
+                .py(px(2.0))
+                .rounded(theme.radius_full)
+                .bg(theme.bg_primary)
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(format!("v{version}")),
+        );
+    }
+
+    if agent.skills.is_empty() {
+        card = card.child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child("No advertised skills yet. Discover the agent to refresh its card."),
+        );
+    } else {
+        let mut chips = div().flex().flex_row().flex_wrap().gap(theme.space_1);
+        for skill in &agent.skills {
+            chips = chips.child(
+                div()
+                    .px(theme.space_2)
+                    .py(px(2.0))
+                    .rounded(theme.radius_full)
+                    .bg(theme.bg_primary)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_secondary)
+                    .child(skill.clone()),
+            );
+        }
+        card = card.child(chips);
+    }
+
+    card.into_any_element()
+}
+
+fn render_remote_prompt_card(
+    data: &AgentsPanelData,
+    remote_prompt_input: &Entity<InputState>,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let Some(selected_agent_name) = data.selected_remote_agent.as_ref() else {
+        return div()
+            .flex()
+            .flex_col()
+            .gap(theme.space_2)
+            .p(theme.space_4)
+            .rounded(theme.radius_md)
+            .bg(theme.bg_surface)
+            .border_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.text_secondary)
+                    .child("Select a remote agent to run a task."),
+            )
+            .into_any_element();
+    };
+
+    let Some(selected_agent) = data
+        .remote_agents
+        .iter()
+        .find(|agent| agent.name == *selected_agent_name)
+    else {
+        return div().into_any_element();
+    };
+
+    let run_agent_name = selected_agent.name.clone();
+    let run_skill_id = data.selected_remote_skill.clone();
+    let run_busy = data.remote_busy;
+    let prompt_input_for_run = remote_prompt_input.clone();
+
+    let mut skill_row = div().flex().flex_row().flex_wrap().gap(theme.space_1);
+    skill_row = skill_row.child(render_skill_chip(
+        selected_agent.name.clone(),
+        None,
+        data.selected_remote_skill.is_none(),
+        theme,
+    ));
+    for skill in &selected_agent.skills {
+        skill_row = skill_row.child(render_skill_chip(
+            selected_agent.name.clone(),
+            Some(skill.clone()),
+            data.selected_remote_skill.as_deref() == Some(skill.as_str()),
+            theme,
+        ));
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .p(theme.space_4)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(
+                    div()
+                        .text_size(theme.font_size_base)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("Run {}", selected_agent.name)),
+                )
+                .child(
+                    div()
+                        .px(theme.space_2)
+                        .py(px(2.0))
+                        .rounded(theme.radius_full)
+                        .bg(theme.bg_primary)
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(if data.selected_remote_skill.is_some() {
+                            "Pinned skill"
+                        } else {
+                            "Auto skill"
+                        }),
+                ),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child("Prompt"),
+        )
+        .child(
+            Input::new(remote_prompt_input)
+                .text_size(theme.font_size_sm)
+                .cleanable(true),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child("Skill"),
+        )
+        .child(skill_row)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap(theme.space_3)
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(if selected_agent.discovered {
+                            "The task will use the cached agent card and selected skill."
+                        } else {
+                            "This agent has not been discovered yet. Run will discover it first."
+                        }),
+                )
+                .child(
+                    control_button(
+                        if run_busy { "Running..." } else { "Run Remote Task" },
+                        if run_busy {
+                            theme.bg_primary
+                        } else {
+                            theme.accent_cyan
+                        },
+                        if run_busy {
+                            theme.text_muted
+                        } else {
+                            theme.text_on_accent
+                        },
+                        move |_event, window, cx| {
+                            if run_busy {
+                                return;
+                            }
+                            let prompt = prompt_input_for_run.read(cx).value().to_string();
+                            window.dispatch_action(
+                                Box::new(AgentsRunRemoteAgent {
+                                    agent_name: run_agent_name.clone(),
+                                    prompt,
+                                    skill_id: run_skill_id.clone(),
+                                }),
+                                cx,
+                            );
+                        },
+                        theme,
+                    ),
+                ),
+        )
+        .into_any_element()
+}
+
+fn render_skill_chip(
+    agent_name: String,
+    skill_id: Option<String>,
+    selected: bool,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let chip_label = skill_id.clone().unwrap_or_else(|| "Auto".into());
+    div()
+        .id(ElementId::Name(
+            format!(
+                "remote-skill-{}-{}",
+                agent_name.replace(' ', "-"),
+                chip_label.replace(' ', "-")
+            )
+            .into(),
+        ))
+        .px(theme.space_2)
+        .py(px(3.0))
+        .rounded(theme.radius_full)
+        .bg(if selected {
+            theme.accent_aqua
+        } else {
+            theme.bg_primary
+        })
+        .text_size(theme.font_size_xs)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(if selected {
+            theme.text_on_accent
+        } else {
+            theme.text_secondary
+        })
+        .hover(|style| {
+            if selected {
+                style.bg(theme.accent_cyan)
+            } else {
+                style.bg(theme.bg_tertiary)
+            }
+        })
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(AgentsSelectRemoteSkill {
+                    agent_name: agent_name.clone(),
+                    skill_id: skill_id.clone(),
+                }),
+                cx,
+            );
+        })
+        .child(chip_label)
+        .into_any_element()
+}
+
+fn render_remote_run_history_section(
+    runs: &[RemoteTaskDisplay],
+    theme: &HiveTheme,
+) -> AnyElement {
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .child(section_title("Recent Remote Tasks", runs.len(), theme));
+
+    if runs.is_empty() {
+        section = section.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .py(theme.space_4)
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_muted)
+                        .child("No remote A2A tasks yet."),
+                ),
+        );
+    } else {
+        let mut list = div().flex().flex_col().gap(theme.space_2);
+        for run in runs {
+            list = list.child(render_remote_run_card(run, theme));
+        }
+        section = section.child(list);
+    }
+
+    section.into_any_element()
+}
+
+fn render_remote_run_card(run: &RemoteTaskDisplay, theme: &HiveTheme) -> AnyElement {
+    let success = run.error.is_none()
+        && matches!(run.state.to_ascii_lowercase().as_str(), "completed" | "success");
+    let status_color = if success {
+        theme.accent_green
+    } else if run.error.is_some() {
+        theme.accent_red
+    } else {
+        theme.accent_yellow
+    };
+    let mut meta = div()
+        .flex()
+        .flex_row()
+        .gap(theme.space_3)
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(format!("Task: {}", run.task_id)),
+        );
+    if let Some(skill) = run.skill_id.as_ref() {
+        meta = meta.child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(format!("Skill: {skill}")),
+        );
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .p(theme.space_3)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(
+                    div()
+                        .text_size(theme.font_size_base)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(run.agent_name.clone()),
+                )
+                .child(
+                    div()
+                        .px(theme.space_2)
+                        .py(px(2.0))
+                        .rounded(theme.radius_full)
+                        .bg(theme.bg_primary)
+                        .text_size(theme.font_size_xs)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(status_color)
+                        .child(if let Some(error) = &run.error {
+                            if error.is_empty() {
+                                run.state.clone()
+                            } else {
+                                "Failed".into()
+                            }
+                        } else {
+                            run.state.clone()
+                        }),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(run.completed_at.clone()),
+                ),
+        )
+        .child(meta)
+        .child(
+            div()
+                .text_size(theme.font_size_sm)
+                .text_color(if run.error.is_some() {
+                    theme.accent_red
+                } else {
+                    theme.text_secondary
+                })
+                .child(
+                    run.error
+                        .clone()
+                        .unwrap_or_else(|| remote_run_excerpt(&run.output)),
+                ),
+        )
+        .into_any_element()
+}
+
+fn remote_status_banner(status: &str, busy: bool, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_3)
+        .py(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(if busy {
+            theme.accent_cyan
+        } else {
+            theme.border
+        })
+        .child(
+            div()
+                .w(px(8.0))
+                .h(px(8.0))
+                .rounded(theme.radius_full)
+                .bg(if busy {
+                    theme.accent_cyan
+                } else {
+                    theme.accent_green
+                }),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(status.to_string()),
+        )
+        .into_any_element()
+}
+
+fn remote_run_excerpt(output: &str) -> String {
+    const MAX_LEN: usize = 220;
+    let output = output.trim();
+    if output.chars().count() <= MAX_LEN {
+        output.to_string()
+    } else {
+        let truncated = output.chars().take(MAX_LEN).collect::<String>();
+        format!("{truncated}...")
+    }
+}
+
+fn section_note(text: String, theme: &HiveTheme) -> AnyElement {
+    div()
+        .text_size(theme.font_size_xs)
+        .text_color(theme.text_muted)
+        .child(text)
+        .into_any_element()
+}
+
+fn control_button<F>(
+    label: &str,
+    bg: Hsla,
+    text_color: Hsla,
+    on_click: F,
+    theme: &HiveTheme,
+) -> AnyElement
+where
+    F: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+{
+    let label = label.to_string();
+    div()
+        .px(theme.space_2)
+        .py(px(3.0))
+        .rounded(theme.radius_sm)
+        .bg(bg)
+        .text_size(theme.font_size_xs)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(text_color)
+        .hover(|style| style.opacity(0.9))
+        .on_mouse_down(MouseButton::Left, on_click)
+        .child(label)
         .into_any_element()
 }
 

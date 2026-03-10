@@ -11,6 +11,7 @@ actions!(
         NewConversation,
         // Panel switch actions
         SwitchToChat,
+        SwitchToQuickStart,
         SwitchToHistory,
         SwitchToFiles,
         SwitchToKanban,
@@ -81,7 +82,11 @@ actions!(
         // Routing panel
         RoutingAddRule,
         // Token Launch panel
+        TokenLaunchCreateWallet,
+        TokenLaunchImportWallet,
         TokenLaunchDeploy,
+        TokenLaunchSaveRpcConfig,
+        TokenLaunchResetRpcConfig,
         // Settings panel
         SettingsSave,
         ExportConfig,
@@ -91,6 +96,7 @@ actions!(
         // Network panel
         NetworkRefresh,
         // Agents panel
+        AgentsRefreshRemoteAgents,
         AgentsReloadWorkflows,
         // Panel switch — new panels
         SwitchToWorkflows,
@@ -165,6 +171,13 @@ pub struct TokenLaunchSelectChain {
     pub chain: String,
 }
 
+/// Token Launch: select one of the saved wallets for the active chain.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct TokenLaunchSelectWallet {
+    pub wallet_id: String,
+}
+
 /// Load a specific workflow into the visual builder canvas.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = hive_workspace, no_json)]
@@ -205,6 +218,59 @@ pub struct AgentsRunWorkflow {
     pub instruction: String,
     pub source: String,
     pub source_id: String,
+}
+
+/// Select the active remote A2A agent in the Agents panel.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct AgentsSelectRemoteAgent {
+    pub agent_name: String,
+}
+
+/// Select or clear the skill used for the currently selected remote A2A agent.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct AgentsSelectRemoteSkill {
+    pub agent_name: String,
+    pub skill_id: Option<String>,
+}
+
+/// Discover the configured remote A2A agent and cache its agent card.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct AgentsDiscoverRemoteAgent {
+    pub agent_name: String,
+}
+
+/// Run a prompt against a configured remote A2A agent.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct AgentsRunRemoteAgent {
+    pub agent_name: String,
+    pub prompt: String,
+    pub skill_id: Option<String>,
+}
+
+/// Select the active Quick Start template.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct QuickStartSelectTemplate {
+    pub template_id: String,
+}
+
+/// Open a panel from the Quick Start setup or next-step cards.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct QuickStartOpenPanel {
+    pub panel: String,
+}
+
+/// Launch a guided Quick Start run for the active project.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct QuickStartRunProject {
+    pub template_id: String,
+    pub detail: String,
 }
 
 /// Switch to a specific tab within the Git Ops panel.

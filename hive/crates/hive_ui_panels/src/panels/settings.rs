@@ -6,10 +6,12 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::switch::Switch;
 use gpui_component::{Icon, IconName};
 use hive_ai::types::ProviderType;
+use hive_integrations::smart_home::{HueBridge, HueLight, HueScene, PhilipsHueClient};
+use hive_terminal::local_ai::PullProgress;
 
 use crate::components::model_selector::{ModelSelected, ModelSelectorView};
 use hive_core::theme_manager::ThemeManager;
-use hive_ui_core::AppConfig;
+use hive_ui_core::{AppConfig, AppHueClient, AppOllamaManager};
 use hive_ui_core::{AppTheme, HiveTheme, ThemeChanged};
 use hive_ui_core::{AccountConnectPlatform, ExportConfig, ImportConfig};
 
@@ -55,9 +57,11 @@ pub struct SettingsData {
     pub has_xai_key: bool,
     pub has_huggingface_key: bool,
     pub has_litellm_key: bool,
+    pub has_hue_key: bool,
     pub ollama_url: String,
     pub lmstudio_url: String,
     pub local_provider_url: Option<String>,
+    pub hue_bridge_ip: Option<String>,
     pub privacy_mode: bool,
     pub default_model: String,
     pub auto_routing: bool,
@@ -99,9 +103,11 @@ impl Default for SettingsData {
             has_xai_key: false,
             has_huggingface_key: false,
             has_litellm_key: false,
+            has_hue_key: false,
             ollama_url: "http://localhost:11434".into(),
             lmstudio_url: "http://localhost:1234".into(),
             local_provider_url: None,
+            hue_bridge_ip: None,
             privacy_mode: false,
             default_model: String::new(),
             auto_routing: true,
@@ -109,7 +115,7 @@ impl Default for SettingsData {
             speculative_show_metrics: true,
             daily_budget_usd: 10.0,
             monthly_budget_usd: 100.0,
-            theme: "dark".into(),
+            theme: "HiveCode Dark".into(),
             font_size: 14,
             auto_update: true,
             notifications_enabled: true,
@@ -157,9 +163,11 @@ impl SettingsData {
                 .litellm_api_key
                 .as_ref()
                 .is_some_and(|k| !k.is_empty()),
+            has_hue_key: cfg.hue_api_key.as_ref().is_some_and(|k| !k.is_empty()),
             ollama_url: cfg.ollama_url.clone(),
             lmstudio_url: cfg.lmstudio_url.clone(),
             local_provider_url: cfg.local_provider_url.clone(),
+            hue_bridge_ip: cfg.hue_bridge_ip.clone(),
             privacy_mode: cfg.privacy_mode,
             default_model: cfg.default_model.clone(),
             auto_routing: cfg.auto_routing,
@@ -218,6 +226,13 @@ impl From<&hive_core::HiveConfig> for SettingsData {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ManagedOllamaModel {
+    name: String,
+    size: Option<u64>,
+    modified_at: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // SettingsView -- interactive entity
 // ---------------------------------------------------------------------------
@@ -242,8 +257,11 @@ pub struct SettingsView {
 
     // URL inputs
     ollama_url_input: Entity<InputState>,
+    ollama_pull_model_input: Entity<InputState>,
     lmstudio_url_input: Entity<InputState>,
     custom_url_input: Entity<InputState>,
+    hue_bridge_ip_input: Entity<InputState>,
+    hue_api_key_input: Entity<InputState>,
 
     // Model selector
     model_selector: Entity<ModelSelectorView>,
@@ -280,9 +298,19 @@ pub struct SettingsView {
     had_litellm_key: bool,
     had_elevenlabs_key: bool,
     had_telnyx_key: bool,
+    had_hue_key: bool,
 
     // Discovery status
     discovered_model_count: usize,
+    ollama_models: Vec<ManagedOllamaModel>,
+    ollama_status: Option<String>,
+    ollama_busy: bool,
+    ollama_inspect_summary: Option<String>,
+    hue_bridges: Vec<HueBridge>,
+    hue_lights: Vec<HueLight>,
+    hue_scenes: Vec<HueScene>,
+    hue_status: Option<String>,
+    hue_busy: bool,
 
     // OAuth client ID inputs per platform
     google_client_id_input: Entity<InputState>,
@@ -336,6 +364,7 @@ impl SettingsView {
             .as_ref()
             .is_some_and(|k| !k.is_empty());
         let had_telnyx = cfg.telnyx_api_key.as_ref().is_some_and(|k| !k.is_empty());
+        let had_hue = cfg.hue_api_key.as_ref().is_some_and(|k| !k.is_empty());
 
         // API key inputs — always start empty, placeholder indicates status
         let anthropic_key_input = cx.new(|cx| {
@@ -410,6 +439,11 @@ impl SettingsView {
             state.set_value(cfg.ollama_url.clone(), window, cx);
             state
         });
+        let ollama_pull_model_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("llama3.2:latest", window, cx);
+            state
+        });
         let lmstudio_url_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_placeholder("http://localhost:1234", window, cx);
@@ -422,6 +456,19 @@ impl SettingsView {
             if let Some(ref url) = cfg.local_provider_url {
                 state.set_value(url.clone(), window, cx);
             }
+            state
+        });
+        let hue_bridge_ip_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("192.168.x.x", window, cx);
+            if let Some(ref ip) = cfg.hue_bridge_ip {
+                state.set_value(ip.clone(), window, cx);
+            }
+            state
+        });
+        let hue_api_key_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder(key_placeholder(had_hue), window, cx);
             state
         });
 
@@ -507,6 +554,8 @@ impl SettingsView {
             &elevenlabs_key_input,
             &telnyx_key_input,
             &ollama_url_input,
+            &hue_bridge_ip_input,
+            &hue_api_key_input,
             &lmstudio_url_input,
             &custom_url_input,
             &daily_budget_input,
@@ -561,8 +610,11 @@ impl SettingsView {
             litellm_key_input,
             litellm_url_input,
             ollama_url_input,
+            ollama_pull_model_input,
             lmstudio_url_input,
             custom_url_input,
+            hue_bridge_ip_input,
+            hue_api_key_input,
             model_selector,
             daily_budget_input,
             monthly_budget_input,
@@ -587,7 +639,17 @@ impl SettingsView {
             had_litellm_key: had_litellm,
             had_elevenlabs_key: had_elevenlabs,
             had_telnyx_key: had_telnyx,
+            had_hue_key: had_hue,
             discovered_model_count: 0,
+            ollama_models: Vec::new(),
+            ollama_status: None,
+            ollama_busy: false,
+            ollama_inspect_summary: None,
+            hue_bridges: Vec::new(),
+            hue_lights: Vec::new(),
+            hue_scenes: Vec::new(),
+            hue_status: None,
+            hue_busy: false,
             google_client_id_input,
             microsoft_client_id_input,
             github_client_id_input,
@@ -621,6 +683,430 @@ impl SettingsView {
     pub fn set_selected_theme(&mut self, name: String, cx: &mut Context<Self>) {
         self.selected_theme = name;
         cx.notify();
+    }
+
+    fn refresh_ollama_models(&mut self, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppOllamaManager>() {
+            self.ollama_status = Some("Ollama manager is unavailable".into());
+            cx.notify();
+            return;
+        }
+
+        self.ollama_busy = true;
+        self.ollama_status = Some("Refreshing Ollama models...".into());
+        let manager = cx.global::<AppOllamaManager>().0.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(manager.list_models())
+                    .map(|models| {
+                        models
+                            .into_iter()
+                            .map(|model| ManagedOllamaModel {
+                                name: model.name,
+                                size: model.size,
+                                modified_at: model.modified_at,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.ollama_busy = false;
+                match result {
+                    Ok(models) => {
+                        let count = models.len();
+                        this.ollama_models = models;
+                        this.ollama_status = Some(format!(
+                            "Loaded {count} Ollama model{}",
+                            if count == 1 { "" } else { "s" }
+                        ));
+                    }
+                    Err(e) => {
+                        this.ollama_status = Some(format!("Failed to list Ollama models: {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn pull_ollama_model(&mut self, model_name: String, cx: &mut Context<Self>) {
+        let model_name = model_name.trim().to_string();
+        if model_name.is_empty() {
+            self.ollama_status = Some("Enter a model name to pull".into());
+            cx.notify();
+            return;
+        }
+        if !cx.has_global::<AppOllamaManager>() {
+            self.ollama_status = Some("Ollama manager is unavailable".into());
+            cx.notify();
+            return;
+        }
+
+        self.ollama_busy = true;
+        self.ollama_status = Some(format!("Pulling '{model_name}'..."));
+        let manager = cx.global::<AppOllamaManager>().0.clone();
+        let progress_text = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let progress_text_for_thread = std::sync::Arc::clone(&progress_text);
+        let result = std::sync::Arc::new(std::sync::Mutex::new(None::<Result<(), String>>));
+        let result_for_thread = std::sync::Arc::clone(&result);
+
+        std::thread::spawn({
+            let model_name = model_name.clone();
+            move || {
+                let outcome = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt.block_on(async {
+                        let (tx, mut rx) = tokio::sync::mpsc::channel::<PullProgress>(32);
+                        let progress_for_task = std::sync::Arc::clone(&progress_text_for_thread);
+                        let pump = tokio::spawn(async move {
+                            while let Some(update) = rx.recv().await {
+                                *progress_for_task.lock().unwrap_or_else(|e| e.into_inner()) =
+                                    Some(format_pull_progress(
+                                        &update.status,
+                                        update.completed,
+                                        update.total,
+                                    ));
+                            }
+                        });
+                        let pull_result = manager.pull_model(&model_name, tx).await;
+                        let _ = pump.await;
+                        pull_result
+                    }),
+                    Err(e) => Err(format!("tokio runtime: {e}")),
+                };
+                *result_for_thread.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+            }
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            loop {
+                let progress = progress_text
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                let maybe_result = result.lock().unwrap_or_else(|e| e.into_inner()).take();
+                let done = maybe_result.is_some();
+                let _ = this.update(app, |this, cx| {
+                    if let Some(progress) = progress.clone() {
+                        this.ollama_status = Some(format!("Pulling '{model_name}': {progress}"));
+                    }
+                    if let Some(outcome) = maybe_result {
+                        this.ollama_busy = false;
+                        match outcome {
+                            Ok(()) => {
+                                this.ollama_status = Some(format!("Pulled model '{model_name}'"));
+                                this.refresh_ollama_models(cx);
+                            }
+                            Err(e) => {
+                                this.ollama_status =
+                                    Some(format!("Failed to pull '{model_name}': {e}"));
+                            }
+                        }
+                    }
+                    cx.notify();
+                });
+
+                if done {
+                    break;
+                }
+
+                app.background_executor()
+                    .timer(std::time::Duration::from_millis(150))
+                    .await;
+            }
+        })
+        .detach();
+    }
+
+    fn show_ollama_model(&mut self, model_name: String, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppOllamaManager>() {
+            self.ollama_status = Some("Ollama manager is unavailable".into());
+            cx.notify();
+            return;
+        }
+
+        self.ollama_busy = true;
+        self.ollama_status = Some(format!("Inspecting '{model_name}'..."));
+        let manager = cx.global::<AppOllamaManager>().0.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(manager.show_model(&model_name)).map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.ollama_busy = false;
+                match result {
+                    Ok(model) => {
+                        let summary = format!(
+                            "{} | size {} | modified {}",
+                            model.name,
+                            format_optional_size(model.size),
+                            model.modified_at.unwrap_or_else(|| "unknown".into())
+                        );
+                        this.ollama_inspect_summary = Some(summary.clone());
+                        this.ollama_status = Some(summary);
+                    }
+                    Err(e) => {
+                        this.ollama_status = Some(format!("Failed to inspect model: {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn delete_ollama_model(&mut self, model_name: String, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppOllamaManager>() {
+            self.ollama_status = Some("Ollama manager is unavailable".into());
+            cx.notify();
+            return;
+        }
+
+        self.ollama_busy = true;
+        self.ollama_status = Some(format!("Deleting '{model_name}'..."));
+        let manager = cx.global::<AppOllamaManager>().0.clone();
+        let deleted_model_name = model_name.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(manager.delete_model(&model_name))
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.ollama_busy = false;
+                match result {
+                    Ok(()) => {
+                        this.ollama_status =
+                            Some(format!("Deleted model '{deleted_model_name}'"));
+                        this.ollama_models
+                            .retain(|model| model.name != deleted_model_name);
+                    }
+                    Err(e) => {
+                        this.ollama_status =
+                            Some(format!("Failed to delete '{deleted_model_name}': {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn discover_hue_bridges(&mut self, cx: &mut Context<Self>) {
+        self.hue_busy = true;
+        self.hue_status = Some("Discovering Hue bridges...".into());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(PhilipsHueClient::discover_bridges())
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.hue_busy = false;
+                match result {
+                    Ok(bridges) => {
+                        let count = bridges.len();
+                        this.hue_bridges = bridges;
+                        this.hue_status = Some(format!(
+                            "Discovered {count} Hue bridge{}",
+                            if count == 1 { "" } else { "s" }
+                        ));
+                    }
+                    Err(e) => {
+                        this.hue_status = Some(format!("Hue discovery failed: {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_hue_state(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = cx
+            .has_global::<AppHueClient>()
+            .then(|| cx.global::<AppHueClient>().0.clone())
+            .flatten()
+        else {
+            self.hue_status = Some(
+                "Hue is not configured yet. Set bridge IP and API key, then click away to save."
+                    .into(),
+            );
+            cx.notify();
+            return;
+        };
+
+        self.hue_busy = true;
+        self.hue_status = Some("Refreshing Hue lights and scenes...".into());
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt.block_on(async {
+                    let lights = client.list_lights().await.map_err(|e| e.to_string())?;
+                    let scenes = client.list_scenes().await.map_err(|e| e.to_string())?;
+                    Ok::<_, String>((lights, scenes))
+                }),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.hue_busy = false;
+                match result {
+                    Ok((lights, scenes)) => {
+                        let light_count = lights.len();
+                        let scene_count = scenes.len();
+                        this.hue_lights = lights;
+                        this.hue_scenes = scenes;
+                        this.hue_status = Some(format!(
+                            "Loaded {light_count} light{} and {scene_count} scene{}",
+                            if light_count == 1 { "" } else { "s" },
+                            if scene_count == 1 { "" } else { "s" }
+                        ));
+                    }
+                    Err(e) => {
+                        this.hue_status = Some(format!("Failed to refresh Hue state: {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn set_hue_light_state(
+        &mut self,
+        light_id: String,
+        on: bool,
+        brightness: Option<u8>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(client) = cx
+            .has_global::<AppHueClient>()
+            .then(|| cx.global::<AppHueClient>().0.clone())
+            .flatten()
+        else {
+            self.hue_status = Some("Hue is not configured yet".into());
+            cx.notify();
+            return;
+        };
+
+        self.hue_busy = true;
+        self.hue_status = Some(format!("Updating light '{light_id}'..."));
+        let updated_light_id = light_id.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(client.set_light_state(&light_id, on, brightness))
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.hue_busy = false;
+                match result {
+                    Ok(()) => {
+                        this.hue_status = Some(format!("Updated light '{updated_light_id}'"));
+                        this.refresh_hue_state(cx);
+                    }
+                    Err(e) => {
+                        this.hue_status = Some(format!("Failed to update light: {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn activate_hue_scene(&mut self, scene_id: String, cx: &mut Context<Self>) {
+        let Some(client) = cx
+            .has_global::<AppHueClient>()
+            .then(|| cx.global::<AppHueClient>().0.clone())
+            .flatten()
+        else {
+            self.hue_status = Some("Hue is not configured yet".into());
+            cx.notify();
+            return;
+        };
+
+        self.hue_busy = true;
+        self.hue_status = Some(format!("Activating scene '{scene_id}'..."));
+        let activated_scene_id = scene_id.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(client.activate_scene(&scene_id))
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.hue_busy = false;
+                match result {
+                    Ok(()) => {
+                        this.hue_status =
+                            Some(format!("Activated scene '{activated_scene_id}'"));
+                        this.refresh_hue_state(cx);
+                    }
+                    Err(e) => {
+                        this.hue_status = Some(format!("Failed to activate scene: {e}"));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Called for every InputEvent from any subscribed input.
@@ -669,6 +1155,7 @@ impl SettingsView {
 
         let elevenlabs_val = self.elevenlabs_key_input.read(cx).value().to_string();
         let telnyx_val = self.telnyx_key_input.read(cx).value().to_string();
+        let hue_val = self.hue_api_key_input.read(cx).value().to_string();
 
         SettingsSnapshot {
             // Only update keys where input is non-empty
@@ -682,9 +1169,14 @@ impl SettingsView {
             litellm_key: non_empty_trimmed(&litellm_val),
             elevenlabs_key: non_empty_trimmed(&elevenlabs_val),
             telnyx_key: non_empty_trimmed(&telnyx_val),
+            hue_api_key: non_empty_trimmed(&hue_val),
 
             ollama_url: self.ollama_url_input.read(cx).value().to_string(),
             lmstudio_url: self.lmstudio_url_input.read(cx).value().to_string(),
+            hue_bridge_ip: {
+                let v = self.hue_bridge_ip_input.read(cx).value().to_string();
+                non_empty_trimmed(&v)
+            },
             litellm_url: {
                 let v = self.litellm_url_input.read(cx).value().to_string();
                 non_empty_trimmed(&v)
@@ -872,10 +1364,12 @@ pub struct SettingsSnapshot {
     pub litellm_key: Option<String>,
     pub elevenlabs_key: Option<String>,
     pub telnyx_key: Option<String>,
+    pub hue_api_key: Option<String>,
     pub ollama_url: String,
     pub lmstudio_url: String,
     pub litellm_url: Option<String>,
     pub custom_url: Option<String>,
+    pub hue_bridge_ip: Option<String>,
     pub default_model: String,
     pub daily_budget: f64,
     pub monthly_budget: f64,
@@ -1072,7 +1566,8 @@ impl Render for SettingsView {
                                         &self.huggingface_key_input,
                                         theme,
                                     ))
-                                    .child(self.render_local_ai_section(cx)),
+                                    .child(self.render_local_ai_section(cx))
+                                    .child(self.render_smart_home_section(cx)),
                             )
                             // Right column
                             .child(
@@ -1098,6 +1593,7 @@ impl SettingsView {
     fn render_local_ai_section(&self, cx: &Context<Self>) -> AnyElement {
         let theme = &self.theme;
         let litellm_set = self.key_is_set(self.had_litellm_key, &self.litellm_key_input, cx);
+        let entity = cx.entity().clone();
 
         let discovery_text = if self.discovered_model_count > 0 {
             format!(
@@ -1113,7 +1609,7 @@ impl SettingsView {
             "No local models found".to_string()
         };
 
-        card(theme)
+        let mut section = card(theme)
             .child(section_title("\u{1F4BB}", "Local AI", theme))
             .child(section_desc(
                 "Connect to locally-running models for free, private inference.",
@@ -1155,6 +1651,47 @@ impl SettingsView {
                     ),
             )
             .child(separator(theme))
+            .child(input_row("Pull Model", &self.ollama_pull_model_input, theme))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(theme.space_2)
+                    .child(settings_action_button(
+                        if self.ollama_busy {
+                            "Refreshing..."
+                        } else {
+                            "Refresh Models"
+                        },
+                        self.ollama_busy,
+                        theme,
+                        {
+                            let entity = entity.clone();
+                            move |_event, _window, cx| {
+                                entity.update(cx, |this, cx| this.refresh_ollama_models(cx));
+                            }
+                        },
+                    ))
+                    .child(settings_action_button(
+                        if self.ollama_busy { "Pulling..." } else { "Pull Model" },
+                        self.ollama_busy,
+                        theme,
+                        {
+                            let entity = entity.clone();
+                            move |_event, _window, cx| {
+                                let model_name = entity
+                                    .read(cx)
+                                    .ollama_pull_model_input
+                                    .read(cx)
+                                    .value()
+                                    .to_string();
+                                entity.update(cx, |this, cx| {
+                                    this.pull_ollama_model(model_name, cx);
+                                });
+                            }
+                        },
+                    )),
+            )
             .child(switch_row(
                 "Privacy Mode",
                 "privacy-switch",
@@ -1175,8 +1712,161 @@ impl SettingsView {
                     } else {
                         "Privacy mode OFF -- requests may be sent to cloud providers when local models are unavailable."
                     }),
+            );
+
+        if let Some(status) = &self.ollama_status {
+            section = section.child(status_banner(status, self.ollama_busy, theme));
+        }
+
+        if let Some(summary) = &self.ollama_inspect_summary {
+            section = section.child(
+                div()
+                    .px(theme.space_3)
+                    .py(theme.space_2)
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_primary)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(summary.clone()),
+            );
+        }
+
+        if self.ollama_models.is_empty() {
+            section = section.child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child("No Ollama models loaded yet."),
+            );
+        } else {
+            let mut rows = div().flex().flex_col().gap(theme.space_2);
+            for model in &self.ollama_models {
+                rows = rows.child(render_ollama_model_row(entity.clone(), model, self.ollama_busy, theme));
+            }
+            section = section.child(rows);
+        }
+
+        section.into_any_element()
+    }
+
+    fn render_smart_home_section(&self, cx: &Context<Self>) -> AnyElement {
+        let theme = &self.theme;
+        let entity = cx.entity().clone();
+        let hue_connected = self.key_is_set(self.had_hue_key, &self.hue_api_key_input, cx)
+            && !self.hue_bridge_ip_input.read(cx).value().trim().is_empty();
+
+        let mut section = card(theme)
+            .child(section_title("\u{1F4A1}", "Smart Home", theme))
+            .child(section_desc(
+                "Manage Philips Hue bridges, lights, and scenes from the shared app integration.",
+                theme,
+            ))
+            .child(separator(theme))
+            .child(input_row("Hue Bridge IP", &self.hue_bridge_ip_input, theme))
+            .child(api_key_row(
+                "Hue API Key",
+                self.key_is_set(self.had_hue_key, &self.hue_api_key_input, cx),
+                &self.hue_api_key_input,
+                theme,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(theme.space_2)
+                    .child(settings_action_button(
+                        if self.hue_busy {
+                            "Discovering..."
+                        } else {
+                            "Discover Bridges"
+                        },
+                        self.hue_busy,
+                        theme,
+                        {
+                            let entity = entity.clone();
+                            move |_event, _window, cx| {
+                                entity.update(cx, |this, cx| this.discover_hue_bridges(cx));
+                            }
+                        },
+                    ))
+                    .child(settings_action_button(
+                        if self.hue_busy { "Refreshing..." } else { "Refresh Devices" },
+                        self.hue_busy,
+                        theme,
+                        {
+                            let entity = entity.clone();
+                            move |_event, _window, cx| {
+                                entity.update(cx, |this, cx| this.refresh_hue_state(cx));
+                            }
+                        },
+                    )),
             )
-            .into_any_element()
+            .child(
+                div()
+                    .px(theme.space_3)
+                    .py(theme.space_2)
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_primary)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(if hue_connected {
+                        "Hue bridge credentials are present. Click away from the inputs after editing so the shared client is rebuilt."
+                    } else {
+                        "Enter the bridge IP and API key, then click away from the field to save and enable the shared Hue client."
+                    }),
+            );
+
+        if let Some(status) = &self.hue_status {
+            section = section.child(status_banner(status, self.hue_busy, theme));
+        }
+
+        if self.hue_bridges.is_empty() {
+            section = section.child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child("No discovered Hue bridges yet."),
+            );
+        } else {
+            let mut bridge_rows = div().flex().flex_col().gap(theme.space_2);
+            for bridge in &self.hue_bridges {
+                bridge_rows = bridge_rows.child(render_hue_bridge_row(entity.clone(), bridge, theme));
+            }
+            section = section.child(bridge_rows);
+        }
+
+        section = section.child(separator(theme));
+        if self.hue_lights.is_empty() {
+            section = section.child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child("No Hue lights loaded."),
+            );
+        } else {
+            let mut light_rows = div().flex().flex_col().gap(theme.space_2);
+            for light in &self.hue_lights {
+                light_rows = light_rows.child(render_hue_light_row(entity.clone(), light, self.hue_busy, theme));
+            }
+            section = section.child(light_rows);
+        }
+
+        if self.hue_scenes.is_empty() {
+            section = section.child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child("No Hue scenes loaded."),
+            );
+        } else {
+            let mut scene_rows = div().flex().flex_col().gap(theme.space_2);
+            for scene in &self.hue_scenes {
+                scene_rows = scene_rows.child(render_hue_scene_row(entity.clone(), scene, self.hue_busy, theme));
+            }
+            section = section.child(scene_rows);
+        }
+
+        section.into_any_element()
     }
 
     fn render_model_routing_section(&self, _cx: &Context<Self>) -> AnyElement {
@@ -1864,6 +2554,243 @@ fn render_api_keys_section(
         .into_any_element()
 }
 
+fn render_ollama_model_row(
+    entity: Entity<SettingsView>,
+    model: &ManagedOllamaModel,
+    busy: bool,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let inspect_name = model.name.clone();
+    let delete_name = model.name.clone();
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .p(theme.space_3)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_primary)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(model.name.clone()),
+                )
+                .child(div().flex_1())
+                .child(settings_action_button("Inspect", busy, theme, {
+                    let entity = entity.clone();
+                    move |_event, _window, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.show_ollama_model(inspect_name.clone(), cx);
+                        });
+                    }
+                }))
+                .child(settings_action_button("Delete", busy, theme, {
+                    let entity = entity.clone();
+                    move |_event, _window, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.delete_ollama_model(delete_name.clone(), cx);
+                        });
+                    }
+                })),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(format!(
+                    "Size {} | Modified {}",
+                    format_optional_size(model.size),
+                    model.modified_at.clone().unwrap_or_else(|| "unknown".into())
+                )),
+        )
+        .into_any_element()
+}
+
+fn render_hue_bridge_row(
+    entity: Entity<SettingsView>,
+    bridge: &HueBridge,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let bridge_ip = bridge.ip.clone();
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_3)
+        .p(theme.space_3)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_primary)
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(bridge.id.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(bridge.ip.clone()),
+                ),
+        )
+        .child(settings_action_button("Use Bridge", false, theme, move |_event, window, cx| {
+            entity.update(cx, |this, cx| {
+                this.hue_bridge_ip_input.update(cx, |state, cx| {
+                    state.set_value(bridge_ip.clone(), window, cx);
+                });
+                cx.emit(SettingsSaved);
+                cx.notify();
+            });
+        }))
+        .into_any_element()
+}
+
+fn render_hue_light_row(
+    entity: Entity<SettingsView>,
+    light: &HueLight,
+    busy: bool,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let light_id_on = light.id.clone();
+    let light_id_dim = light.id.clone();
+    let light_id_bright = light.id.clone();
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .p(theme.space_3)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_primary)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(status_dot(light.reachable, theme))
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(light.name.clone()),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(format!(
+                            "{} | bri {}",
+                            if light.on { "On" } else { "Off" },
+                            light.brightness
+                        )),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(theme.space_2)
+                .child(settings_action_button(
+                    if light.on { "Turn Off" } else { "Turn On" },
+                    busy,
+                    theme,
+                    {
+                        let entity = entity.clone();
+                        let turn_on = !light.on;
+                        move |_event, _window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.set_hue_light_state(
+                                    light_id_on.clone(),
+                                    turn_on,
+                                    if turn_on { Some(254) } else { None },
+                                    cx,
+                                );
+                            });
+                        }
+                    },
+                ))
+                .child(settings_action_button("Dim", busy, theme, {
+                    let entity = entity.clone();
+                    move |_event, _window, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.set_hue_light_state(light_id_dim.clone(), true, Some(96), cx);
+                        });
+                    }
+                }))
+                .child(settings_action_button("Bright", busy, theme, {
+                    move |_event, _window, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.set_hue_light_state(light_id_bright.clone(), true, Some(254), cx);
+                        });
+                    }
+                })),
+        )
+        .into_any_element()
+}
+
+fn render_hue_scene_row(
+    entity: Entity<SettingsView>,
+    scene: &HueScene,
+    busy: bool,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let scene_id = scene.id.clone();
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_3)
+        .p(theme.space_3)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_primary)
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(scene.name.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(scene.id.clone()),
+                ),
+        )
+        .child(settings_action_button("Activate", busy, theme, move |_event, _window, cx| {
+            entity.update(cx, |this, cx| {
+                this.activate_hue_scene(scene_id.clone(), cx);
+            });
+        }))
+        .into_any_element()
+}
+
 // ---------------------------------------------------------------------------
 // Row helpers with interactive widgets
 // ---------------------------------------------------------------------------
@@ -2010,6 +2937,108 @@ fn switch_row<A: Action + Clone>(
                 }),
         )
         .into_any_element()
+}
+
+fn settings_action_button<F>(
+    label: &str,
+    disabled: bool,
+    theme: &HiveTheme,
+    on_click: F,
+) -> AnyElement
+where
+    F: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+{
+    let label = label.to_string();
+    div()
+        .px(theme.space_3)
+        .py(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(if disabled {
+            theme.bg_tertiary
+        } else {
+            theme.accent_cyan
+        })
+        .text_size(theme.font_size_xs)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(if disabled {
+            theme.text_muted
+        } else {
+            theme.text_on_accent
+        })
+        .hover(|style| style.opacity(0.9))
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            if disabled {
+                return;
+            }
+            on_click(event, window, cx);
+        })
+        .child(label)
+        .into_any_element()
+}
+
+fn status_banner(text: &str, busy: bool, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_3)
+        .py(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_primary)
+        .border_1()
+        .border_color(if busy {
+            theme.accent_cyan
+        } else {
+            theme.border
+        })
+        .child(
+            div()
+                .w(px(8.0))
+                .h(px(8.0))
+                .rounded(theme.radius_full)
+                .bg(if busy {
+                    theme.accent_cyan
+                } else {
+                    theme.accent_green
+                }),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(text.to_string()),
+        )
+        .into_any_element()
+}
+
+fn format_optional_size(size: Option<u64>) -> String {
+    size.map(format_bytes).unwrap_or_else(|| "unknown".into())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let value = bytes as f64;
+    if value >= GB {
+        format!("{:.1} GB", value / GB)
+    } else if value >= MB {
+        format!("{:.1} MB", value / MB)
+    } else if value >= KB {
+        format!("{:.1} KB", value / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn format_pull_progress(status: &str, completed: Option<u64>, total: Option<u64>) -> String {
+    match (completed, total) {
+        (Some(completed), Some(total)) if total > 0 => {
+            let pct = ((completed as f64 / total as f64) * 100.0).round() as u32;
+            format!("{status} ({pct}% of {})", format_bytes(total))
+        }
+        _ => status.to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------

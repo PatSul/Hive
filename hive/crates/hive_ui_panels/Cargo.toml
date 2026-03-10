@@ -15,6 +15,7 @@ hive_agents = { path = "../hive_agents" }
 hive_assistant = { path = "../hive_assistant" }
 hive_blockchain = { path = "../hive_blockchain" }
 hive_integrations = { path = "../hive_integrations" }
+hive_terminal = { path = "../hive_terminal" }
 
 gpui.workspace = true
 gpui-component.workspace = true

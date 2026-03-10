@@ -324,7 +324,11 @@ impl BrowserAutomation {
         let engine = self.browser_type.to_string();
         debug!(engine = %engine, "ensuring Playwright browser is installed");
 
-        let output = tokio::process::Command::new("npx")
+        if self.playwright_path.is_none() {
+            self.install_playwright_package().await?;
+        }
+
+        let output = tokio::process::Command::new(Self::npx_command())
             .args(["playwright", "install", &engine])
             .output()
             .await
@@ -340,6 +344,27 @@ impl BrowserAutomation {
         }
 
         debug!("Playwright browser engine installed successfully");
+        Ok(())
+    }
+
+    async fn install_playwright_package(&self) -> Result<()> {
+        debug!("ensuring Playwright npm package is installed");
+
+        let output = tokio::process::Command::new(Self::npm_command())
+            .args(["install", "-g", "playwright"])
+            .output()
+            .await
+            .context("failed to run `npm install -g playwright`")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "Playwright npm package install failed (exit {}): {}",
+                output.status.code().unwrap_or(-1),
+                stderr.trim()
+            );
+        }
+
         Ok(())
     }
 
@@ -1126,7 +1151,7 @@ impl BrowserAutomation {
     async fn execute_script(&self, script: &str) -> Result<serde_json::Value> {
         let temp_dir = std::env::temp_dir();
         let script_id = uuid::Uuid::new_v4();
-        let script_path = temp_dir.join(format!("hive_pw_{script_id}.mjs"));
+        let script_path = temp_dir.join(format!("hive_pw_{script_id}.cjs"));
 
         // Write script to temp file.
         tokio::fs::write(&script_path, script)
@@ -1138,17 +1163,63 @@ impl BrowserAutomation {
         let node_cmd = self.node_command();
         let timeout_duration = std::time::Duration::from_millis(self.timeout_ms + 10_000);
 
-        let result = tokio::time::timeout(timeout_duration, async {
-            let output = tokio::process::Command::new(&node_cmd)
-                .arg(&script_path)
-                .env("NODE_PATH", self.node_path())
-                .output()
-                .await
-                .context("failed to execute Node.js process")?;
+        let mut retried_package_install = false;
+        let mut retried_browser_install = false;
+        let result = loop {
+            let node_path = self.node_path();
+            let result = tokio::time::timeout(timeout_duration, async {
+                let output = tokio::process::Command::new(&node_cmd)
+                    .arg(&script_path)
+                    .env("NODE_PATH", &node_path)
+                    .output()
+                    .await
+                    .context("failed to execute Node.js process")?;
 
-            Ok::<_, anyhow::Error>(output)
-        })
-        .await;
+                Ok::<_, anyhow::Error>(output)
+            })
+            .await;
+
+            let output = match result {
+                Ok(inner) => inner?,
+                Err(_) => bail!(
+                    "Playwright script timed out after {} ms",
+                    self.timeout_ms + 10_000
+                ),
+            };
+
+            if output.status.success() {
+                break Ok(output);
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !retried_package_install && stderr.contains("Cannot find module 'playwright'") {
+                self.install_playwright_package().await?;
+                retried_package_install = true;
+                continue;
+            }
+
+            if !retried_browser_install
+                && (stderr.contains("Executable doesn't exist")
+                    || stderr.contains("Please run the following command to download new browsers"))
+            {
+                self.ensure_installed().await?;
+                retried_browser_install = true;
+                continue;
+            }
+
+            // Try to parse structured error from stderr.
+            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(stderr.trim()) {
+                if let Some(msg) = err_json["error"].as_str() {
+                    break Err(anyhow::anyhow!("Playwright script error: {}", msg));
+                }
+            }
+
+            break Err(anyhow::anyhow!(
+                "Playwright script failed (exit {}): {}",
+                output.status.code().unwrap_or(-1),
+                stderr.trim()
+            ));
+        };
 
         // Always clean up the temp file.
         if let Err(e) = tokio::fs::remove_file(&script_path).await {
@@ -1159,29 +1230,7 @@ impl BrowserAutomation {
             );
         }
 
-        let output = match result {
-            Ok(inner) => inner?,
-            Err(_) => bail!(
-                "Playwright script timed out after {} ms",
-                self.timeout_ms + 10_000
-            ),
-        };
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // Try to parse structured error from stderr.
-            if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(stderr.trim()) {
-                if let Some(msg) = err_json["error"].as_str() {
-                    bail!("Playwright script error: {}", msg);
-                }
-            }
-            bail!(
-                "Playwright script failed (exit {}): {}",
-                output.status.code().unwrap_or(-1),
-                stderr.trim()
-            );
-        }
-
+        let output = result?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stdout_trimmed = stdout.trim();
 
@@ -1189,8 +1238,7 @@ impl BrowserAutomation {
             bail!("Playwright script produced no output");
         }
 
-        serde_json::from_str(stdout_trimmed)
-            .context("failed to parse Playwright script JSON output")
+        serde_json::from_str(stdout_trimmed).context("failed to parse Playwright script JSON output")
     }
 
     /// Determine the `node` binary to use.
@@ -1208,6 +1256,22 @@ impl BrowserAutomation {
         "node".to_string()
     }
 
+    fn npm_command() -> &'static str {
+        if cfg!(windows) {
+            "npm.cmd"
+        } else {
+            "npm"
+        }
+    }
+
+    fn npx_command() -> &'static str {
+        if cfg!(windows) {
+            "npx.cmd"
+        } else {
+            "npx"
+        }
+    }
+
     /// Build the NODE_PATH so `require('playwright')` can find the
     /// package regardless of the working directory.
     fn node_path(&self) -> String {
@@ -1218,8 +1282,15 @@ impl BrowserAutomation {
             }
         }
 
-        // Default: rely on npx / globally installed playwright.
-        String::new()
+        match std::process::Command::new(Self::npm_command())
+            .args(["root", "-g"])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => String::new(),
+        }
     }
 }
 

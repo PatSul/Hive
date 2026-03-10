@@ -23,6 +23,50 @@ use crate::peer::{PeerInfo, PeerRegistry, PeerState};
 use crate::router::{MessageRouter, hello_handler, heartbeat_handler, goodbye_handler};
 use crate::transport::{self, PeerConnection, TransportEvent};
 
+/// Read-only handle for querying live network state from outside the runtime
+/// that owns the running [`HiveNode`].
+#[derive(Clone)]
+pub struct HiveNodeHandle {
+    identity: NodeIdentity,
+    peers: Arc<RwLock<PeerRegistry>>,
+}
+
+impl HiveNodeHandle {
+    /// Return the peer ID for the running node.
+    pub fn peer_id(&self) -> &PeerId {
+        &self.identity.peer_id
+    }
+
+    /// Return the full identity for the running node.
+    pub fn identity(&self) -> &NodeIdentity {
+        &self.identity
+    }
+
+    /// Get an async snapshot of all known peers.
+    pub async fn peers(&self) -> Vec<PeerInfo> {
+        let registry = self.peers.read().await;
+        registry.list_all().into_iter().cloned().collect()
+    }
+
+    /// Get an async snapshot of connected peers.
+    pub async fn connected_peers(&self) -> Vec<PeerInfo> {
+        let registry = self.peers.read().await;
+        registry.list_connected().into_iter().cloned().collect()
+    }
+
+    /// Get a blocking snapshot of all known peers.
+    pub fn peers_snapshot(&self) -> Vec<PeerInfo> {
+        let registry = self.peers.blocking_read();
+        registry.list_all().into_iter().cloned().collect()
+    }
+
+    /// Get a blocking snapshot of connected peers.
+    pub fn connected_peers_snapshot(&self) -> Vec<PeerInfo> {
+        let registry = self.peers.blocking_read();
+        registry.list_connected().into_iter().cloned().collect()
+    }
+}
+
 /// The top-level Hive network node.
 ///
 /// Create one per application instance. Call [`start()`](HiveNode::start) to
@@ -75,6 +119,14 @@ impl HiveNode {
     pub fn with_defaults(name: impl Into<String>) -> Self {
         let identity = NodeIdentity::generate(name);
         Self::new(identity, NetworkConfig::default())
+    }
+
+    /// Create a read-only handle that shares this node's live peer registry.
+    pub fn handle(&self) -> HiveNodeHandle {
+        HiveNodeHandle {
+            identity: self.identity.clone(),
+            peers: Arc::clone(&self.peers),
+        }
     }
 
     /// Return the node's peer ID.
@@ -529,6 +581,9 @@ mod tests {
         assert!(!node.is_running());
         assert_eq!(node.identity().name, "test-node");
         assert!(!node.peer_id().as_str().is_empty());
+        let handle = node.handle();
+        assert_eq!(handle.identity().name, "test-node");
+        assert_eq!(handle.peer_id(), node.peer_id());
     }
 
     #[test]
@@ -653,5 +708,36 @@ mod tests {
         assert!(router.has_handler(&MessageKind::Hello));
         assert!(router.has_handler(&MessageKind::Heartbeat));
         assert!(router.has_handler(&MessageKind::Goodbye));
+    }
+
+    #[tokio::test]
+    async fn handle_exposes_live_peer_snapshots() {
+        let mut config = NetworkConfig::default();
+        config.discovery_enabled = false;
+
+        let identity = NodeIdentity::generate("snapshot-node");
+        let node = HiveNode::new(identity, config);
+        let handle = node.handle();
+
+        let peer_identity = NodeIdentity::generate("peer-a");
+        let peer_info = PeerInfo {
+            id: peer_identity.peer_id.clone(),
+            identity: peer_identity,
+            addr: "127.0.0.1:9470".parse().unwrap(),
+            state: PeerState::Connected,
+            connected_at: Some(chrono::Utc::now()),
+            last_seen: chrono::Utc::now(),
+            latency_ms: Some(12),
+        };
+
+        {
+            let mut registry = node.peers.write().await;
+            registry.add_peer(peer_info);
+        }
+
+        let peers = handle.peers().await;
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].identity.name, "peer-a");
+        assert_eq!(handle.connected_peers().await.len(), 1);
     }
 }

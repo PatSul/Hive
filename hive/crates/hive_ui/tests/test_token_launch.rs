@@ -9,8 +9,10 @@ fn new_starts_at_select_chain() {
     assert!(data.token_symbol.is_empty());
     assert!(data.total_supply.is_empty());
     assert_eq!(data.decimals, 9);
+    assert_eq!(data.wallet_id, None);
     assert_eq!(data.wallet_address, None);
     assert_eq!(data.wallet_balance, None);
+    assert!(data.available_wallets.is_empty());
     assert_eq!(data.estimated_cost, None);
     assert_eq!(data.deploy_status, DeployStatus::NotStarted);
 }
@@ -152,6 +154,7 @@ fn reset_clears_everything() {
     data.token_symbol = "RM".into();
     data.total_supply = "999".into();
     data.decimals = 18;
+    data.wallet_id = Some("wallet-123".into());
     data.wallet_address = Some("0xdef".into());
     data.wallet_balance = Some(1.5);
     data.estimated_cost = Some(0.01);
@@ -165,8 +168,10 @@ fn reset_clears_everything() {
     assert!(data.token_symbol.is_empty());
     assert!(data.total_supply.is_empty());
     assert_eq!(data.decimals, 9);
+    assert_eq!(data.wallet_id, None);
     assert_eq!(data.wallet_address, None);
     assert_eq!(data.wallet_balance, None);
+    assert!(data.available_wallets.is_empty());
     assert_eq!(data.estimated_cost, None);
     assert_eq!(data.deploy_status, DeployStatus::NotStarted);
 }
@@ -231,6 +236,38 @@ fn has_sufficient_funds_logic() {
     // Balance less than cost
     data.wallet_balance = Some(0.4);
     assert!(!data.has_sufficient_funds());
+}
+
+#[test]
+fn can_deploy_requires_complete_state() {
+    let mut data = TokenLaunchData::new();
+    assert!(!data.can_deploy());
+
+    data.selected_chain = Some(ChainOption::Ethereum);
+    data.token_name = "Hive".into();
+    data.token_symbol = "HIVE".into();
+    data.total_supply = "1000000".into();
+    data.wallet_id = Some("wallet-1".into());
+    data.wallet_address = Some("0xabc".into());
+    assert!(data.can_deploy());
+
+    data.deploy_status = DeployStatus::Deploying;
+    assert!(!data.can_deploy());
+}
+
+#[test]
+fn can_deploy_blocks_when_known_funds_are_insufficient() {
+    let mut data = TokenLaunchData::new();
+    data.selected_chain = Some(ChainOption::Base);
+    data.token_name = "Hive".into();
+    data.token_symbol = "HIVE".into();
+    data.total_supply = "1000000".into();
+    data.wallet_id = Some("wallet-1".into());
+    data.wallet_address = Some("0xabc".into());
+    data.wallet_balance = Some(0.01);
+    data.estimated_cost = Some(0.02);
+
+    assert!(!data.can_deploy());
 }
 
 #[test]

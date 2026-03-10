@@ -11,4 +11,7 @@ pub use erc20_bytecode::{ChainConfig, Erc20Contract, get_chain_configs, get_erc2
 pub use evm::{DeployResult, EvmWallet, TokenDeployParams};
 pub use rpc_config::{RpcConfig, RpcConfigStore, validate_url};
 pub use solana::{SolanaWallet, SplDeployResult, SplTokenParams};
-pub use wallet_store::{Chain, WalletEntry, WalletStore, decrypt_key, encrypt_key};
+pub use wallet_store::{
+    Chain, WalletEntry, WalletStore, decrypt_key, encrypt_key, generate_wallet_material,
+    import_wallet_material,
+};

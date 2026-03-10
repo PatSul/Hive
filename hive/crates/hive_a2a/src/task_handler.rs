@@ -27,6 +27,7 @@ use hive_agents::hivemind::{AiExecutor, HiveMind, HiveMindConfig};
 use hive_agents::queen::Queen;
 use hive_agents::specs::Spec;
 use hive_agents::swarm::SwarmConfig;
+use hive_ai::providers::AiProvider;
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole};
 
 use crate::agent_card::{
@@ -39,6 +40,40 @@ use crate::error::A2aError;
 // ---------------------------------------------------------------------------
 // ArcExecutor — bridge to pass Arc<E> where E: AiExecutor is expected by value
 // ---------------------------------------------------------------------------
+
+/// Adapter that forwards `AiExecutor` calls to a concrete `AiProvider`.
+///
+/// This lets the A2A server run against the same provider abstraction the UI
+/// already uses without teaching the rest of the orchestration stack about
+/// `AiProvider`.
+pub struct ProviderExecutor {
+    provider: Arc<dyn AiProvider>,
+    default_model: String,
+}
+
+impl ProviderExecutor {
+    /// Create a new provider-backed executor.
+    pub fn new(provider: Arc<dyn AiProvider>, default_model: impl Into<String>) -> Self {
+        Self {
+            provider,
+            default_model: default_model.into(),
+        }
+    }
+}
+
+impl AiExecutor for ProviderExecutor {
+    async fn execute(&self, request: &ChatRequest) -> Result<ChatResponse, String> {
+        let mut request = request.clone();
+        if request.model.trim().is_empty() {
+            request.model = self.default_model.clone();
+        }
+
+        self.provider
+            .chat(&request)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
 
 /// Thin wrapper that lets us pass `Arc<E>` to APIs that consume an
 /// `E: AiExecutor` by value (HiveMind::new, Coordinator::new).
@@ -96,11 +131,7 @@ impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
     /// 5. Updates the task to `Completed` or `Failed` and sends a final
     ///    status update event.
     /// 6. Returns the completed `Task`.
-    pub async fn handle_message(
-        &self,
-        task_id: &str,
-        message: &Message,
-    ) -> Result<Task, A2aError> {
+    pub async fn handle_message(&self, task_id: &str, message: &Message) -> Result<Task, A2aError> {
         let task_text = bridge::extract_message_text(message);
         if task_text.trim().is_empty() {
             return Err(A2aError::Bridge("Message contains no text content".into()));
@@ -386,10 +417,7 @@ async fn execute_queen<E: AiExecutor + 'static>(
     };
 
     let queen = Queen::new(config, executor);
-    let result = queen
-        .execute(task_text)
-        .await
-        .map_err(A2aError::Provider)?;
+    let result = queen.execute(task_text).await.map_err(A2aError::Provider)?;
 
     Ok(bridge::swarm_result_to_artifact(&result))
 }
@@ -511,8 +539,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_message_creates_task() {
         let handler = HiveTaskHandler::new(Arc::new(MockExecutor), ServerDefaults::default());
-        let message =
-            a2a_rs::Message::user_text("Hello".into(), uuid::Uuid::new_v4().to_string());
+        let message = a2a_rs::Message::user_text("Hello".into(), uuid::Uuid::new_v4().to_string());
         let task = handler.handle_message("task-1", &message).await;
         assert!(task.is_ok());
         let task = task.unwrap();
@@ -541,8 +568,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_task() {
         let handler = HiveTaskHandler::new(Arc::new(MockExecutor), ServerDefaults::default());
-        let message =
-            a2a_rs::Message::user_text("Hello".into(), uuid::Uuid::new_v4().to_string());
+        let message = a2a_rs::Message::user_text("Hello".into(), uuid::Uuid::new_v4().to_string());
         handler.handle_message("task-1", &message).await.unwrap();
 
         let task = handler.get_task("task-1").await;
@@ -560,8 +586,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_existing_task() {
         let handler = HiveTaskHandler::new(Arc::new(MockExecutor), ServerDefaults::default());
-        let message =
-            a2a_rs::Message::user_text("Hello".into(), uuid::Uuid::new_v4().to_string());
+        let message = a2a_rs::Message::user_text("Hello".into(), uuid::Uuid::new_v4().to_string());
         handler.handle_message("task-sub", &message).await.unwrap();
 
         let rx = handler.subscribe("task-sub").await;
@@ -613,10 +638,7 @@ mod tests {
         };
 
         // Despite text containing queen keywords, explicit metadata overrides.
-        let task = handler
-            .handle_message("task-meta", &message)
-            .await
-            .unwrap();
+        let task = handler.handle_message("task-meta", &message).await.unwrap();
         assert_eq!(task.id, "task-meta");
         assert_eq!(task.status.state, TaskState::Completed);
 
@@ -630,10 +652,7 @@ mod tests {
         let handler = HiveTaskHandler::new(Arc::new(MockExecutor), ServerDefaults::default());
         let message =
             a2a_rs::Message::user_text("Test history".into(), uuid::Uuid::new_v4().to_string());
-        let task = handler
-            .handle_message("task-hist", &message)
-            .await
-            .unwrap();
+        let task = handler.handle_message("task-hist", &message).await.unwrap();
 
         // History should contain the original user message plus the completion message.
         assert!(task.history.is_some());

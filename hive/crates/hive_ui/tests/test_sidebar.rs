@@ -24,11 +24,12 @@ fn test_from_index_valid() {
     assert_eq!(Panel::from_index(19), Some(Panel::Network));
     assert_eq!(Panel::from_index(20), Some(Panel::Settings));
     assert_eq!(Panel::from_index(21), Some(Panel::Help));
+    assert_eq!(Panel::from_index(22), Some(Panel::QuickStart));
 }
 
 #[test]
 fn test_from_index_out_of_bounds() {
-    assert_eq!(Panel::from_index(22), None);
+    assert_eq!(Panel::from_index(23), None);
     assert_eq!(Panel::from_index(100), None);
     assert_eq!(Panel::from_index(usize::MAX), None);
 }
@@ -48,7 +49,7 @@ fn test_sidebar_default_panel_is_chat() {
 
 #[test]
 fn test_panel_all_count() {
-    assert_eq!(Panel::ALL.len(), 22);
+    assert_eq!(Panel::ALL.len(), 23);
 }
 
 // -- Panel stored round-trip tests --------------------------------------
@@ -76,6 +77,7 @@ fn test_panel_from_stored_unknown_defaults_to_chat() {
 #[test]
 fn test_panel_to_stored_stable_values() {
     assert_eq!(Panel::Chat.to_stored(), "Chat");
+    assert_eq!(Panel::QuickStart.to_stored(), "QuickStart");
     assert_eq!(Panel::Assistant.to_stored(), "Assistant");
     assert_eq!(Panel::TokenLaunch.to_stored(), "TokenLaunch");
     assert_eq!(Panel::Settings.to_stored(), "Settings");

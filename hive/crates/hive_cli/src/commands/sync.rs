@@ -1,15 +1,20 @@
 //! hive sync command handlers.
 
-use anyhow::{Context, Result};
 use crate::api::CloudClient;
 use crate::ui;
+use anyhow::{Context, Result};
 
 pub async fn push(key: &str, file_path: &str) -> Result<()> {
     let config = hive_core::HiveConfig::load()?;
     let client = CloudClient::new(config.cloud_api_url.as_deref(), config.cloud_jwt.as_deref());
-    let data = std::fs::read(file_path)
-        .with_context(|| format!("Failed to read file: {}", file_path))?;
-    println!("  Pushing {} ({} bytes) as \"{}\"...", file_path, data.len(), key);
+    let data =
+        std::fs::read(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
+    println!(
+        "  Pushing {} ({} bytes) as \"{}\"...",
+        file_path,
+        data.len(),
+        key
+    );
     client.sync_push(key, &data).await?;
     println!("  Done. Blob uploaded successfully.");
     Ok(())
@@ -55,7 +60,11 @@ pub async fn status() -> Result<()> {
 }
 
 fn format_bytes(bytes: i64) -> String {
-    if bytes < 1024 { format!("{} B", bytes) }
-    else if bytes < 1024 * 1024 { format!("{:.1} KB", bytes as f64 / 1024.0) }
-    else { format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)) }
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
 }

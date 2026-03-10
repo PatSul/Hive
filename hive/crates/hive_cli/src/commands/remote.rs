@@ -1,7 +1,7 @@
 //! hive remote command handler.
 
-use anyhow::Result;
 use crate::ui;
+use anyhow::Result;
 
 pub async fn run() -> Result<()> {
     let config = hive_core::HiveConfig::load()?;

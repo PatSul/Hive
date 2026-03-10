@@ -77,6 +77,18 @@ impl McpServer {
         tools
     }
 
+    /// Call a tool directly and return its raw JSON value.
+    pub fn call_tool_value(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        match self.tools.get(name) {
+            Some((_, handler)) => handler(arguments),
+            None => Err(format!("Unknown tool: {name}")),
+        }
+    }
+
     /// Handle a JSON-RPC request and return a response.
     pub fn handle_request(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
         match request.method.as_str() {
@@ -130,36 +142,34 @@ impl McpServer {
             .cloned()
             .unwrap_or(json!({}));
 
-        match self.tools.get(name) {
-            Some((_, handler)) => match handler(args) {
-                Ok(result) => {
-                    // MCP content text must be a string. If the handler returned
-                    // a JSON string, unwrap it; otherwise serialize the value.
-                    let text = match result {
-                        serde_json::Value::String(s) => s,
-                        other => serde_json::to_string(&other).unwrap_or_default(),
-                    };
-                    JsonRpcResponse::success(
-                        request.id,
-                        json!({
-                            "content": [{ "type": "text", "text": text }]
-                        }),
-                    )
-                }
-                Err(msg) => JsonRpcResponse::error(
+        match self.call_tool_value(name, args) {
+            Ok(result) => {
+                // MCP content text must be a string. If the handler returned
+                // a JSON string, unwrap it; otherwise serialize the value.
+                let text = match result {
+                    serde_json::Value::String(s) => s,
+                    other => serde_json::to_string(&other).unwrap_or_default(),
+                };
+                JsonRpcResponse::success(
                     request.id,
-                    JsonRpcError {
-                        code: error_codes::INTERNAL_ERROR,
-                        message: msg,
-                        data: None,
-                    },
-                ),
-            },
-            None => JsonRpcResponse::error(
+                    json!({
+                        "content": [{ "type": "text", "text": text }]
+                    }),
+                )
+            }
+            Err(msg) if msg.starts_with("Unknown tool: ") => JsonRpcResponse::error(
                 request.id,
                 JsonRpcError {
                     code: error_codes::METHOD_NOT_FOUND,
-                    message: format!("Unknown tool: {name}"),
+                    message: msg,
+                    data: None,
+                },
+            ),
+            Err(msg) => JsonRpcResponse::error(
+                request.id,
+                JsonRpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: msg,
                     data: None,
                 },
             ),
@@ -592,7 +602,7 @@ mod tests {
         let (_dir, server) = setup_workspace();
         let tools = server.list_tools();
 
-        assert_eq!(tools.len(), 22);
+        assert_eq!(tools.len(), 34);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
@@ -600,6 +610,9 @@ mod tests {
         assert!(names.contains(&"search_files"));
         assert!(names.contains(&"list_files"));
         assert!(names.contains(&"git_status"));
+        assert!(names.contains(&"a2a_list_agents"));
+        assert!(names.contains(&"ollama_list_models"));
+        assert!(names.contains(&"hue_discover_bridges"));
     }
 
     #[test]
@@ -622,7 +635,7 @@ mod tests {
         assert!(resp.is_success());
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 22);
+        assert_eq!(tools.len(), 34);
     }
 
     // -- Initialize tests --

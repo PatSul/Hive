@@ -259,6 +259,28 @@ impl CostTracker {
 
     /// Export records as CSV string.
     pub fn export_csv(&self) -> String {
+        let headers = ["timestamp", "model_id", "input_tokens", "output_tokens", "cost"];
+        let rows: Vec<Vec<String>> = self
+            .records
+            .iter()
+            .map(|r| {
+                vec![
+                    r.timestamp.to_rfc3339(),
+                    r.model_id.clone(),
+                    r.input_tokens.to_string(),
+                    r.output_tokens.to_string(),
+                    format!("{:.6}", r.cost),
+                ]
+            })
+            .collect();
+
+        hive_docs::csv::generate_csv(&headers, &rows).unwrap_or_else(|e| {
+            tracing::warn!("CostTracker CSV export fell back to inline writer: {e}");
+            self.export_csv_fallback()
+        })
+    }
+
+    fn export_csv_fallback(&self) -> String {
         let mut csv = String::from("timestamp,model_id,input_tokens,output_tokens,cost\n");
         for r in &self.records {
             csv.push_str(&format!(

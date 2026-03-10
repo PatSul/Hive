@@ -59,8 +59,7 @@ fn is_private_ip(host: &str) -> bool {
 /// - Non-localhost URLs must use HTTPS
 /// - Private IPs (10.x, 192.168.x, 169.254.x, 0.0.0.0) are blocked
 pub fn validate_outbound_url(url: &str) -> Result<(), A2aError> {
-    let parsed = Url::parse(url)
-        .map_err(|e| A2aError::Security(format!("Invalid URL: {e}")))?;
+    let parsed = Url::parse(url).map_err(|e| A2aError::Security(format!("Invalid URL: {e}")))?;
 
     let host = parsed
         .host_str()
@@ -170,6 +169,8 @@ mod tests {
     #[test]
     fn test_outbound_url_https_public_ok() {
         assert!(validate_outbound_url("https://api.openai.com/v1/agents").is_ok());
-        assert!(validate_outbound_url("https://remote-agent.fly.dev/.well-known/agent.json").is_ok());
+        assert!(
+            validate_outbound_url("https://remote-agent.fly.dev/.well-known/agent.json").is_ok()
+        );
     }
 }

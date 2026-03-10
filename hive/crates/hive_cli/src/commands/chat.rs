@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
@@ -17,9 +17,7 @@ use crate::ui;
 
 pub async fn run(model_override: Option<String>) -> Result<()> {
     let config = hive_core::HiveConfig::load()?;
-    let client = CloudClient::new(
-        config.cloud_api_url.as_deref(), config.cloud_jwt.as_deref(),
-    );
+    let client = CloudClient::new(config.cloud_api_url.as_deref(), config.cloud_jwt.as_deref());
     let model = model_override.unwrap_or_else(|| config.default_model.clone());
     let tier = config.cloud_tier.clone().unwrap_or_else(|| "free".into());
     let mut app = ChatApp::new(model, tier);
@@ -42,7 +40,9 @@ async fn run_chat_loop(
 ) -> Result<()> {
     loop {
         terminal.draw(|f| ui::draw_chat(f, app))?;
-        if app.should_quit { break; }
+        if app.should_quit {
+            break;
+        }
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 match handle_key(key, app) {
@@ -66,25 +66,59 @@ async fn run_chat_loop(
     Ok(())
 }
 
-enum KeyAction { Quit, Submit, Continue }
+enum KeyAction {
+    Quit,
+    Submit,
+    Continue,
+}
 
 fn handle_key(key: KeyEvent, app: &mut ChatApp) -> KeyAction {
     if key.code == KeyCode::Esc
-        || (key.modifiers.contains(KeyModifiers::CONTROL)
-            && key.code == KeyCode::Char('c'))
-    { return KeyAction::Quit; }
-    if app.waiting { return KeyAction::Continue; }
+        || (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c'))
+    {
+        return KeyAction::Quit;
+    }
+    if app.waiting {
+        return KeyAction::Continue;
+    }
     match key.code {
         KeyCode::Enter => KeyAction::Submit,
-        KeyCode::Char(c) => { app.insert_char(c); KeyAction::Continue }
-        KeyCode::Backspace => { app.delete_char_before(); KeyAction::Continue }
-        KeyCode::Delete => { app.delete_char_at(); KeyAction::Continue }
-        KeyCode::Left => { app.move_left(); KeyAction::Continue }
-        KeyCode::Right => { app.move_right(); KeyAction::Continue }
-        KeyCode::Home => { app.move_home(); KeyAction::Continue }
-        KeyCode::End => { app.move_end(); KeyAction::Continue }
-        KeyCode::Up => { app.scroll_offset = app.scroll_offset.saturating_add(1); KeyAction::Continue }
-        KeyCode::Down => { app.scroll_offset = app.scroll_offset.saturating_sub(1); KeyAction::Continue }
+        KeyCode::Char(c) => {
+            app.insert_char(c);
+            KeyAction::Continue
+        }
+        KeyCode::Backspace => {
+            app.delete_char_before();
+            KeyAction::Continue
+        }
+        KeyCode::Delete => {
+            app.delete_char_at();
+            KeyAction::Continue
+        }
+        KeyCode::Left => {
+            app.move_left();
+            KeyAction::Continue
+        }
+        KeyCode::Right => {
+            app.move_right();
+            KeyAction::Continue
+        }
+        KeyCode::Home => {
+            app.move_home();
+            KeyAction::Continue
+        }
+        KeyCode::End => {
+            app.move_end();
+            KeyAction::Continue
+        }
+        KeyCode::Up => {
+            app.scroll_offset = app.scroll_offset.saturating_add(1);
+            KeyAction::Continue
+        }
+        KeyCode::Down => {
+            app.scroll_offset = app.scroll_offset.saturating_sub(1);
+            KeyAction::Continue
+        }
         _ => KeyAction::Continue,
     }
 }
@@ -96,7 +130,10 @@ async fn process_sse_response(
 ) {
     let body = match response.text().await {
         Ok(t) => t,
-        Err(e) => { app.add_error(&format!("Failed to read response: {}", e)); return; }
+        Err(e) => {
+            app.add_error(&format!("Failed to read response: {}", e));
+            return;
+        }
     };
     let mut final_response: Option<ChatResponse> = None;
     for line in body.lines() {
@@ -105,7 +142,9 @@ async fn process_sse_response(
                 app.append_stream_chunk(&chunk);
                 let _ = terminal.draw(|f| ui::draw_chat(f, app));
             }
-            Some(SseEvent::Complete(resp)) => { final_response = Some(resp); }
+            Some(SseEvent::Complete(resp)) => {
+                final_response = Some(resp);
+            }
             _ => {}
         }
     }

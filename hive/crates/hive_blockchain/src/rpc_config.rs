@@ -126,6 +126,7 @@ pub fn validate_url(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn defaults_cover_all_chains() {
@@ -202,5 +203,22 @@ mod tests {
         assert!(!validate_url("not a url"));
         assert!(!validate_url("ftp://server.com"));
         assert!(!validate_url("file:///etc/passwd"));
+    }
+
+    #[test]
+    fn save_and_load_round_trip_preserves_custom_rpc() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rpc_config.json");
+
+        let mut store = RpcConfigStore::with_defaults();
+        store
+            .set_custom_rpc(Chain::Solana, "https://solana.example.com".into())
+            .unwrap();
+        store.save_to_file(&path).unwrap();
+
+        let loaded = RpcConfigStore::load_from_file(&path).unwrap();
+        let rpc = loaded.get_rpc(Chain::Solana).unwrap();
+        assert_eq!(rpc.url, "https://solana.example.com");
+        assert!(rpc.is_custom);
     }
 }

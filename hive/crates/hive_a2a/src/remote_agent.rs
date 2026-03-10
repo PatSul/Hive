@@ -4,9 +4,7 @@
 //! an external A2A agent. It provides methods to send tasks via JSON-RPC
 //! and extract outputs from completed tasks.
 
-use a2a_rs::{
-    AgentCard, Message, MessageSendConfiguration, MessageSendParams, Part, Role, Task,
-};
+use a2a_rs::{AgentCard, Message, MessageSendConfiguration, MessageSendParams, Part, Role, Task};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
@@ -106,7 +104,7 @@ impl RemoteAgent {
         });
 
         // Build the HTTP request
-        let url = format!("{}/", self.base_url.trim_end_matches('/'));
+        let url = format!("{}/a2a", self.base_url.trim_end_matches('/'));
         let mut request = self.client.post(&url).json(&rpc_request);
 
         if let Some(ref key) = self.api_key {
@@ -128,10 +126,9 @@ impl RemoteAgent {
         }
 
         // Parse the JSON-RPC response
-        let rpc_response: Value = response
-            .json()
-            .await
-            .map_err(|e| A2aError::Network(format!("Failed to parse response from {}: {e}", self.name)))?;
+        let rpc_response: Value = response.json().await.map_err(|e| {
+            A2aError::Network(format!("Failed to parse response from {}: {e}", self.name))
+        })?;
 
         // Check for JSON-RPC error
         if let Some(err) = rpc_response.get("error") {
@@ -146,14 +143,12 @@ impl RemoteAgent {
         }
 
         // Extract the result as a Task
-        let result = rpc_response
-            .get("result")
-            .ok_or_else(|| {
-                A2aError::Network(format!(
-                    "Remote agent {} returned no result in JSON-RPC response",
-                    self.name
-                ))
-            })?;
+        let result = rpc_response.get("result").ok_or_else(|| {
+            A2aError::Network(format!(
+                "Remote agent {} returned no result in JSON-RPC response",
+                self.name
+            ))
+        })?;
 
         let task: Task = serde_json::from_value(result.clone()).map_err(|e| {
             A2aError::Bridge(format!(

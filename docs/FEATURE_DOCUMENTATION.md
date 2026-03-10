@@ -2,8 +2,8 @@
 
 > **Updated**: 2026-02-11
 > **Branch**: rust/main
-> **Codebase**: ~97,000 lines of Rust across 13 crates
-> **Tests**: 2,013 passing, 0 compiler warnings
+> **Codebase**: Reference snapshot document; current crate count and line totals may differ from `HEAD`
+> **Tests**: Use `docs/TEST_PLAN.md` for the current verification commands and known issues
 
 ---
 
@@ -900,7 +900,7 @@ Multi-tier approval workflows for sensitive operations.
 | hive_fs | ~50 | Files, git, search, watcher |
 | hive_docs | ~30 | Document generation formats |
 | hive_blockchain | ~20 | Wallet, token deploy, RPC config |
-| **Total** | **~2,013** | **0 warnings** |
+| **Total** | **~2,013 (snapshot)** | **Reference totals only — verify current status from the workspace and test plan** |
 
 ## Appendix B: Local Storage (`~/.hive/`)
 

@@ -1,8 +1,8 @@
 //! hive status command.
 
-use anyhow::Result;
 use crate::api::CloudClient;
 use crate::ui;
+use anyhow::Result;
 
 pub async fn run() -> Result<()> {
     let config = hive_core::HiveConfig::load()?;
@@ -11,10 +11,14 @@ pub async fn run() -> Result<()> {
     match client.get_account().await {
         Ok(acct) => {
             println!("  Account:  {}", acct.email);
-            if let Some(name) = &acct.display_name { println!("  Name:     {}", name); }
+            if let Some(name) = &acct.display_name {
+                println!("  Name:     {}", name);
+            }
             println!("  Tier:     {}", acct.tier);
             println!("  ID:       {}", acct.id);
-            if let Some(exp) = &acct.subscription_expires_at { println!("  Expires:  {}", exp); }
+            if let Some(exp) = &acct.subscription_expires_at {
+                println!("  Expires:  {}", exp);
+            }
             println!("  Created:  {}", acct.created_at);
         }
         Err(e) => println!("  Could not fetch account info: {}", e),
@@ -34,9 +38,22 @@ pub async fn run() -> Result<()> {
     }
     println!();
     println!("  Config:");
-    println!("    Cloud API:   {}", config.cloud_api_url.as_deref().unwrap_or("(default)"));
-    println!("    Cloud Relay: {}", config.cloud_relay_url.as_deref().unwrap_or("(not set)"));
-    println!("    JWT:         {}", if config.cloud_jwt.is_some() { "set" } else { "not set" });
+    println!(
+        "    Cloud API:   {}",
+        config.cloud_api_url.as_deref().unwrap_or("(default)")
+    );
+    println!(
+        "    Cloud Relay: {}",
+        config.cloud_relay_url.as_deref().unwrap_or("(not set)")
+    );
+    println!(
+        "    JWT:         {}",
+        if config.cloud_jwt.is_some() {
+            "set"
+        } else {
+            "not set"
+        }
+    );
     println!("    Model:       {}", config.default_model);
     println!();
     Ok(())

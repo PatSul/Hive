@@ -12,6 +12,7 @@ pub mod logs;
 pub mod models_browser;
 pub mod monitor;
 pub mod network;
+pub mod quick_start;
 pub mod review;
 pub mod routing;
 pub mod settings;
@@ -20,4 +21,3 @@ pub mod skills;
 pub mod specs;
 pub mod token_launch;
 pub mod workflow_builder;
-

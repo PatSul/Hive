@@ -1,7 +1,7 @@
 //! hive config command handler.
 
-use anyhow::{Result, bail};
 use crate::ui;
+use anyhow::{bail, Result};
 
 pub async fn run(key: Option<String>, value: Option<String>) -> Result<()> {
     let mut config = hive_core::HiveConfig::load()?;
@@ -11,7 +11,10 @@ pub async fn run(key: Option<String>, value: Option<String>) -> Result<()> {
             let json = serde_json::to_string_pretty(&config)?;
             println!("{}", json);
             println!();
-            println!("  Config file: {}", hive_core::HiveConfig::config_path()?.display());
+            println!(
+                "  Config file: {}",
+                hive_core::HiveConfig::config_path()?.display()
+            );
             println!();
         }
         (Some(k), None) => {

@@ -194,6 +194,7 @@ const KEY_TELNYX: &str = "api_key_telnyx";
 const KEY_XAI: &str = "api_key_xai";
 const KEY_MISTRAL: &str = "api_key_mistral";
 const KEY_VENICE: &str = "api_key_venice";
+const KEY_HUE: &str = "api_key_hue";
 
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
@@ -291,6 +292,8 @@ pub struct HiveConfig {
     pub elevenlabs_api_key: Option<String>,
     #[serde(skip)]
     pub telnyx_api_key: Option<String>,
+    #[serde(skip)]
+    pub hue_api_key: Option<String>,
 
     // Voice & TTS
     pub tts_provider: String,
@@ -312,6 +315,7 @@ pub struct HiveConfig {
     pub lmstudio_url: String,
     pub litellm_url: Option<String>,
     pub local_provider_url: Option<String>,
+    pub hue_bridge_ip: Option<String>,
     pub privacy_mode: bool,
 
     // Model routing
@@ -407,6 +411,7 @@ impl Default for HiveConfig {
             litellm_api_key: None,
             elevenlabs_api_key: None,
             telnyx_api_key: None,
+            hue_api_key: None,
             tts_provider: "qwen3".into(),
             tts_voice_id: None,
             tts_speed: 1.0,
@@ -418,6 +423,7 @@ impl Default for HiveConfig {
             lmstudio_url: "http://localhost:1234".into(),
             litellm_url: None,
             local_provider_url: None,
+            hue_bridge_ip: None,
             privacy_mode: false,
             default_model: "gpt-4o-mini".into(),
             auto_routing: true,
@@ -427,7 +433,7 @@ impl Default for HiveConfig {
             speculative_show_metrics: true,
             daily_budget_usd: 10.0,
             monthly_budget_usd: 100.0,
-            theme: "dark".into(),
+            theme: "HiveCode Dark".into(),
             font_size: 14,
             auto_update: true,
             notifications_enabled: true,
@@ -745,6 +751,7 @@ impl ConfigManager {
             config.xai_api_key = get_secure_key(ss, &key_map, KEY_XAI);
             config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
+            config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
         }
     }
 
@@ -780,6 +787,7 @@ impl ConfigManager {
             "xai" => config.xai_api_key.clone(),
             "mistral" => config.mistral_api_key.clone(),
             "venice" => config.venice_api_key.clone(),
+            "hue" => config.hue_api_key.clone(),
             _ => None,
         }
     }
@@ -802,6 +810,7 @@ impl ConfigManager {
                 "xai" => config.xai_api_key = key.clone(),
                 "mistral" => config.mistral_api_key = key.clone(),
                 "venice" => config.venice_api_key = key.clone(),
+                "hue" => config.hue_api_key = key.clone(),
                 _ => anyhow::bail!("Unknown provider: {provider}"),
             }
         }
@@ -834,6 +843,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_XAI, &config.xai_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         save_key_map(&self.keys_path, &key_map)
     }
 
@@ -909,6 +919,7 @@ impl ConfigManager {
         ("xai", KEY_XAI),
         ("mistral", KEY_MISTRAL),
         ("venice", KEY_VENICE),
+        ("hue", KEY_HUE),
     ];
 
     /// Export all configuration (including secrets) as a password-encrypted blob.
@@ -1165,6 +1176,7 @@ mod tests {
         set_secure_key(&ss, &mut map, KEY_OPENAI, &Some("sk-openai-123".into())).unwrap();
         set_secure_key(&ss, &mut map, KEY_OPENROUTER, &Some("sk-or-456".into())).unwrap();
         set_secure_key(&ss, &mut map, KEY_GOOGLE, &Some("AIza-google".into())).unwrap();
+        set_secure_key(&ss, &mut map, KEY_HUE, &Some("hue-api-key".into())).unwrap();
         save_key_map(&keys_path, &map).unwrap();
 
         // Reload and decrypt
@@ -1184,6 +1196,10 @@ mod tests {
         assert_eq!(
             get_secure_key(&ss, &loaded_map, KEY_GOOGLE).unwrap(),
             "AIza-google"
+        );
+        assert_eq!(
+            get_secure_key(&ss, &loaded_map, KEY_HUE).unwrap(),
+            "hue-api-key"
         );
     }
 
@@ -1240,7 +1256,7 @@ mod tests {
         assert!(!key_map.contains_key(KEY_GOOGLE)); // null = removed
 
         // Non-secret fields should be preserved
-        assert_eq!(config.theme, "dark");
+        assert_eq!(config.theme, "HiveCode Dark");
         assert_eq!(config.privacy_mode, false);
     }
 
@@ -1444,6 +1460,7 @@ mod tests {
         let mut config = HiveConfig::default();
         config.anthropic_api_key = Some("sk-save-test".into());
         config.google_api_key = Some("AIza-save".into());
+        config.hue_api_key = Some("hue-save-key".into());
 
         // Manually persist via the helper
         let mut key_map = HashMap::new();
@@ -1457,6 +1474,7 @@ mod tests {
         )
         .unwrap();
         set_secure_key(&ss, &mut key_map, KEY_GOOGLE, &config.google_api_key).unwrap();
+        set_secure_key(&ss, &mut key_map, KEY_HUE, &config.hue_api_key).unwrap();
         save_key_map(&keys_path, &key_map).unwrap();
 
         // Re-read and verify
@@ -1469,6 +1487,10 @@ mod tests {
         assert_eq!(
             get_secure_key(&ss2, &loaded_map, KEY_GOOGLE).unwrap(),
             "AIza-save"
+        );
+        assert_eq!(
+            get_secure_key(&ss2, &loaded_map, KEY_HUE).unwrap(),
+            "hue-save-key"
         );
         assert!(get_secure_key(&ss2, &loaded_map, KEY_OPENAI).is_none());
         assert!(get_secure_key(&ss2, &loaded_map, KEY_OPENROUTER).is_none());
@@ -1485,8 +1507,10 @@ mod tests {
         assert!(config.openai_api_key.is_none());
         assert!(config.openrouter_api_key.is_none());
         assert!(config.google_api_key.is_none());
+        assert!(config.hue_api_key.is_none());
         assert_eq!(config.ollama_url, "http://localhost:11434");
-        assert_eq!(config.theme, "dark");
+        assert!(config.hue_bridge_ip.is_none());
+        assert_eq!(config.theme, "HiveCode Dark");
         assert_eq!(config.font_size, 14);
     }
 

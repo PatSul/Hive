@@ -19,10 +19,10 @@ use hive_core::persistence::Database;
 use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
-    AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
+    AppA2aClient, AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
     AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppDatabase,
     AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppIde, AppIntegrationDb,
-    AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppPersonas,
+    AppHueClient, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager, AppPersonas,
     AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
     AppSecurity, AppSemanticSearch, AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService,
     AppTts, AppUpdater, AppWallets,
@@ -381,7 +381,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppMcpServer(hive_agents::mcp_server::McpServer::new(
         workspace_root,
     )));
-    info!("McpServer initialized (6 built-in + 13 integration tools)");
+    info!("McpServer initialized (built-in + integration tools)");
 
     // Spec manager — project specifications.
     cx.set_global(AppSpecs(hive_agents::SpecManager::new()));
@@ -446,10 +446,16 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppWallets(wallets));
     info!("WalletStore initialized");
 
-    // RPC config — default endpoints for EVM and Solana chains.
-    cx.set_global(AppRpcConfig(
-        hive_blockchain::rpc_config::RpcConfigStore::with_defaults(),
-    ));
+    // RPC config — load saved per-chain endpoints or fall back to defaults.
+    let rpc_config_path = HiveConfig::base_dir()
+        .map(|d| d.join("rpc_config.json"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("rpc_config.json"));
+    let rpc_config = hive_blockchain::rpc_config::RpcConfigStore::load_from_file(&rpc_config_path)
+        .unwrap_or_else(|e| {
+            warn!("RpcConfigStore load failed, using defaults: {e}");
+            hive_blockchain::rpc_config::RpcConfigStore::with_defaults()
+        });
+    cx.set_global(AppRpcConfig(rpc_config));
     info!("RpcConfigStore initialized");
 
     // IDE integration — workspace and file tracking.
@@ -535,6 +541,48 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppBrowser(browser));
     info!("BrowserAutomation initialized");
 
+    let a2a_config_path = HiveConfig::base_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))
+        .join("a2a.toml");
+    let a2a_client = match hive_a2a::A2aClientService::load_or_create(&a2a_config_path) {
+        Ok(service) => std::sync::Arc::new(service),
+        Err(e) => {
+            warn!("A2A client config load failed, using defaults: {e}");
+            std::sync::Arc::new(hive_a2a::A2aClientService::with_config(
+                a2a_config_path.clone(),
+                hive_a2a::A2aConfig::default(),
+            ))
+        }
+    };
+    cx.set_global(AppA2aClient(a2a_client));
+    info!("A2A client initialized");
+
+    let ollama_manager = std::sync::Arc::new(hive_terminal::local_ai::OllamaManager::new(Some(
+        config.ollama_url.clone(),
+    )));
+    cx.set_global(AppOllamaManager(ollama_manager));
+    info!("OllamaManager initialized");
+
+    let hue_client = config
+        .hue_bridge_ip
+        .as_deref()
+        .zip(config.hue_api_key.as_deref())
+        .map(|(bridge_ip, api_key)| {
+            std::sync::Arc::new(hive_integrations::smart_home::PhilipsHueClient::new(
+                bridge_ip,
+                api_key,
+            ))
+        });
+    cx.set_global(AppHueClient(hue_client));
+    info!(
+        "Hue smart-home integration {}",
+        if cx.global::<AppHueClient>().0.is_some() {
+            "initialized"
+        } else {
+            "not configured"
+        }
+    );
+
     // Bitbucket client — needs username + app password from environment.
     if let (Ok(bb_user), Ok(bb_pass)) = (
         std::env::var("BITBUCKET_USERNAME"),
@@ -605,7 +653,10 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             database: cx.global::<AppIntegrationDb>().0.clone(),
             docker: cx.global::<AppDocker>().0.clone(),
             kubernetes: cx.global::<AppKubernetes>().0.clone(),
+            a2a: cx.global::<AppA2aClient>().0.clone(),
             browser: cx.global::<AppBrowser>().0.clone(),
+            ollama: cx.global::<AppOllamaManager>().0.clone(),
+            hue: cx.global::<AppHueClient>().0.clone(),
             aws: cx.global::<AppAws>().0.clone(),
             azure: cx.global::<AppAzure>().0.clone(),
             gcp: cx.global::<AppGcp>().0.clone(),
@@ -623,15 +674,13 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     // P2P network node — federation, peer discovery, WebSocket server.
     //
-    // The node is created with the persisted config and started on a dedicated
-    // background thread with its own tokio runtime.  We store a *query handle*
-    // (a separate HiveNode with matching identity) in the GPUI global for
-    // read-only access to peer info.  The running node lives on the background
-    // thread for the lifetime of the application.
+    // The real node is created once, then moved to a background thread with
+    // its own tokio runtime. The GPUI global receives a read-only handle that
+    // shares the node's live peer registry.
     {
-        let network_config_path = HiveConfig::base_dir()
-            .map(|d| d.join("network.json"))
-            .unwrap_or_else(|_| std::path::PathBuf::from("network.json"));
+        let network_base_dir = HiveConfig::base_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"));
+        let network_config_path = network_base_dir.join("network.json");
         let net_config = hive_network::NetworkConfig::load_or_default(&network_config_path);
 
         let node_name = std::env::var("HIVE_NODE_NAME").unwrap_or_else(|_| {
@@ -650,28 +699,23 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             }
         });
 
-        // Create the global handle — a separate node instance for read-only queries.
-        let global_node = std::sync::Arc::new(
-            hive_network::HiveNode::with_defaults(&node_name),
-        );
-        cx.set_global(AppNetwork(global_node));
+        let identity_path = network_base_dir.join("network_identity.json");
+        let identity = hive_network::NodeIdentity::load_or_generate(&identity_path, &node_name);
+        let node = hive_network::HiveNode::new(identity, net_config);
+        let listen_addr = node.config().listen_addr;
 
-        let listen_addr = net_config.listen_addr;
+        cx.set_global(AppNetwork(std::sync::Arc::new(node.handle())));
 
-        // Start the *real* node on a background thread with its own tokio runtime.
+        // Start the real node on a background thread with its own tokio runtime.
         std::thread::Builder::new()
             .name("hive-p2p".into())
             .spawn(move || {
+                let mut node = node;
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("P2P tokio runtime");
                 rt.block_on(async {
-                    let node = hive_network::HiveNode::with_defaults(&node_name);
-                    // Replace the default config with the loaded one.
-                    let identity = node.identity().clone();
-                    let mut node = hive_network::HiveNode::new(identity, net_config);
-
                     match node.start().await {
                         Ok(()) => info!("P2P network started — listening on {listen_addr}"),
                         Err(e) => {
@@ -747,13 +791,35 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     // following the same pattern as the P2P network and remote control daemon.
     // Config is loaded from ~/.hive/a2a.toml (created with defaults on first run).
     {
-        let a2a_config_path = HiveConfig::base_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))
-            .join("a2a.toml");
-
         match hive_a2a::A2aConfig::load_or_create(&a2a_config_path) {
             Ok(a2a_config) => {
                 if a2a_config.server.enabled {
+                    let a2a_handler = {
+                        let ai_service = &cx.global::<AppAiService>().0;
+                        let probe_messages = vec![hive_ai::types::ChatMessage::text(
+                            hive_ai::types::MessageRole::User,
+                            "A2A readiness probe",
+                        )];
+
+                        ai_service
+                            .prepare_stream(
+                                probe_messages,
+                                ai_service.default_model(),
+                                None,
+                                None,
+                            )
+                            .map(|(provider, request)| {
+                                let executor =
+                                    hive_a2a::ProviderExecutor::new(provider, request.model);
+                                let handler = hive_a2a::HiveTaskHandler::new(
+                                    std::sync::Arc::new(executor),
+                                    a2a_config.server.defaults.clone(),
+                                );
+                                std::sync::Arc::new(handler)
+                                    as std::sync::Arc<dyn hive_a2a::TaskHandlerAdapter>
+                            })
+                    };
+
                     let bind_addr = a2a_config.bind_addr();
 
                     std::thread::Builder::new()
@@ -764,7 +830,10 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                                 .build()
                                 .expect("A2A server tokio runtime");
                             rt.block_on(async {
-                                if let Err(e) = hive_a2a::start_server(a2a_config).await {
+                                if let Err(e) =
+                                    hive_a2a::start_server_with_handler(a2a_config, a2a_handler)
+                                        .await
+                                {
                                     error!("[A2A] Server error: {}", e);
                                 }
                             });

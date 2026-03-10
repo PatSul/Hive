@@ -1,9 +1,9 @@
 //! hive login command.
 
-use anyhow::Result;
-use std::io::{self, Write};
 use crate::api::CloudClient;
 use crate::ui;
+use anyhow::Result;
+use std::io::{self, Write};
 
 pub async fn run() -> Result<()> {
     ui::print_login_banner();

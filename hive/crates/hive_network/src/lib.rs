@@ -46,5 +46,5 @@ pub use config::NetworkConfig;
 pub use error::NetworkError;
 pub use identity::{NodeIdentity, PeerId};
 pub use message::{Envelope, MessageKind};
-pub use node::HiveNode;
+pub use node::{HiveNode, HiveNodeHandle};
 pub use peer::{PeerInfo, PeerRegistry, PeerState};

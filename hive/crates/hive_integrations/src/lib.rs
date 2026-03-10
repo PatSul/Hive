@@ -66,6 +66,4 @@ pub use kubernetes::{
     ClusterInfo, Deployment, K8sContext, K8sEvent, K8sService, KubernetesClient,
     Namespace as K8sNamespace, Pod,
 };
-pub use smart_home::PhilipsHueClient;
 pub use webhooks::{Webhook, WebhookRegistry};
-pub use clawdtalk::{ClawdTalkClient, ClawdTalkConfig, BridgeState, InboundMessage, OutboundMessage};

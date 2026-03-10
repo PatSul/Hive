@@ -6,7 +6,10 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use ed25519_dalek::SigningKey as SolanaSigningKey;
+use k256::ecdsa::SigningKey as EvmSigningKey;
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Keccak256};
 use tracing::info;
 
 const AES_NONCE_LEN: usize = 12;
@@ -122,7 +125,9 @@ impl WalletStore {
 
     /// Decrypt the private key for a specific wallet entry.
     pub fn decrypt_wallet_key(&self, id: &str, password: &str) -> Result<Vec<u8>> {
-        let wallet = self.get_wallet(id).ok_or_else(|| anyhow::anyhow!("wallet not found: {id}"))?;
+        let wallet = self
+            .get_wallet(id)
+            .ok_or_else(|| anyhow::anyhow!("wallet not found: {id}"))?;
         decrypt_key(&wallet.encrypted_key, password).context("failed to decrypt wallet key")
     }
 
@@ -173,6 +178,128 @@ impl Default for WalletStore {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Generate new private key material for the given chain and derive its public address.
+pub fn generate_wallet_material(chain: Chain) -> Result<(Vec<u8>, String)> {
+    let private_key: [u8; 32] = rand::random();
+    let address = derive_wallet_address(chain, &private_key)?;
+    Ok((private_key.to_vec(), address))
+}
+
+/// Import existing private key material for the given chain and derive its public address.
+pub fn import_wallet_material(chain: Chain, input: &str) -> Result<(Vec<u8>, String)> {
+    let private_key = parse_private_key(chain, input)?;
+    let address = derive_wallet_address(chain, &private_key)?;
+    Ok((private_key, address))
+}
+
+fn derive_wallet_address(chain: Chain, private_key: &[u8]) -> Result<String> {
+    match chain {
+        Chain::Ethereum | Chain::Base => derive_evm_address(private_key),
+        Chain::Solana => derive_solana_address(private_key),
+    }
+}
+
+fn derive_evm_address(private_key: &[u8]) -> Result<String> {
+    let key_bytes = normalize_32_byte_key(private_key, "EVM private key")?;
+    let signing_key = EvmSigningKey::from_bytes((&key_bytes).into())
+        .map_err(|e| anyhow::anyhow!("invalid EVM private key: {e}"))?;
+    let encoded = signing_key.verifying_key().to_encoded_point(false);
+    let public_key = encoded.as_bytes();
+    let hash = Keccak256::digest(&public_key[1..]);
+    Ok(format!("0x{}", hex_encode(&hash[12..])))
+}
+
+fn derive_solana_address(private_key: &[u8]) -> Result<String> {
+    let key_bytes = normalize_32_byte_key(private_key, "Solana private key")?;
+    let signing_key = SolanaSigningKey::from_bytes(&key_bytes);
+    Ok(bs58::encode(signing_key.verifying_key().as_bytes()).into_string())
+}
+
+fn parse_private_key(chain: Chain, input: &str) -> Result<Vec<u8>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("private key is required");
+    }
+
+    match chain {
+        Chain::Ethereum | Chain::Base => {
+            let bytes = decode_hex(trimmed)?;
+            let key_bytes = normalize_32_byte_key(&bytes, "EVM private key")?;
+            Ok(key_bytes.to_vec())
+        }
+        Chain::Solana => {
+            let bytes = if looks_like_hex(trimmed) {
+                decode_hex(trimmed)?
+            } else {
+                bs58::decode(trimmed)
+                    .into_vec()
+                    .map_err(|e| anyhow::anyhow!("invalid Solana private key: {e}"))?
+            };
+
+            if bytes.len() == 64 {
+                return Ok(bytes[..32].to_vec());
+            }
+
+            let key_bytes = normalize_32_byte_key(&bytes, "Solana private key")?;
+            Ok(key_bytes.to_vec())
+        }
+    }
+}
+
+fn normalize_32_byte_key(bytes: &[u8], label: &str) -> Result<[u8; 32]> {
+    let slice = match bytes.len() {
+        32 => bytes,
+        64 => &bytes[..32],
+        len => {
+            anyhow::bail!("{label} must be 32 bytes (or 64 bytes for Solana keypairs), got {len}")
+        }
+    };
+
+    let mut array = [0u8; 32];
+    array.copy_from_slice(slice);
+    Ok(array)
+}
+
+fn looks_like_hex(value: &str) -> bool {
+    let stripped = value.strip_prefix("0x").unwrap_or(value);
+    !stripped.is_empty()
+        && stripped.len() % 2 == 0
+        && stripped.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn decode_hex(value: &str) -> Result<Vec<u8>> {
+    let stripped = value.strip_prefix("0x").unwrap_or(value);
+    if stripped.len() % 2 != 0 {
+        anyhow::bail!("hex private key must contain an even number of characters");
+    }
+
+    let mut bytes = Vec::with_capacity(stripped.len() / 2);
+    for chunk in stripped.as_bytes().chunks_exact(2) {
+        let hi = hex_nibble(chunk[0] as char)?;
+        let lo = hex_nibble(chunk[1] as char)?;
+        bytes.push((hi << 4) | lo);
+    }
+    Ok(bytes)
+}
+
+fn hex_nibble(ch: char) -> Result<u8> {
+    match ch {
+        '0'..='9' => Ok((ch as u8) - b'0'),
+        'a'..='f' => Ok((ch as u8) - b'a' + 10),
+        'A'..='F' => Ok((ch as u8) - b'A' + 10),
+        _ => anyhow::bail!("invalid hex character `{ch}`"),
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +463,46 @@ mod tests {
         store.add_wallet("W3".into(), Chain::Solana, "sol3".into(), vec![]);
 
         assert_eq!(store.list_wallets().len(), 3);
+    }
+
+    #[test]
+    fn generate_wallet_material_returns_evm_address() {
+        let (private_key, address) = generate_wallet_material(Chain::Ethereum).unwrap();
+        assert_eq!(private_key.len(), 32);
+        assert!(address.starts_with("0x"));
+        assert_eq!(address.len(), 42);
+    }
+
+    #[test]
+    fn import_wallet_material_derives_evm_address_from_hex() {
+        let private_key = "0x4c0883a69102937d6231471b5dbb6204fe5129617082790f8b1a4d7a8b798f8f";
+        let (_, address) = import_wallet_material(Chain::Ethereum, private_key).unwrap();
+        assert_eq!(address.len(), 42);
+        assert!(address.starts_with("0x"));
+    }
+
+    #[test]
+    fn generate_wallet_material_returns_solana_address() {
+        let (private_key, address) = generate_wallet_material(Chain::Solana).unwrap();
+        assert_eq!(private_key.len(), 32);
+        let decoded = bs58::decode(address).into_vec().unwrap();
+        assert_eq!(decoded.len(), 32);
+    }
+
+    #[test]
+    fn import_wallet_material_accepts_solana_base58_secret() {
+        let secret = vec![7u8; 32];
+        let encoded = bs58::encode(&secret).into_string();
+        let (private_key, address) = import_wallet_material(Chain::Solana, &encoded).unwrap();
+        assert_eq!(private_key, secret);
+        let decoded = bs58::decode(address).into_vec().unwrap();
+        assert_eq!(decoded.len(), 32);
+    }
+
+    #[test]
+    fn import_wallet_material_rejects_invalid_length() {
+        let error = import_wallet_material(Chain::Base, "0x1234").unwrap_err();
+        assert!(error.to_string().contains("must be 32 bytes"));
     }
 
     #[test]

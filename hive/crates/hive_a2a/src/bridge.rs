@@ -57,10 +57,7 @@ pub fn infer_skill(text: &str) -> &'static str {
     let lower = text.to_lowercase();
 
     // Queen keywords (multi-team orchestration)
-    if lower.contains("teams")
-        || lower.contains("swarm")
-        || lower.contains("platform")
-    {
+    if lower.contains("teams") || lower.contains("swarm") || lower.contains("platform") {
         return "queen";
     }
 
@@ -308,12 +305,12 @@ pub fn artifact_to_text(artifact: &Artifact) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hive_agents::coordinator::{
-        CoordinatorResult, TaskEvent, TaskPlan, TaskResult,
-    };
+    use hive_agents::coordinator::{CoordinatorResult, TaskEvent, TaskPlan, TaskResult};
     use hive_agents::hivemind::{OrchestrationResult, OrchestrationStatus};
     use hive_agents::personas::PersonaKind;
-    use hive_agents::swarm::{SwarmPlan, SwarmResult, SwarmStatus, TeamObjective, OrchestrationMode};
+    use hive_agents::swarm::{
+        OrchestrationMode, SwarmPlan, SwarmResult, SwarmStatus, TeamObjective,
+    };
 
     // -- extract_message_text -----------------------------------------------
 
@@ -340,10 +337,7 @@ mod tests {
             context_id: None,
             kind: "message".into(),
         };
-        assert_eq!(
-            extract_message_text(&msg),
-            "Part one\nPart two\nPart three"
-        );
+        assert_eq!(extract_message_text(&msg), "Part one\nPart two\nPart three");
     }
 
     #[test]
@@ -366,14 +360,8 @@ mod tests {
     #[test]
     fn test_extract_skill_from_metadata_present() {
         let mut meta = Map::new();
-        meta.insert(
-            "skill_id".into(),
-            Value::String("hivemind".into()),
-        );
-        assert_eq!(
-            extract_skill_id(Some(&meta)),
-            Some("hivemind".to_string())
-        );
+        meta.insert("skill_id".into(), Value::String("hivemind".into()));
+        assert_eq!(extract_skill_id(Some(&meta)), Some("hivemind".to_string()));
     }
 
     #[test]
@@ -450,7 +438,11 @@ mod tests {
 
         assert_eq!(artifact.artifact_id, "hivemind-run-42");
         assert_eq!(artifact.name, Some("HiveMind Result".into()));
-        assert!(artifact.description.as_ref().unwrap().contains("Build auth module"));
+        assert!(artifact
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("Build auth module"));
 
         let text = artifact_to_text(&artifact);
         assert!(text.contains("Auth module implemented successfully."));

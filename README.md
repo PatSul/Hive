@@ -15,11 +15,11 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.15-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.17-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
-  <img src="https://img.shields.io/badge/tests-3%2C500%2B-brightgreen" alt="Tests" />
-  <img src="https://img.shields.io/badge/crates-20-blue" alt="Crates" />
-  <img src="https://img.shields.io/badge/warnings-0-brightgreen" alt="Warnings" />
+  <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
+  <img src="https://img.shields.io/badge/warnings-tracked-yellow" alt="Warnings" />
   <img src="https://img.shields.io/badge/lines-177k%2B-informational" alt="Lines of Rust" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
   <img src="https://img.shields.io/badge/UI-GPUI-blueviolet" alt="GPUI" />
@@ -643,10 +643,10 @@ All panels are wired to live backend data. No mock data in the production path. 
 Hive is built for production robustness:
 
 - **Graceful error handling** — Production code paths use `Result<T>` with `?` propagation, `.unwrap_or_default()`, or explicit `match` blocks. Remaining `expect()` calls are limited to compile-time-constant regex patterns and application startup invariants.
-- **Zero compiler warnings** — The full workspace compiles with `cargo build --workspace` producing 0 errors and 0 warnings.
-- **Clippy clean** — All `cargo clippy` lints addressed: no collapsible ifs, no unnecessary closures, no naming conflicts.
+- **Warning cleanup is tracked continuously** — keep validated crate slices warning-free and use targeted `cargo check` commands while the workspace-wide validation path is being tightened.
+- **Clippy is part of the quality bar** — run it on the actively validated crate slices instead of assuming the entire workspace is green by default.
 - **Documented APIs** — Public structs, enums, traits, and functions have `///` documentation comments describing purpose and behavior.
-- **3,500+ tests** — Unit and integration tests across the workspace, all passing. Includes LanceDB vector memory tests, embedding provider tests, skill CRUD tests, and full lifecycle integration tests.
+- **Extensive automated coverage** — the repo contains thousands of unit and integration tests. Use the commands in `docs/TEST_PLAN.md` for the currently supported verification matrix.
 
 ---
 
@@ -752,7 +752,12 @@ cargo run --release
 
 ```bash
 cd hive
-cargo test --workspace
+./verify.sh
+```
+
+```powershell
+cd hive
+.\verify.bat
 ```
 
 ---
@@ -781,13 +786,13 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.15 |
-| Crates | 20 |
+| Version | 0.3.17 |
+| Crates | 21 |
 | Rust source files | 375 |
 | Lines of Rust | 180,600+ |
-| Tests | 3,500+ |
-| Compiler warnings | 0 |
-| Clippy warnings | 0 |
+| Tests | Targeted verification matrix |
+| Compiler warnings | Tracked per validated slice |
+| Clippy warnings | Checked per validated slice |
 | Memory footprint | < 50 MB |
 | Startup time | < 1 second |
 | UI rendering | 120fps (GPU-accelerated via GPUI) |
@@ -854,11 +859,11 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 - **Security fixes**: Eliminated command injection in deploy trigger (now uses safe `Command::env()` API), hardened iMessage provider against AppleScript and SQL injection with input validation and comprehensive escaping, added multi-statement SQL injection guard on database queries, added CSP and security headers to website
 - **4 new messaging providers**: WhatsApp (Business Cloud API), Signal (CLI REST API), Google Chat (Workspace API), iMessage (macOS AppleScript + chat.db) — all with full MessagingProvider trait implementation and comprehensive test suites
-- **Module wiring**: Connected 11 previously unwired modules to the application — Guardian (AI output safety), HiveLoop, FleetLearning, RAG, SemanticSearch, Enterprise, Canvas, Webhooks, PhilipsHue smart home, ClawdTalk voice, AssistantPlugin system
+- **Module wiring**: Connected previously unwired core modules to the application, including Guardian, HiveLoop, FleetLearning, RAG, SemanticSearch, Enterprise, Canvas, Webhooks, and the AssistantPlugin system
 - **Scheduler tick driver**: Background OS thread with 60-second tokio interval timer drives scheduler and reminder service ticks
 - **Plugin system**: PluginRegistry with `with_defaults()` auto-loading ReminderPlugin — first production AssistantPlugin implementation
 - **Blockchain labeling**: Deploy functions now clearly labeled as simulation mode with SIM_ prefixed identifiers and `simulated: true` field
-- **Real ERC-20 bytecode**: Replaced placeholder with compiled Solidity 0.8.20 minimal ERC-20 contract
+- **Blockchain deployment labeling**: Token-launch flows remain explicitly labeled where deployment is still simulation-backed or not yet wired end-to-end
 
 ### v0.3.2
 
@@ -897,7 +902,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 - P2P Federation, Blockchain/Web3, Docker Sandbox
 - Eliminated ~800+ `.unwrap()` calls with proper error handling
 - SQLite persistence, FTS5 search, persistent logs
-- 2,544 tests, 0 warnings
+- Targeted validation across the actively maintained crate matrix
 
 ### v0.1.0
 

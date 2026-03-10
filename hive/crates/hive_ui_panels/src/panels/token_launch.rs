@@ -1,10 +1,15 @@
 use gpui::*;
+use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
 use crate::components::render_wallet_card;
 use crate::components::render_wizard_stepper;
 use hive_ui_core::HiveTheme;
-use hive_ui_core::{TokenLaunchDeploy, TokenLaunchSelectChain, TokenLaunchSetStep};
+use hive_ui_core::{
+    TokenLaunchCreateWallet, TokenLaunchDeploy, TokenLaunchImportWallet,
+    TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSelectChain,
+    TokenLaunchSelectWallet, TokenLaunchSetStep,
+};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -93,6 +98,14 @@ pub enum DeployStatus {
     Failed(String),
 }
 
+/// A saved wallet available for the currently selected chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedWalletOption {
+    pub id: String,
+    pub name: String,
+    pub address: String,
+}
+
 /// All data needed to render and drive the Token Launch Wizard.
 #[derive(Debug, Clone)]
 pub struct TokenLaunchData {
@@ -102,8 +115,10 @@ pub struct TokenLaunchData {
     pub token_symbol: String,
     pub total_supply: String,
     pub decimals: u8,
+    pub wallet_id: Option<String>,
     pub wallet_address: Option<String>,
     pub wallet_balance: Option<f64>,
+    pub available_wallets: Vec<SavedWalletOption>,
     pub estimated_cost: Option<f64>,
     pub deploy_status: DeployStatus,
 }
@@ -118,8 +133,10 @@ impl TokenLaunchData {
             token_symbol: String::new(),
             total_supply: String::new(),
             decimals: 9,
+            wallet_id: None,
             wallet_address: None,
             wallet_balance: None,
+            available_wallets: Vec::new(),
             estimated_cost: None,
             deploy_status: DeployStatus::NotStarted,
         }
@@ -174,12 +191,38 @@ impl TokenLaunchData {
             _ => false,
         }
     }
+
+    /// Whether the current state is ready to submit a deployment request.
+    pub fn can_deploy(&self) -> bool {
+        self.selected_chain.is_some()
+            && !self.token_name.trim().is_empty()
+            && !self.token_symbol.trim().is_empty()
+            && !self.total_supply.trim().is_empty()
+            && self.wallet_id.is_some()
+            && self.wallet_address.is_some()
+            && !matches!(self.deploy_status, DeployStatus::Deploying)
+            && match (self.wallet_balance, self.estimated_cost) {
+                (Some(balance), Some(cost)) => balance >= cost,
+                _ => true,
+            }
+    }
 }
 
 impl Default for TokenLaunchData {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Clone)]
+pub struct TokenLaunchInputs {
+    pub token_name: Entity<InputState>,
+    pub token_symbol: Entity<InputState>,
+    pub total_supply: Entity<InputState>,
+    pub decimals: Entity<InputState>,
+    pub wallet_name: Entity<InputState>,
+    pub wallet_secret: Entity<InputState>,
+    pub rpc_url: Entity<InputState>,
 }
 
 // ---------------------------------------------------------------------------
@@ -191,11 +234,15 @@ pub struct TokenLaunchPanel;
 
 impl TokenLaunchPanel {
     /// Render the wizard with the given data snapshot.
-    pub fn render(data: &TokenLaunchData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &TokenLaunchData,
+        inputs: &TokenLaunchInputs,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         let step_content: AnyElement = match data.current_step {
             WizardStep::SelectChain => render_chain_selection(data, theme),
-            WizardStep::TokenDetails => render_token_details(data, theme),
-            WizardStep::WalletSetup => render_wallet_step(data, theme),
+            WizardStep::TokenDetails => render_token_details(data, inputs, theme),
+            WizardStep::WalletSetup => render_wallet_step(data, inputs, theme),
             WizardStep::Deploy => render_deploy_step(data, theme),
         };
 
@@ -322,7 +369,7 @@ fn separator(theme: &HiveTheme) -> AnyElement {
 }
 
 /// A styled button with accent background.
-fn accent_button(label: &str, color: Hsla, theme: &HiveTheme) -> AnyElement {
+fn accent_button(label: &str, color: Hsla, theme: &HiveTheme) -> Div {
     div()
         .px(theme.space_4)
         .py(theme.space_2)
@@ -332,11 +379,10 @@ fn accent_button(label: &str, color: Hsla, theme: &HiveTheme) -> AnyElement {
         .text_color(theme.text_on_accent)
         .font_weight(FontWeight::SEMIBOLD)
         .child(label.to_string())
-        .into_any_element()
 }
 
 /// A styled secondary button with border.
-fn secondary_button(label: &str, theme: &HiveTheme) -> AnyElement {
+fn secondary_button(label: &str, theme: &HiveTheme) -> Div {
     div()
         .px(theme.space_4)
         .py(theme.space_2)
@@ -347,7 +393,6 @@ fn secondary_button(label: &str, theme: &HiveTheme) -> AnyElement {
         .text_size(theme.font_size_base)
         .text_color(theme.text_secondary)
         .child(label.to_string())
-        .into_any_element()
 }
 
 /// A disabled button (muted appearance, no cursor pointer).
@@ -363,15 +408,8 @@ fn disabled_button(label: &str, theme: &HiveTheme) -> AnyElement {
         .into_any_element()
 }
 
-/// A read-only input placeholder row (label + value box).
-fn input_row(label: &str, value: &str, placeholder: &str, theme: &HiveTheme) -> AnyElement {
-    let display = if value.is_empty() { placeholder } else { value };
-    let text_color = if value.is_empty() {
-        theme.text_muted
-    } else {
-        theme.text_primary
-    };
-
+/// An editable input row matching the surrounding card styling.
+fn input_row(label: &str, input_state: &Entity<InputState>, theme: &HiveTheme) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -385,16 +423,12 @@ fn input_row(label: &str, value: &str, placeholder: &str, theme: &HiveTheme) -> 
         )
         .child(
             div()
-                .px(theme.space_3)
-                .py(theme.space_2)
                 .w_full()
                 .rounded(theme.radius_sm)
-                .bg(theme.bg_primary)
                 .border_1()
                 .border_color(theme.border)
-                .text_size(theme.font_size_base)
-                .text_color(text_color)
-                .child(display.to_string()),
+                .bg(theme.bg_primary)
+                .child(Input::new(input_state).appearance(true).cleanable(false)),
         )
         .into_any_element()
 }
@@ -605,7 +639,11 @@ fn render_chain_card(
 // Step 2: Token Details
 // ---------------------------------------------------------------------------
 
-fn render_token_details(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
+fn render_token_details(
+    data: &TokenLaunchData,
+    inputs: &TokenLaunchInputs,
+    theme: &HiveTheme,
+) -> AnyElement {
     let chain_label = data
         .selected_chain
         .map(|c| format!("{} ({})", c.name(), c.standard()))
@@ -644,30 +682,10 @@ fn render_token_details(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement
                 ),
         )
         // Input fields
-        .child(input_row(
-            "Token Name",
-            &data.token_name,
-            "e.g. My Awesome Token",
-            theme,
-        ))
-        .child(input_row(
-            "Token Symbol (3-5 chars)",
-            &data.token_symbol,
-            "e.g. MAT",
-            theme,
-        ))
-        .child(input_row(
-            "Total Supply",
-            &data.total_supply,
-            "e.g. 1000000000",
-            theme,
-        ))
-        .child(input_row(
-            "Decimals",
-            &data.decimals.to_string(),
-            "9",
-            theme,
-        ))
+        .child(input_row("Token Name", &inputs.token_name, theme))
+        .child(input_row("Token Symbol (3-5 chars)", &inputs.token_symbol, theme))
+        .child(input_row("Total Supply", &inputs.total_supply, theme))
+        .child(input_row("Decimals", &inputs.decimals, theme))
         .into_any_element()
 }
 
@@ -675,8 +693,17 @@ fn render_token_details(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement
 // Step 3: Wallet
 // ---------------------------------------------------------------------------
 
-fn render_wallet_step(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
+fn render_wallet_step(
+    data: &TokenLaunchData,
+    inputs: &TokenLaunchInputs,
+    theme: &HiveTheme,
+) -> AnyElement {
     let chain_name = data.selected_chain.map(|c| c.name()).unwrap_or("Unknown");
+    let secret_label = match data.selected_chain {
+        Some(ChainOption::Solana) => "Private Key (hex or base58)",
+        Some(ChainOption::Ethereum | ChainOption::Base) => "Private Key (hex)",
+        None => "Private Key",
+    };
 
     let wallet_display: AnyElement = match &data.wallet_address {
         Some(address) => {
@@ -704,6 +731,104 @@ fn render_wallet_step(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
                     .child("Create or import a wallet to continue"),
             )
             .into_any_element(),
+    };
+
+    let wallet_picker: AnyElement = if data.available_wallets.is_empty() {
+        div().into_any_element()
+    } else {
+        div()
+            .flex()
+            .flex_col()
+            .gap(theme.space_2)
+            .child(
+                div()
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.text_muted)
+                    .child("Saved wallets for this chain"),
+            )
+            .children(data.available_wallets.iter().map(|wallet| {
+                let is_selected = data.wallet_id.as_deref() == Some(wallet.id.as_str());
+                let wallet_id = wallet.id.clone();
+                let border_color = if is_selected {
+                    theme.accent_aqua
+                } else {
+                    theme.border
+                };
+                let badge_bg = if is_selected {
+                    theme.accent_aqua
+                } else {
+                    theme.bg_tertiary
+                };
+                let badge_text = if is_selected {
+                    theme.text_on_accent
+                } else {
+                    theme.text_muted
+                };
+
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .gap(theme.space_3)
+                    .p(theme.space_3)
+                    .rounded(theme.radius_md)
+                    .bg(theme.bg_primary)
+                    .border_1()
+                    .border_color(border_color)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(theme.space_1)
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(theme.text_primary)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(wallet.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .font_family(theme.font_mono.clone())
+                                    .child(wallet.address.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .child(
+                                div()
+                                    .px(theme.space_2)
+                                    .py(px(2.0))
+                                    .rounded(theme.radius_sm)
+                                    .bg(badge_bg)
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(badge_text)
+                                    .child(if is_selected { "Connected" } else { "Saved" }),
+                            )
+                            .child(if is_selected {
+                                div().into_any_element()
+                            } else {
+                                secondary_button("Use Wallet", theme)
+                                    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(TokenLaunchSelectWallet {
+                                                wallet_id: wallet_id.clone(),
+                                            }),
+                                            cx,
+                                        );
+                                    })
+                                    .into_any_element()
+                            }),
+                    )
+            }))
+            .into_any_element()
     };
 
     let fund_status: AnyElement = if data.wallet_address.is_some() {
@@ -780,6 +905,16 @@ fn render_wallet_step(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
             theme,
         ))
         .child(separator(theme))
+        .child(input_row("Wallet Name", &inputs.wallet_name, theme))
+        .child(input_row(secret_label, &inputs.wallet_secret, theme))
+        .child(input_row("RPC Endpoint", &inputs.rpc_url, theme))
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child("Used for balance, cost, and deployment RPC calls on the selected chain."),
+        )
+        .child(wallet_picker)
         .child(wallet_display)
         // Action buttons
         .child(
@@ -789,8 +924,44 @@ fn render_wallet_step(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .gap(theme.space_3)
-                .child(accent_button("Create New Wallet", theme.accent_aqua, theme))
-                .child(secondary_button("Import Existing", theme)),
+                .child(
+                    accent_button("Create New Wallet", theme.accent_aqua, theme)
+                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                            window.dispatch_action(Box::new(TokenLaunchCreateWallet), cx);
+                        }),
+                )
+                .child(
+                    secondary_button("Import Existing", theme).on_mouse_down(
+                        MouseButton::Left,
+                        |_event, window, cx| {
+                            window.dispatch_action(Box::new(TokenLaunchImportWallet), cx);
+                        },
+                    ),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_center()
+                .gap(theme.space_3)
+                .child(
+                    secondary_button("Save RPC", theme).on_mouse_down(
+                        MouseButton::Left,
+                        |_event, window, cx| {
+                            window.dispatch_action(Box::new(TokenLaunchSaveRpcConfig), cx);
+                        },
+                    ),
+                )
+                .child(
+                    secondary_button("Reset RPC", theme).on_mouse_down(
+                        MouseButton::Left,
+                        |_event, window, cx| {
+                            window.dispatch_action(Box::new(TokenLaunchResetRpcConfig), cx);
+                        },
+                    ),
+                ),
         )
         .child(fund_status)
         .child(cost_display)
@@ -828,6 +999,33 @@ fn render_deploy_step(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
         "--"
     } else {
         &data.total_supply
+    };
+
+    let deploy_button: AnyElement = if data.can_deploy() {
+        div()
+            .id("btn-deploy-token")
+            .px(theme.space_8)
+            .py(theme.space_3)
+            .rounded(theme.radius_lg)
+            .bg(theme.accent_aqua)
+            .text_size(theme.font_size_lg)
+            .text_color(theme.text_on_accent)
+            .font_weight(FontWeight::BOLD)
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                window.dispatch_action(Box::new(TokenLaunchDeploy), cx);
+            })
+            .child("\u{1F680} Deploy Token")
+            .into_any_element()
+    } else {
+        disabled_button(
+            if matches!(data.deploy_status, DeployStatus::Deploying) {
+                "\u{23F3} Deploying..."
+            } else {
+                "\u{1F680} Deploy Token"
+            },
+            theme,
+        )
     };
 
     let status_display: AnyElement = match &data.deploy_status {
@@ -974,22 +1172,7 @@ fn render_deploy_step(data: &TokenLaunchData, theme: &HiveTheme) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .py(theme.space_3)
-                .child(
-                    div()
-                        .id("btn-deploy-token")
-                        .px(theme.space_8)
-                        .py(theme.space_3)
-                        .rounded(theme.radius_lg)
-                        .bg(theme.accent_aqua)
-                        .text_size(theme.font_size_lg)
-                        .text_color(theme.text_on_accent)
-                        .font_weight(FontWeight::BOLD)
-                        .cursor_pointer()
-                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                            window.dispatch_action(Box::new(TokenLaunchDeploy), cx);
-                        })
-                        .child("\u{1F680} Deploy Token"),
-                ),
+                .child(deploy_button),
         )
         // Status area
         .child(status_display)

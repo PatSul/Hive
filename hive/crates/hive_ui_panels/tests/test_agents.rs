@@ -71,9 +71,13 @@ fn run_display_is_active() {
 fn agents_panel_data_empty() {
     let data = AgentsPanelData::empty();
     assert!(data.personas.is_empty());
+    assert!(data.remote_agents.is_empty());
     assert!(data.workflows.is_empty());
     assert!(data.active_runs.is_empty());
     assert!(data.run_history.is_empty());
+    assert!(data.remote_run_history.is_empty());
+    assert!(data.selected_remote_agent.is_none());
+    assert!(data.selected_remote_skill.is_none());
     assert_eq!(data.workflow_source_dir, ".hive/workflows");
 }
 
@@ -81,7 +85,10 @@ fn agents_panel_data_empty() {
 fn agents_panel_data_sample() {
     let data = AgentsPanelData::sample();
     assert_eq!(data.personas.len(), 6);
+    assert_eq!(data.remote_agents.len(), 1);
     assert_eq!(data.workflows.len(), 2);
     assert_eq!(data.active_runs.len(), 1);
     assert_eq!(data.run_history.len(), 1);
+    assert_eq!(data.remote_run_history.len(), 1);
+    assert_eq!(data.selected_remote_agent.as_deref(), Some("Remote Builder"));
 }

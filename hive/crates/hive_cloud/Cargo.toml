@@ -12,7 +12,11 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+chrono = { workspace = true }
 jsonwebtoken = "9.3.0"
 async-stripe = { version = "0.39", features = ["runtime-tokio-hyper", "checkout"] }
 futures = { workspace = true }
 hive_remote = { path = "../hive_remote" }
+
+[dev-dependencies]
+reqwest = { workspace = true }

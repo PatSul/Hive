@@ -8,11 +8,50 @@
 //! via [`wire_integration_handlers`] once the integration services are
 //! initialized as GPUI globals.
 
+use async_trait::async_trait;
 use crate::mcp_client::McpTool;
 use crate::mcp_server::ToolHandler;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+
+/// MCP-facing summary of a configured outbound A2A agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct A2aAgentRecord {
+    pub name: String,
+    pub url: String,
+    pub api_key_configured: bool,
+    pub discovered: bool,
+    pub card_name: Option<String>,
+    pub description: Option<String>,
+    pub version: Option<String>,
+    pub skills: Vec<String>,
+}
+
+/// MCP-facing result of running a prompt against a remote A2A agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct A2aTaskRecord {
+    pub agent_name: String,
+    pub url: String,
+    pub task_id: String,
+    pub state: String,
+    pub skill_id: Option<String>,
+    pub output: String,
+}
+
+/// Trait implemented by the app-owned outbound A2A service.
+#[async_trait]
+pub trait OutboundA2aService: Send + Sync {
+    async fn list_agents(&self) -> Result<Vec<A2aAgentRecord>, String>;
+    async fn discover_agent(&self, identifier: &str) -> Result<A2aAgentRecord, String>;
+    async fn run_task(
+        &self,
+        identifier: &str,
+        prompt: &str,
+        skill_id: Option<&str>,
+    ) -> Result<A2aTaskRecord, String>;
+}
 
 /// Return all integration tool definitions with default (stub) handlers.
 ///
@@ -52,8 +91,23 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
         (k8s_pods_tool(), stub("Ensure kubeconfig is configured to see real pods")),
         // --- Cloud ---
         (cloud_resources_tool(), stub("Configure cloud credentials in Settings to see real resources")),
+        // --- A2A ---
+        (a2a_list_agents_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to list them here")),
+        (a2a_discover_agent_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to discover their skills")),
+        (a2a_run_task_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to run remote tasks")),
         // --- Browser ---
         (browse_url_tool(), stub("Browser automation available — content extraction pending connection")),
+        // --- Local AI / Ollama ---
+        (ollama_list_models_tool(), stub("Point Settings > Local AI at a running Ollama instance to list models")),
+        (ollama_pull_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to pull models")),
+        (ollama_show_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to inspect models")),
+        (ollama_delete_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to delete models")),
+        // --- Smart Home / Hue ---
+        (hue_discover_bridges_tool(), stub("Hue bridge discovery is available when local networking is reachable")),
+        (hue_list_lights_tool(), stub("Configure a Hue bridge and API key in Settings to list lights")),
+        (hue_set_light_state_tool(), stub("Configure a Hue bridge and API key in Settings to control lights")),
+        (hue_list_scenes_tool(), stub("Configure a Hue bridge and API key in Settings to list scenes")),
+        (hue_activate_scene_tool(), stub("Configure a Hue bridge and API key in Settings to activate scenes")),
         // --- Docs Search ---
         (search_docs_tool(), stub("Run /index-docs to build the documentation index first")),
         // --- Deploy ---
@@ -347,6 +401,47 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         }) as ToolHandler));
     }
 
+    // --- A2A ---
+    {
+        let svc = Arc::clone(&services.a2a);
+        tools.push((a2a_list_agents_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let agents = svc.list_agents().await?;
+                Ok(json!({
+                    "count": agents.len(),
+                    "agents": agents,
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.a2a);
+        tools.push((a2a_discover_agent_tool(), Box::new(move |args: serde_json::Value| {
+            let identifier = args["agent"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let agent = svc.discover_agent(&identifier).await?;
+                Ok(json!(agent))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.a2a);
+        tools.push((a2a_run_task_tool(), Box::new(move |args: serde_json::Value| {
+            let identifier = args["agent"].as_str().unwrap_or("").to_string();
+            let prompt = args["prompt"].as_str().unwrap_or("").to_string();
+            let skill_id = args["skill_id"].as_str().map(ToOwned::to_owned);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let result = svc.run_task(&identifier, &prompt, skill_id.as_deref()).await?;
+                Ok(json!(result))
+            })
+        }) as ToolHandler));
+    }
+
     // --- Browser ---
     {
         let svc = Arc::clone(&services.browser);
@@ -363,6 +458,168 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
                     })),
                     Err(e) => Err(format!("Browse failed: {e}")),
                 }
+            })
+        }) as ToolHandler));
+    }
+
+    // --- Local AI / Ollama ---
+    {
+        let svc = Arc::clone(&services.ollama);
+        tools.push((ollama_list_models_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let models = svc.list_models().await?;
+                Ok(json!({
+                    "count": models.len(),
+                    "models": models,
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.ollama);
+        tools.push((ollama_pull_model_tool(), Box::new(move |args: serde_json::Value| {
+            let model = args["model"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+                let model_name = model.clone();
+                let pull = tokio::spawn(async move { svc.pull_model(&model_name, tx).await });
+                let mut progress = Vec::new();
+                while let Some(update) = rx.recv().await {
+                    progress.push(json!(update));
+                }
+                match pull.await.map_err(|e| format!("Ollama pull task panicked: {e}"))? {
+                    Ok(()) => Ok(json!({
+                        "status": "pulled",
+                        "model": model,
+                        "progress": progress,
+                    })),
+                    Err(e) => Err(e),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.ollama);
+        tools.push((ollama_show_model_tool(), Box::new(move |args: serde_json::Value| {
+            let model = args["model"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let info = svc.show_model(&model).await?;
+                Ok(json!(info))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.ollama);
+        tools.push((ollama_delete_model_tool(), Box::new(move |args: serde_json::Value| {
+            let model = args["model"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                svc.delete_model(&model).await?;
+                Ok(json!({
+                    "status": "deleted",
+                    "model": model,
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    // --- Smart Home / Hue ---
+    tools.push((hue_discover_bridges_tool(), Box::new(move |_args: serde_json::Value| {
+        block_on_async(async move {
+            let bridges = hive_integrations::smart_home::PhilipsHueClient::discover_bridges()
+                .await
+                .map_err(|e| format!("Hue discovery failed: {e}"))?;
+            Ok(json!({
+                "count": bridges.len(),
+                "bridges": bridges,
+            }))
+        })
+    }) as ToolHandler));
+
+    {
+        let svc = services.hue.clone();
+        tools.push((hue_list_lights_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = svc.clone();
+            block_on_async(async move {
+                let client = svc
+                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                let lights = client
+                    .list_lights()
+                    .await
+                    .map_err(|e| format!("Hue lights request failed: {e}"))?;
+                Ok(json!({
+                    "count": lights.len(),
+                    "lights": lights,
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = services.hue.clone();
+        tools.push((hue_set_light_state_tool(), Box::new(move |args: serde_json::Value| {
+            let light_id = args["light_id"].as_str().unwrap_or("").to_string();
+            let on = args["on"].as_bool().unwrap_or(false);
+            let brightness = args["brightness"].as_u64().map(|value| value as u8);
+            let svc = svc.clone();
+            block_on_async(async move {
+                let client = svc
+                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                client
+                    .set_light_state(&light_id, on, brightness)
+                    .await
+                    .map_err(|e| format!("Hue light state update failed: {e}"))?;
+                Ok(json!({
+                    "status": "updated",
+                    "light_id": light_id,
+                    "on": on,
+                    "brightness": brightness,
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = services.hue.clone();
+        tools.push((hue_list_scenes_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = svc.clone();
+            block_on_async(async move {
+                let client = svc
+                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                let scenes = client
+                    .list_scenes()
+                    .await
+                    .map_err(|e| format!("Hue scenes request failed: {e}"))?;
+                Ok(json!({
+                    "count": scenes.len(),
+                    "scenes": scenes,
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = services.hue.clone();
+        tools.push((hue_activate_scene_tool(), Box::new(move |args: serde_json::Value| {
+            let scene_id = args["scene_id"].as_str().unwrap_or("").to_string();
+            let svc = svc.clone();
+            block_on_async(async move {
+                let client = svc
+                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                client
+                    .activate_scene(&scene_id)
+                    .await
+                    .map_err(|e| format!("Hue scene activation failed: {e}"))?;
+                Ok(json!({
+                    "status": "activated",
+                    "scene_id": scene_id,
+                }))
             })
         }) as ToolHandler));
     }
@@ -482,7 +739,10 @@ pub struct IntegrationServices {
     pub database: Arc<hive_integrations::database::DatabaseHub>,
     pub docker: Arc<hive_integrations::docker::DockerClient>,
     pub kubernetes: Arc<hive_integrations::kubernetes::KubernetesClient>,
+    pub a2a: Arc<dyn OutboundA2aService>,
     pub browser: Arc<hive_integrations::browser::BrowserAutomation>,
+    pub ollama: Arc<hive_terminal::local_ai::OllamaManager>,
+    pub hue: Option<Arc<hive_integrations::smart_home::PhilipsHueClient>>,
     pub aws: Arc<hive_integrations::cloud::AwsClient>,
     pub azure: Arc<hive_integrations::cloud::AzureClient>,
     pub gcp: Arc<hive_integrations::cloud::GcpClient>,
@@ -643,6 +903,47 @@ fn cloud_resources_tool() -> McpTool {
     }
 }
 
+fn a2a_list_agents_tool() -> McpTool {
+    McpTool {
+        name: "a2a_list_agents".into(),
+        description: "List configured outbound A2A agents from ~/.hive/a2a.toml".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn a2a_discover_agent_tool() -> McpTool {
+    McpTool {
+        name: "a2a_discover_agent".into(),
+        description: "Discover a configured remote A2A agent and return its advertised skills".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "agent": { "type": "string", "description": "Configured agent name or URL" }
+            },
+            "required": ["agent"]
+        }),
+    }
+}
+
+fn a2a_run_task_tool() -> McpTool {
+    McpTool {
+        name: "a2a_run_task".into(),
+        description: "Run a text prompt against a configured remote A2A agent".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "agent": { "type": "string", "description": "Configured agent name or URL" },
+                "prompt": { "type": "string", "description": "Prompt to send" },
+                "skill_id": { "type": "string", "description": "Optional remote skill id" }
+            },
+            "required": ["agent", "prompt"]
+        }),
+    }
+}
+
 fn browse_url_tool() -> McpTool {
     McpTool {
         name: "browse_url".into(),
@@ -654,6 +955,122 @@ fn browse_url_tool() -> McpTool {
                 "selector": { "type": "string", "description": "Optional CSS selector to extract specific content" }
             },
             "required": ["url"]
+        }),
+    }
+}
+
+fn ollama_list_models_tool() -> McpTool {
+    McpTool {
+        name: "ollama_list_models".into(),
+        description: "List models available on the configured Ollama endpoint".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn ollama_pull_model_tool() -> McpTool {
+    McpTool {
+        name: "ollama_pull_model".into(),
+        description: "Pull a model onto the configured Ollama endpoint".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "model": { "type": "string", "description": "Model name, e.g. llama3.2:latest" }
+            },
+            "required": ["model"]
+        }),
+    }
+}
+
+fn ollama_show_model_tool() -> McpTool {
+    McpTool {
+        name: "ollama_show_model".into(),
+        description: "Show metadata for a model on the configured Ollama endpoint".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "model": { "type": "string", "description": "Model name" }
+            },
+            "required": ["model"]
+        }),
+    }
+}
+
+fn ollama_delete_model_tool() -> McpTool {
+    McpTool {
+        name: "ollama_delete_model".into(),
+        description: "Delete a model from the configured Ollama endpoint".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "model": { "type": "string", "description": "Model name" }
+            },
+            "required": ["model"]
+        }),
+    }
+}
+
+fn hue_discover_bridges_tool() -> McpTool {
+    McpTool {
+        name: "hue_discover_bridges".into(),
+        description: "Discover Philips Hue bridges on the local network".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn hue_list_lights_tool() -> McpTool {
+    McpTool {
+        name: "hue_list_lights".into(),
+        description: "List lights from the configured Philips Hue bridge".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn hue_set_light_state_tool() -> McpTool {
+    McpTool {
+        name: "hue_set_light_state".into(),
+        description: "Set on/off and optional brightness for a Hue light".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "light_id": { "type": "string", "description": "Hue light id" },
+                "on": { "type": "boolean", "description": "Desired on/off state" },
+                "brightness": { "type": "integer", "description": "Optional Hue brightness value (1-254)" }
+            },
+            "required": ["light_id", "on"]
+        }),
+    }
+}
+
+fn hue_list_scenes_tool() -> McpTool {
+    McpTool {
+        name: "hue_list_scenes".into(),
+        description: "List scenes from the configured Philips Hue bridge".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn hue_activate_scene_tool() -> McpTool {
+    McpTool {
+        name: "hue_activate_scene".into(),
+        description: "Activate a scene on the configured Philips Hue bridge".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "scene_id": { "type": "string", "description": "Hue scene id" }
+            },
+            "required": ["scene_id"]
         }),
     }
 }
@@ -889,5 +1306,291 @@ async fn list_gcp_resources(
             })).collect();
             Ok(json!({ "provider": "gcp", "resource_type": "compute", "count": items.len(), "resources": items }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::extract::Path;
+    use axum::http::{HeaderValue, StatusCode, header};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::{delete, get, post, put};
+    use axum::{Json, Router};
+    use serde_json::Value;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::net::TcpListener;
+
+    #[derive(Default)]
+    struct MockA2aService {
+        runs: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl OutboundA2aService for MockA2aService {
+        async fn list_agents(&self) -> Result<Vec<A2aAgentRecord>, String> {
+            Ok(vec![A2aAgentRecord {
+                name: "remote-builder".into(),
+                url: "http://remote.example.test".into(),
+                api_key_configured: true,
+                discovered: true,
+                card_name: Some("Remote Builder".into()),
+                description: Some("Builds remotely".into()),
+                version: Some("1.0.0".into()),
+                skills: vec!["build".into(), "review".into()],
+            }])
+        }
+
+        async fn discover_agent(&self, identifier: &str) -> Result<A2aAgentRecord, String> {
+            if identifier == "missing" {
+                return Err("agent not found".into());
+            }
+            Ok(A2aAgentRecord {
+                name: identifier.into(),
+                url: "http://remote.example.test".into(),
+                api_key_configured: true,
+                discovered: true,
+                card_name: Some("Remote Builder".into()),
+                description: Some("Builds remotely".into()),
+                version: Some("1.0.0".into()),
+                skills: vec!["build".into()],
+            })
+        }
+
+        async fn run_task(
+            &self,
+            identifier: &str,
+            prompt: &str,
+            skill_id: Option<&str>,
+        ) -> Result<A2aTaskRecord, String> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            if identifier == "missing" {
+                return Err("agent not found".into());
+            }
+            Ok(A2aTaskRecord {
+                agent_name: identifier.into(),
+                url: "http://remote.example.test".into(),
+                task_id: "task-1".into(),
+                state: "Completed".into(),
+                skill_id: skill_id.map(ToOwned::to_owned),
+                output: format!("ran: {prompt}"),
+            })
+        }
+    }
+
+    fn test_services(
+        a2a: Arc<dyn OutboundA2aService>,
+        ollama_url: Option<String>,
+        hue: Option<Arc<hive_integrations::smart_home::PhilipsHueClient>>,
+    ) -> IntegrationServices {
+        IntegrationServices {
+            messaging: Arc::new(hive_integrations::messaging::MessagingHub::new()),
+            project_management: Arc::new(
+                hive_integrations::project_management::ProjectManagementHub::new(),
+            ),
+            knowledge: Arc::new(hive_integrations::knowledge::KnowledgeHub::new()),
+            database: Arc::new(hive_integrations::database::DatabaseHub::new()),
+            docker: Arc::new(hive_integrations::docker::DockerClient::new()),
+            kubernetes: Arc::new(hive_integrations::kubernetes::KubernetesClient::new()),
+            a2a,
+            browser: Arc::new(hive_integrations::browser::BrowserAutomation::new()),
+            ollama: Arc::new(hive_terminal::local_ai::OllamaManager::new(ollama_url)),
+            hue,
+            aws: Arc::new(hive_integrations::cloud::AwsClient::new(None, None)),
+            azure: Arc::new(hive_integrations::cloud::AzureClient::new(None)),
+            gcp: Arc::new(hive_integrations::cloud::GcpClient::new(None)),
+            docs_indexer: Arc::new(hive_integrations::docs_indexer::DocsIndexer::empty()),
+        }
+    }
+
+    fn call_tool(
+        tools: &[(McpTool, ToolHandler)],
+        name: &str,
+        args: Value,
+    ) -> Result<Value, String> {
+        let (_, handler) = tools
+            .iter()
+            .find(|(tool, _)| tool.name == name)
+            .unwrap_or_else(|| panic!("missing tool {name}"));
+        handler(args)
+    }
+
+    async fn start_ollama_server() -> String {
+        async fn tags() -> Json<Value> {
+            Json(serde_json::json!({
+                "models": [
+                    { "name": "llama3.2:latest", "size": 42, "modified_at": "2026-03-09T00:00:00Z" }
+                ]
+            }))
+        }
+
+        async fn show() -> Json<Value> {
+            Json(serde_json::json!({
+                "size": 42,
+                "modified_at": "2026-03-09T00:00:00Z"
+            }))
+        }
+
+        async fn delete_model() -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn pull() -> Response {
+            let body = Body::from(
+                "{\"status\":\"pulling manifest\",\"completed\":1,\"total\":2}\n{\"status\":\"success\"}\n",
+            );
+            (
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/x-ndjson"),
+                )],
+                body,
+            )
+                .into_response()
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/api/tags", get(tags))
+            .route("/api/show", post(show))
+            .route("/api/delete", delete(delete_model))
+            .route("/api/pull", post(pull));
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("http://{addr}")
+    }
+
+    async fn start_hue_server() -> String {
+        async fn lights() -> Json<Value> {
+            Json(serde_json::json!({
+                "1": {
+                    "name": "Desk Lamp",
+                    "state": { "on": true, "bri": 200, "reachable": true }
+                }
+            }))
+        }
+
+        async fn set_light(Path(_id): Path<String>) -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn scenes() -> Json<Value> {
+            Json(serde_json::json!({
+                "scene-1": { "name": "Focus" }
+            }))
+        }
+
+        async fn activate_scene() -> StatusCode {
+            StatusCode::OK
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/lights", get(lights))
+            .route("/lights/:id/state", put(set_light))
+            .route("/scenes", get(scenes))
+            .route("/groups/0/action", put(activate_scene));
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("http://{addr}")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a2a_tools_use_shared_service() {
+        let services = test_services(Arc::new(MockA2aService::default()), None, None);
+        let tools = wire_integration_handlers(services);
+
+        let listed = call_tool(&tools, "a2a_list_agents", json!({})).unwrap();
+        assert_eq!(listed["count"], 1);
+        assert_eq!(listed["agents"][0]["name"], "remote-builder");
+
+        let discovered = call_tool(&tools, "a2a_discover_agent", json!({"agent": "remote-builder"})).unwrap();
+        assert_eq!(discovered["skills"][0], "build");
+
+        let ran = call_tool(
+            &tools,
+            "a2a_run_task",
+            json!({"agent": "remote-builder", "prompt": "ship it", "skill_id": "build"}),
+        )
+        .unwrap();
+        assert_eq!(ran["agent_name"], "remote-builder");
+        assert_eq!(ran["skill_id"], "build");
+        assert!(ran["output"].as_str().unwrap().contains("ship it"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ollama_tools_use_configured_endpoint() {
+        let ollama_url = start_ollama_server().await;
+        let services = test_services(
+            Arc::new(MockA2aService::default()),
+            Some(ollama_url),
+            None,
+        );
+        let tools = wire_integration_handlers(services);
+
+        let listed = call_tool(&tools, "ollama_list_models", json!({})).unwrap();
+        assert_eq!(listed["count"], 1);
+        assert_eq!(listed["models"][0]["name"], "llama3.2:latest");
+
+        let shown = call_tool(&tools, "ollama_show_model", json!({"model": "llama3.2:latest"})).unwrap();
+        assert_eq!(shown["name"], "llama3.2:latest");
+
+        let pulled = call_tool(&tools, "ollama_pull_model", json!({"model": "llama3.2:latest"})).unwrap();
+        assert_eq!(pulled["status"], "pulled");
+        assert!(pulled["progress"].as_array().unwrap().len() >= 2);
+
+        let deleted = call_tool(&tools, "ollama_delete_model", json!({"model": "llama3.2:latest"})).unwrap();
+        assert_eq!(deleted["status"], "deleted");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hue_tools_use_configured_client_and_fail_without_one() {
+        let hue_url = start_hue_server().await;
+        let hue_client = Arc::new(hive_integrations::smart_home::PhilipsHueClient::with_base_url(
+            "127.0.0.1",
+            "key",
+            &hue_url,
+        ));
+        let tools = wire_integration_handlers(test_services(
+            Arc::new(MockA2aService::default()),
+            None,
+            Some(hue_client),
+        ));
+
+        let lights = call_tool(&tools, "hue_list_lights", json!({})).unwrap();
+        assert_eq!(lights["count"], 1);
+        assert_eq!(lights["lights"][0]["name"], "Desk Lamp");
+
+        let scenes = call_tool(&tools, "hue_list_scenes", json!({})).unwrap();
+        assert_eq!(scenes["count"], 1);
+        assert_eq!(scenes["scenes"][0]["name"], "Focus");
+
+        let updated = call_tool(
+            &tools,
+            "hue_set_light_state",
+            json!({"light_id": "1", "on": true, "brightness": 180}),
+        )
+        .unwrap();
+        assert_eq!(updated["status"], "updated");
+
+        let activated = call_tool(&tools, "hue_activate_scene", json!({"scene_id": "scene-1"})).unwrap();
+        assert_eq!(activated["status"], "activated");
+
+        let missing = wire_integration_handlers(test_services(
+            Arc::new(MockA2aService::default()),
+            None,
+            None,
+        ));
+        let err = call_tool(&missing, "hue_list_lights", json!({})).unwrap_err();
+        assert!(err.contains("not configured"));
     }
 }

@@ -86,10 +86,7 @@ impl DiscoveryCache {
 /// 3. HTTP GET the well-known agent card endpoint
 /// 4. Parse the response as an [`AgentCard`]
 /// 5. Cache the result and return it
-pub async fn discover_agent(
-    base_url: &str,
-    cache: &DiscoveryCache,
-) -> Result<AgentCard, A2aError> {
+pub async fn discover_agent(base_url: &str, cache: &DiscoveryCache) -> Result<AgentCard, A2aError> {
     // 1. Check cache
     if let Some(card) = cache.get(base_url) {
         return Ok(card);
@@ -100,9 +97,9 @@ pub async fn discover_agent(
     validate_outbound_url(&card_url)?;
 
     // 3. Fetch
-    let response = reqwest::get(&card_url)
-        .await
-        .map_err(|e| A2aError::Network(format!("Failed to fetch agent card from {card_url}: {e}")))?;
+    let response = reqwest::get(&card_url).await.map_err(|e| {
+        A2aError::Network(format!("Failed to fetch agent card from {card_url}: {e}"))
+    })?;
 
     if !response.status().is_success() {
         return Err(A2aError::Network(format!(
@@ -112,10 +109,9 @@ pub async fn discover_agent(
     }
 
     // 4. Parse
-    let card: AgentCard = response
-        .json()
-        .await
-        .map_err(|e| A2aError::Network(format!("Failed to parse agent card from {card_url}: {e}")))?;
+    let card: AgentCard = response.json().await.map_err(|e| {
+        A2aError::Network(format!("Failed to parse agent card from {card_url}: {e}"))
+    })?;
 
     // 5. Cache and return
     cache.insert(base_url, card.clone());

@@ -26,12 +26,13 @@ use hive_ai::tts::service::TtsService;
 use hive_agents::collective_memory::CollectiveMemory;
 use hive_agents::standup::StandupService;
 use hive_agents::competence_detection::CompetenceDetector;
+use hive_a2a::A2aClientService;
 use hive_assistant::AssistantService;
 use hive_blockchain::rpc_config::RpcConfigStore;
 use hive_blockchain::wallet_store::WalletStore;
 use hive_core::channels::ChannelStore;
 use hive_core::scheduler::Scheduler;
-use hive_network::HiveNode;
+use hive_network::HiveNodeHandle;
 use hive_core::config::ConfigManager;
 use hive_core::notifications::NotificationStore;
 use hive_core::persistence::Database;
@@ -49,9 +50,11 @@ use hive_integrations::knowledge::KnowledgeHub;
 use hive_integrations::kubernetes::KubernetesClient;
 use hive_integrations::messaging::MessagingHub;
 use hive_integrations::project_management::ProjectManagementHub;
+use hive_integrations::smart_home::PhilipsHueClient;
 use hive_learn::LearningService;
 use hive_shield::HiveShield;
 use hive_terminal::CliService;
+use hive_terminal::local_ai::OllamaManager;
 
 /// Global wrapper for the AI service (providers, routing, cost tracking).
 pub struct AppAiService(pub AiService);
@@ -149,12 +152,11 @@ impl Global for AppIde {}
 pub struct AppChannels(pub ChannelStore);
 impl Global for AppChannels {}
 
-/// Global wrapper for the P2P network node (federation, peer discovery).
+/// Global wrapper for the live P2P network query handle.
 ///
-/// The node is initialized at startup and begins listening for connections
-/// and discovering LAN peers in the background.  Use `AppNetwork::0` to
-/// access the `HiveNode` handle for peer queries and message sending.
-pub struct AppNetwork(pub Arc<HiveNode>);
+/// The running node lives on a background runtime. `AppNetwork` exposes a
+/// shared read-only handle so the UI can inspect the real peer registry.
+pub struct AppNetwork(pub Arc<HiveNodeHandle>);
 impl Global for AppNetwork {}
 
 /// Global wrapper for the messaging hub (Slack, Discord, Teams, etc.).
@@ -184,6 +186,18 @@ impl Global for AppKubernetes {}
 /// Global wrapper for browser automation.
 pub struct AppBrowser(pub Arc<BrowserAutomation>);
 impl Global for AppBrowser {}
+
+/// Global wrapper for outbound A2A client operations.
+pub struct AppA2aClient(pub Arc<A2aClientService>);
+impl Global for AppA2aClient {}
+
+/// Global wrapper for Ollama model management.
+pub struct AppOllamaManager(pub Arc<OllamaManager>);
+impl Global for AppOllamaManager {}
+
+/// Global wrapper for Philips Hue smart-home integration.
+pub struct AppHueClient(pub Option<Arc<PhilipsHueClient>>);
+impl Global for AppHueClient {}
 
 /// Global wrapper for Bitbucket integration.
 pub struct AppBitbucket(pub Arc<BitbucketClient>);

@@ -1,5 +1,7 @@
+use anyhow::Context;
 use crate::relay::RelayFrame;
 use futures::{SinkExt, StreamExt};
+use hive_core::config::HiveConfig;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{error, info, warn};
@@ -21,6 +23,24 @@ impl RelayClient {
     pub async fn connect(
         &self,
         node_id: &str,
+    ) -> anyhow::Result<(
+        mpsc::UnboundedSender<RelayFrame>,
+        mpsc::UnboundedReceiver<RelayFrame>,
+    )> {
+        let config_token = HiveConfig::load().ok().and_then(|config| config.cloud_jwt);
+        let session_token = Self::resolve_session_token(
+            std::env::var("HIVE_SESSION_TOKEN").ok(),
+            std::env::var("HIVE_CLOUD_JWT").ok().or(config_token),
+        )
+        .context("No relay session token configured. Set HIVE_SESSION_TOKEN or log in to Hive Cloud.")?;
+
+        self.connect_with_token(node_id, &session_token).await
+    }
+
+    pub async fn connect_with_token(
+        &self,
+        node_id: &str,
+        session_token: &str,
     ) -> anyhow::Result<(
         mpsc::UnboundedSender<RelayFrame>,
         mpsc::UnboundedReceiver<RelayFrame>,
@@ -70,10 +90,45 @@ impl RelayClient {
 
         // Immediately send a Register frame upon connection
         let _ = tx_in.send(RelayFrame::Register {
-            session_token: "TODO_JWT".into(),
+            session_token: session_token.to_string(),
             node_id: node_id.to_string(),
         });
 
         Ok((tx_in, rx_out))
+    }
+
+    fn resolve_session_token(
+        env_token: Option<String>,
+        config_token: Option<String>,
+    ) -> Option<String> {
+        env_token
+            .filter(|token| !token.trim().is_empty())
+            .or_else(|| config_token.filter(|token| !token.trim().is_empty()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RelayClient;
+
+    #[test]
+    fn resolve_session_token_prefers_env() {
+        let token = RelayClient::resolve_session_token(
+            Some("env-token".into()),
+            Some("config-token".into()),
+        );
+        assert_eq!(token.as_deref(), Some("env-token"));
+    }
+
+    #[test]
+    fn resolve_session_token_uses_config_fallback() {
+        let token = RelayClient::resolve_session_token(None, Some("config-token".into()));
+        assert_eq!(token.as_deref(), Some("config-token"));
+    }
+
+    #[test]
+    fn resolve_session_token_rejects_blank_values() {
+        let token = RelayClient::resolve_session_token(Some("   ".into()), Some("".into()));
+        assert!(token.is_none());
     }
 }

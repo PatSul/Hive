@@ -1,8 +1,9 @@
 # Hive — Comprehensive Test Plan
 
 > **Generated**: 2026-02-10
-> **Target**: rust/main branch
-> **Scope**: All 11 crates in the Hive workspace
+> **Updated**: 2026-03-08
+> **Target**: current workspace
+> **Scope**: targeted MVP validation matrix for the current Rust workspace
 
 ---
 
@@ -25,35 +26,39 @@
 ### Running Tests
 
 ```bash
-# Full suite (from hive/ directory)
-cargo test
+# Recommended Windows entry point (from hive/ directory)
+verify.bat
 
-# Individual crate
-cargo test -p hive_ai
-cargo test -p hive_core
-cargo test -p hive_agents
-cargo test -p hive_terminal
-cargo test -p hive_fs
-cargo test -p hive_shield
-cargo test -p hive_docs
-cargo test -p hive_blockchain
-cargo test -p hive_integrations
+# Recommended macOS/Linux entry point (from hive/ directory)
+./verify.sh
 
-# Skip UI crate (has stack overflow in full compile)
-cargo test -p hive_ai -p hive_core -p hive_agents -p hive_terminal -p hive_fs -p hive_app
+# Validated cargo check slice
+cargo check -p hive_cloud -p hive_admin -p hive_terminal -p hive_blockchain -p hive_ui_panels -p hive_ui -p hive_app
+
+# Validated backend/service tests
+cargo test -p hive_a2a -p hive_cloud -p hive_admin -p hive_cli -p hive_terminal -p hive_blockchain -q
+
+# Targeted UI regression test for the token launch flow
+cargo test -p hive_ui --test test_token_launch -q
 ```
 
 ### Test Categories
 
 | Category | Type | Tool | Coverage |
 |----------|------|------|----------|
-| Unit | Automated | `cargo test` | All crates |
-| Integration | Automated | `cargo test` (feature-gated) | Cross-crate |
-| UI | Manual | Application launch | 16 panels |
-| Security | Automated + Manual | `cargo test` + manual review | Security gate |
-| Provider | Manual (needs API keys) | Application + curl | 9 providers |
+| Compile | Automated | `cargo check` | Current MVP/UI/backend slice |
+| Backend | Automated | `cargo test` | A2A, cloud, admin, CLI, terminal, blockchain |
+| Token Launch | Automated | `cargo test -p hive_ui --test test_token_launch` | Wallet + deploy wizard state flow |
+| UI | Manual | Application launch | Visual verification of affected panels |
+| Provider | Manual (needs API keys) | Application + curl | External AI/integration services |
 | E2E | Manual | Full application flow | Key workflows |
 | Performance | Manual | Profiling tools | Streaming, startup |
+
+### Platform Coverage
+
+- Windows: `verify.bat`
+- macOS: `./verify.sh`
+- Linux: `./verify.sh` after installing the documented system packages for GPUI/windowing dependencies
 
 ---
 

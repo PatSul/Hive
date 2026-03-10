@@ -1,6 +1,7 @@
 use gpui::*;
 use gpui_component::{Icon, IconName};
 
+use crate::SwitchToQuickStart;
 use crate::theme::HiveTheme;
 
 /// Welcome screen shown before the first message.
@@ -48,6 +49,7 @@ impl WelcomeScreen {
                             .text_color(theme.text_muted)
                             .child("Start by typing a message below, or:"),
                     )
+                    .child(quick_start_button(theme))
                     .child(hint_row(
                         theme,
                         IconName::Settings,
@@ -65,6 +67,27 @@ impl WelcomeScreen {
                     )),
             )
     }
+}
+
+fn quick_start_button(theme: &HiveTheme) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_3)
+        .py(theme.space_2)
+        .rounded(theme.radius_md)
+        .bg(theme.accent_cyan)
+        .text_color(theme.text_on_accent)
+        .text_size(theme.font_size_sm)
+        .font_weight(FontWeight::SEMIBOLD)
+        .hover(|style| style.bg(theme.accent_aqua))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+            window.dispatch_action(Box::new(SwitchToQuickStart), cx);
+        })
+        .child(Icon::new(IconName::Star).size_4().text_color(theme.text_on_accent))
+        .child("Run Quick Start for this project")
 }
 
 fn hint_row(theme: &HiveTheme, icon: IconName, text: &str) -> impl IntoElement {

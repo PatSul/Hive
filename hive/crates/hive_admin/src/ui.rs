@@ -1,10 +1,10 @@
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders, Paragraph, Tabs as RatatuiTabs},
-    style::{Color, Modifier, Style},
-};
 use crate::app::{App, Tab};
 use crate::tabs;
+use ratatui::{
+    prelude::*,
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Paragraph, Tabs as RatatuiTabs},
+};
 
 const CYAN: Color = Color::Rgb(0, 212, 255);
 const DIM_WHITE: Color = Color::Rgb(180, 180, 180);
@@ -26,9 +26,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let titles: Vec<String> = Tab::ALL.iter().map(|t| t.label().to_string()).collect();
-    let selected = Tab::ALL.iter().position(|t| *t == app.current_tab).unwrap_or(0);
+    let selected = Tab::ALL
+        .iter()
+        .position(|t| *t == app.current_tab)
+        .unwrap_or(0);
     let tabs = RatatuiTabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title(" Hive Cloud Admin "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Hive Cloud Admin "),
+        )
         .select(selected)
         .style(Style::default().fg(DIM_WHITE))
         .highlight_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD));

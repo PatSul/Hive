@@ -1,5 +1,6 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::input::{InputEvent, InputState};
 use gpui_component::{Icon, IconName};
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::theme::Theme as GpuiTheme;
@@ -24,17 +25,20 @@ use crate::chat_service::{ChatService, StreamCompleted};
 use chrono::Utc;
 use hive_ui_core::{
     // Globals
-    AppAiService, AppAssistant, AppAutomation, AppChannels, AppConfig, AppDatabase, AppKnowledge,
-    AppKnowledgeFiles, AppHiveMemory, AppLearning, AppMarketplace, AppNetwork, AppNotifications,
-    AppPersonas, AppQuickIndex, AppSkillManager, AppRagService, AppContextEngine, AppSecurity,
-    AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
+    AppA2aClient, AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBrowser,
+    AppChannels, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppGcp, AppHueClient,
+    AppIntegrationDb, AppKnowledge, AppKnowledgeFiles, AppHiveMemory, AppKubernetes,
+    AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications,
+    AppOllamaManager, AppPersonas, AppProjectManagement, AppQuickIndex, AppSkillManager,
+    AppRagService, AppContextEngine, AppRpcConfig, AppSecurity, AppSemanticSearch, AppShield,
+    AppSpecs, AppTheme, AppTts, AppUpdater, AppWallets,
     // Types
     HiveTheme, Panel, Sidebar,
 };
 // Re-export actions so hive_app can import from hive_ui::workspace::*
 pub use hive_ui_core::{
     ClearChat, NewConversation,
-    SwitchToChat, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
+    SwitchToChat, SwitchToQuickStart, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
     SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
     SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToHelp,
@@ -60,9 +64,14 @@ pub use hive_ui_core::{
     PluginImportFromUrl, PluginImportFromLocal, PluginImportConfirm,
     PluginImportToggleSkill, PluginRemove, PluginUpdate, PluginToggleExpand,
     PluginToggleSkill, AppPluginManager,
-    RoutingAddRule, TokenLaunchDeploy, TokenLaunchSetStep, TokenLaunchSelectChain,
+    RoutingAddRule, TokenLaunchCreateWallet, TokenLaunchDeploy, TokenLaunchImportWallet,
+    TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSetStep,
+    TokenLaunchSelectChain, TokenLaunchSelectWallet,
     SettingsSave, ExportConfig, ImportConfig,
-    MonitorRefresh, NetworkRefresh, AgentsReloadWorkflows, AgentsRunWorkflow,
+    MonitorRefresh, NetworkRefresh, AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents,
+    AgentsReloadWorkflows, AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent,
+    AgentsSelectRemoteSkill,
+    QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate,
     SwitchToWorkflows, SwitchToChannels,
     WorkflowBuilderSave, WorkflowBuilderRun, WorkflowBuilderDeleteNode,
     WorkflowBuilderLoadWorkflow, ChannelSelect,
@@ -83,14 +92,18 @@ use hive_ui_panels::panels::{
     logs::{LogsData, LogsPanel},
     models_browser::{ModelsBrowserView, ProjectModelsChanged},
     monitor::{MonitorData, MonitorPanel, SystemResources},
-    network::{NetworkPanel, NetworkPeerData},
+    network::{NetworkPanel, NetworkPeerData, PeerDisplayInfo},
+    quick_start::{
+        QuickStartNextStepDisplay, QuickStartPanel, QuickStartPanelData,
+        QuickStartSetupDisplay, QuickStartTemplateDisplay, QuickStartTone,
+    },
     review::{AiCommitState, BranchEntry, GitOpsTab, LfsFileEntry, PrForm, PrSummary, ReviewData, ReviewPanel},
     routing::{RoutingData, RoutingPanel},
     settings::{SettingsSaved, SettingsView},
     shield::{ShieldConfigChanged, ShieldPanelData, ShieldView},
     skills::{SkillsData, SkillsPanel},
     specs::{SpecPanelData, SpecsPanel},
-    token_launch::{TokenLaunchData, TokenLaunchPanel},
+    token_launch::{TokenLaunchData, TokenLaunchInputs, TokenLaunchPanel},
     workflow_builder::{WorkflowBuilderView, WorkflowSaved, WorkflowRunRequested},
     channels::{ChannelsView, ChannelCreated, ChannelMessageSent},
 };
@@ -201,6 +214,8 @@ pub struct HiveWorkspace {
     current_project_root: PathBuf,
     current_project_name: String,
     chat_input: Entity<ChatInputView>,
+    quick_start_goal_input: Entity<InputState>,
+    agents_remote_prompt_input: Entity<InputState>,
     chat_service: Entity<ChatService>,
     settings_view: Entity<SettingsView>,
     shield_view: Entity<ShieldView>,
@@ -213,6 +228,7 @@ pub struct HiveWorkspace {
     focus_handle: FocusHandle,
     history_data: HistoryData,
     files_data: FilesData,
+    quick_start_data: QuickStartPanelData,
     kanban_data: KanbanData,
     monitor_data: MonitorData,
     logs_data: LogsData,
@@ -221,6 +237,7 @@ pub struct HiveWorkspace {
     routing_data: RoutingData,
     skills_data: SkillsData,
     token_launch_data: TokenLaunchData,
+    token_launch_inputs: TokenLaunchInputs,
     specs_data: SpecPanelData,
     agents_data: AgentsPanelData,
     shield_data: ShieldPanelData,
@@ -267,7 +284,7 @@ impl HiveWorkspace {
             let theme_name = if cx.has_global::<AppConfig>() {
                 cx.global::<AppConfig>().0.get().theme.clone()
             } else {
-                "dark".to_string()
+                "HiveCode Dark".to_string()
             };
             Self::resolve_theme_by_name(&theme_name)
         };
@@ -405,6 +422,26 @@ impl HiveWorkspace {
             },
         )
         .detach();
+
+        let quick_start_goal_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder(
+                "Describe what Hive should improve, complete, fix, or ship in this project",
+                window,
+                cx,
+            );
+            state
+        });
+
+        let agents_remote_prompt_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder(
+                "Ask the selected remote agent to review code, summarize docs, or handle a focused task",
+                window,
+                cx,
+            );
+            state
+        });
 
         // Create the interactive settings view entity.
         let settings_view = cx.new(|cx| SettingsView::new(window, cx));
@@ -583,11 +620,87 @@ impl HiveWorkspace {
         )
         .detach();
 
+        let token_name_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("e.g. My Awesome Token", window, cx);
+            state
+        });
+        let token_symbol_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("e.g. HIVE", window, cx);
+            state
+        });
+        let total_supply_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("e.g. 1000000000", window, cx);
+            state
+        });
+        let decimals_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("9", window, cx);
+            state.set_value("9".to_string(), window, cx);
+            state
+        });
+        let wallet_name_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Wallet name", window, cx);
+            state
+        });
+        let wallet_secret_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Select a chain to configure wallet import", window, cx);
+            state
+        });
+        let rpc_url_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Select a chain to configure RPC", window, cx);
+            state
+        });
+
+        for input in [
+            &token_name_input,
+            &token_symbol_input,
+            &total_supply_input,
+            &decimals_input,
+            &wallet_name_input,
+            &wallet_secret_input,
+        ] {
+            cx.subscribe_in(
+                input,
+                window,
+                |this, _entity, event: &InputEvent, _window, cx| {
+                    if matches!(event, InputEvent::Change | InputEvent::Blur) {
+                        this.sync_token_launch_inputs_to_data(cx);
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+        }
+
+        let token_launch_inputs = TokenLaunchInputs {
+            token_name: token_name_input,
+            token_symbol: token_symbol_input,
+            total_supply: total_supply_input,
+            decimals: decimals_input,
+            wallet_name: wallet_name_input,
+            wallet_secret: wallet_secret_input,
+            rpc_url: rpc_url_input,
+        };
+
         // Focus handle for the workspace root — ensures dispatch_action works
         // from child panel click handlers even when no input is focused.
         let focus_handle = cx.focus_handle();
 
         let history_data = HistoryData::empty();
+        let quick_start_data = Self::build_quick_start_data(
+            &project_root,
+            &project_name,
+            &chat_service,
+            "dogfood",
+            None,
+            cx,
+        );
         let kanban_data = KanbanData::default();
         let monitor_data = MonitorData::empty();
         let logs_data = LogsData::empty();
@@ -611,6 +724,8 @@ impl HiveWorkspace {
             current_project_root: project_root,
             current_project_name: project_name,
             chat_input,
+            quick_start_goal_input,
+            agents_remote_prompt_input,
             chat_service,
             settings_view,
             shield_view,
@@ -620,6 +735,7 @@ impl HiveWorkspace {
             focus_handle,
             history_data,
             files_data,
+            quick_start_data,
             kanban_data,
             monitor_data,
             logs_data,
@@ -628,6 +744,7 @@ impl HiveWorkspace {
             routing_data,
             skills_data,
             token_launch_data,
+            token_launch_inputs,
             specs_data,
             agents_data,
             shield_data,
@@ -795,6 +912,78 @@ impl HiveWorkspace {
         format!("{} [{}]", self.current_project_name, self.current_project_root.display())
     }
 
+    fn start_background_project_indexing(&self, cx: &mut Context<Self>) {
+        let hive_mem = cx.has_global::<AppHiveMemory>()
+            .then(|| cx.global::<AppHiveMemory>().0.clone());
+        let rag_service = cx.has_global::<AppRagService>()
+            .then(|| cx.global::<AppRagService>().0.clone());
+
+        if hive_mem.is_none() && rag_service.is_none() {
+            return;
+        }
+
+        let project_root = self.current_project_root.clone();
+        std::thread::Builder::new()
+            .name("hive-indexer".into())
+            .spawn(move || {
+                let entries = hive_ai::memory::BackgroundIndexer::collect_indexable_files(
+                    &project_root,
+                );
+                let path_str = project_root.to_string_lossy().to_string();
+                let indexed_files: Vec<(String, String)> = entries
+                    .iter()
+                    .filter_map(|entry_path| {
+                        std::fs::read_to_string(entry_path).ok().map(|content| {
+                            let rel = entry_path
+                                .strip_prefix(&project_root)
+                                .unwrap_or(entry_path)
+                                .to_string_lossy()
+                                .to_string();
+                            (rel, content)
+                        })
+                    })
+                    .collect();
+
+                if let Some(rag_service) = rag_service
+                    && let Ok(mut rag) = rag_service.lock()
+                {
+                    rag.clear_index();
+                    for (rel, content) in &indexed_files {
+                        rag.index_file(rel, content);
+                    }
+                    info!(
+                        "RAG indexer: indexed {}/{} files from {}",
+                        indexed_files.len(),
+                        entries.len(),
+                        path_str
+                    );
+                }
+
+                if let Some(hive_mem) = hive_mem {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    if let Ok(rt) = rt {
+                        rt.block_on(async {
+                            let mem = hive_mem.lock().await;
+                            let mut count = 0usize;
+                            for (rel, content) in &indexed_files {
+                                if mem.index_file(rel, content).await.is_ok() {
+                                    count += 1;
+                                }
+                            }
+                            info!(
+                                "Background indexer: indexed {count}/{} files from {}",
+                                entries.len(),
+                                path_str
+                            );
+                        });
+                    }
+                }
+            })
+            .ok();
+    }
+
     fn apply_project_context(&mut self, cwd: &Path, cx: &mut Context<Self>) {
         let project_root = Self::discover_project_root(cwd);
         if project_root != self.current_project_root {
@@ -824,11 +1013,14 @@ impl HiveWorkspace {
                 quick_index.dependencies.len()
             );
             cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
+            self.start_background_project_indexing(cx);
+            self.refresh_quick_start_data(cx);
 
             cx.notify();
         } else if self.current_project_name.is_empty() {
             self.current_project_name = Self::project_name_from_path(&self.current_project_root);
             self.status_bar.active_project = self.project_label();
+            self.refresh_quick_start_data(cx);
             cx.notify();
         }
 
@@ -843,47 +1035,6 @@ impl HiveWorkspace {
         self.apply_project_context(&workspace_path, cx);
         self.files_data = FilesData::from_path(&self.current_project_root);
         self.switch_to_panel(Panel::Files, cx);
-
-        // Trigger background indexing of the workspace directory.
-        // Runs on a dedicated thread to avoid blocking the UI.
-        if cx.has_global::<AppHiveMemory>() {
-            let hive_mem = cx.global::<AppHiveMemory>().0.clone();
-            let project_root = self.current_project_root.clone();
-            std::thread::Builder::new()
-                .name("hive-indexer".into())
-                .spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build();
-                    if let Ok(rt) = rt {
-                        rt.block_on(async {
-                            let entries = hive_ai::memory::BackgroundIndexer::collect_indexable_files(
-                                &project_root,
-                            );
-                            let path_str = project_root.to_string_lossy().to_string();
-                            let mem = hive_mem.lock().await;
-                            let mut count = 0usize;
-                            for entry_path in &entries {
-                                if let Ok(content) = std::fs::read_to_string(entry_path) {
-                                    let rel = entry_path
-                                        .strip_prefix(&project_root)
-                                        .unwrap_or(entry_path)
-                                        .to_string_lossy()
-                                        .to_string();
-                                    if mem.index_file(&rel, &content).await.is_ok() {
-                                        count += 1;
-                                    }
-                                }
-                            }
-                            info!(
-                                "Background indexer: indexed {count}/{} files from {path_str}",
-                                entries.len()
-                            );
-                        });
-                    }
-                })
-                .ok();
-        }
     }
 
     pub fn set_active_panel(&mut self, panel: Panel) {
@@ -1435,7 +1586,9 @@ impl HiveWorkspace {
     }
 
     fn refresh_agents_data(&mut self, cx: &App) {
-        use hive_ui_panels::panels::agents::{PersonaDisplay, RunDisplay, WorkflowDisplay};
+        use hive_ui_panels::panels::agents::{
+            PersonaDisplay, RemoteAgentDisplay, RunDisplay, WorkflowDisplay,
+        };
 
         if cx.has_global::<AppPersonas>() {
             let registry = &cx.global::<AppPersonas>().0;
@@ -1450,6 +1603,93 @@ impl HiveWorkspace {
                     active: false,
                 })
                 .collect();
+        }
+
+        self.agents_data.remote_agents.clear();
+        if cx.has_global::<AppA2aClient>() {
+            let client = &cx.global::<AppA2aClient>().0;
+            if let Err(e) = client.reload() {
+                warn!("Agents: failed to reload A2A config: {e}");
+            }
+            match client.list_agents() {
+                Ok(remote_agents) => {
+                    self.agents_data.remote_hint = Some(format!(
+                        "{} configured remote agent(s) from {}",
+                        remote_agents.len(),
+                        client.config_path().display()
+                    ));
+                    self.agents_data.remote_agents = remote_agents
+                        .into_iter()
+                        .map(|agent| {
+                            let description = agent
+                                .description
+                                .unwrap_or_else(|| format!("Remote A2A agent at {}", agent.url));
+                            RemoteAgentDisplay {
+                                name: agent.name,
+                                url: agent.url,
+                                description,
+                                discovered: agent.discovered,
+                                api_key_configured: agent.api_key_configured,
+                                version: agent.version,
+                                skills: agent.skills,
+                            }
+                        })
+                        .collect();
+                }
+                Err(e) => {
+                    self.agents_data.remote_hint = Some("Remote A2A config unavailable".into());
+                    warn!("Agents: failed to list A2A agents: {e}");
+                }
+            }
+        } else {
+            self.agents_data.remote_hint = Some("A2A client unavailable".into());
+        }
+
+        if self.agents_data.remote_agents.is_empty() {
+            self.agents_data.selected_remote_agent = None;
+            self.agents_data.selected_remote_skill = None;
+        } else {
+            let selected_is_valid = self.agents_data.selected_remote_agent.as_ref().is_some_and(
+                |selected| {
+                    self.agents_data
+                        .remote_agents
+                        .iter()
+                        .any(|agent| agent.name == *selected)
+                },
+            );
+            if !selected_is_valid {
+                self.agents_data.selected_remote_agent = self
+                    .agents_data
+                    .remote_agents
+                    .first()
+                    .map(|agent| agent.name.clone());
+            }
+            if let Some(selected_agent) = self.agents_data.selected_remote_agent.as_ref()
+                && let Some(agent) = self
+                    .agents_data
+                    .remote_agents
+                    .iter()
+                    .find(|agent| agent.name == *selected_agent)
+            {
+                let skill_is_valid = self.agents_data.selected_remote_skill.as_ref().is_none_or(
+                    |skill| agent.skills.iter().any(|candidate| candidate == skill),
+                );
+                if !skill_is_valid {
+                    self.agents_data.selected_remote_skill = None;
+                }
+            }
+            self.agents_data.personas.extend(
+                self.agents_data
+                    .remote_agents
+                    .iter()
+                    .map(|agent| PersonaDisplay {
+                        name: agent.name.clone(),
+                        kind: "remote_a2a".into(),
+                        description: agent.description.clone(),
+                        model_tier: "Remote".into(),
+                        active: true,
+                    }),
+            );
         }
 
         if cx.has_global::<AppAutomation>() {
@@ -2076,6 +2316,58 @@ impl HiveWorkspace {
                 }
             }
 
+            if cx.has_global::<AppSemanticSearch>() {
+                let mut candidate_paths = Vec::new();
+
+                if cx.has_global::<AppQuickIndex>() {
+                    let quick_index = &cx.global::<AppQuickIndex>().0;
+                    let mut seen = std::collections::HashSet::new();
+                    for symbol in quick_index.key_symbols.iter().take(32) {
+                        let path = quick_index.project_root.join(&symbol.file);
+                        if seen.insert(path.clone()) {
+                            candidate_paths.push(path);
+                        }
+                    }
+                }
+
+                if candidate_paths.is_empty() {
+                    candidate_paths.push(self.current_project_root.clone());
+                }
+
+                let candidate_refs: Vec<&std::path::Path> =
+                    candidate_paths.iter().map(|path| path.as_path()).collect();
+
+                if let Ok(mut semantic_search) = cx.global::<AppSemanticSearch>().0.lock() {
+                    let results = semantic_search.search_with_context(
+                        &user_query_text,
+                        &candidate_refs,
+                        5,
+                        1,
+                    );
+
+                    if !results.is_empty() {
+                        let semantic_context = results
+                            .iter()
+                            .map(|result| {
+                                format!(
+                                    "--- {}:{} ---\n{}\n{}\n{}",
+                                    result.file_path,
+                                    result.line_number,
+                                    result.context_before,
+                                    result.content,
+                                    result.context_after
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n\n");
+
+                        all_context.push_str("## Semantic Search Matches\n\n");
+                        all_context.push_str(&semantic_context);
+                        all_context.push_str("\n\n");
+                    }
+                }
+            }
+
             // HiveMemory + KnowledgeHub are async — queried in the spawn
             // blocks below. memory_context stays empty here; the real
             // enrichment happens off the UI thread via enrich_request().
@@ -2084,9 +2376,10 @@ impl HiveWorkspace {
             // For now, we seed the ContextEngine with whatever RAG found, plus we can index the current directory.
             if cx.has_global::<AppContextEngine>() {
                 if let Ok(mut ctx_engine) = cx.global::<AppContextEngine>().0.lock() {
-                    // Seed engine with the RAG content
+                    // Seed the engine with the retrieved context so TF-IDF
+                    // curation can blend RAG and semantic-search matches.
                     if !all_context.is_empty() {
-                        ctx_engine.add_file("rag_results.txt", &all_context);
+                        ctx_engine.add_file("retrieved_context.txt", &all_context);
                     }
 
                     // Seed engine with project knowledge files so they
@@ -2667,6 +2960,12 @@ impl HiveWorkspace {
         let theme = &self.theme;
         match self.sidebar.active_panel {
             Panel::Chat => unreachable!(),
+            Panel::QuickStart => QuickStartPanel::render(
+                &self.quick_start_data,
+                &self.quick_start_goal_input,
+                theme,
+            )
+            .into_any_element(),
             Panel::History => HistoryPanel::render(&self.history_data, theme).into_any_element(),
             Panel::Files => FilesPanel::render(&self.files_data, theme).into_any_element(),
             Panel::Kanban => KanbanPanel::render(&self.kanban_data, theme).into_any_element(),
@@ -2679,11 +2978,19 @@ impl HiveWorkspace {
             Panel::Workflows => self.workflow_builder_view.clone().into_any_element(),
             Panel::Channels => self.channels_view.clone().into_any_element(),
             Panel::Models => self.models_browser_view.clone().into_any_element(),
-            Panel::TokenLaunch => {
-                TokenLaunchPanel::render(&self.token_launch_data, theme).into_any_element()
-            }
+            Panel::TokenLaunch => TokenLaunchPanel::render(
+                &self.token_launch_data,
+                &self.token_launch_inputs,
+                theme,
+            )
+            .into_any_element(),
             Panel::Specs => SpecsPanel::render(&self.specs_data, theme).into_any_element(),
-            Panel::Agents => AgentsPanel::render(&self.agents_data, theme).into_any_element(),
+            Panel::Agents => AgentsPanel::render(
+                &self.agents_data,
+                &self.agents_remote_prompt_input,
+                theme,
+            )
+            .into_any_element(),
             Panel::Shield => self.shield_view.clone().into_any_element(),
             Panel::Learning => LearningPanel::render(&self.learning_data, theme).into_any_element(),
             Panel::Assistant => {
@@ -2760,6 +3067,9 @@ impl HiveWorkspace {
 
         // Lazy-load data for panels that need it on first visit.
         match panel {
+            Panel::QuickStart => {
+                self.refresh_quick_start_data(cx);
+            }
             Panel::History if self.history_data.conversations.is_empty() => {
                 self.history_data = Self::load_history_data();
             }
@@ -2837,6 +3147,15 @@ impl HiveWorkspace {
         // Focus the chat text input so the user can start typing immediately.
         let fh = self.chat_input.read(cx).input_focus_handle();
         window.focus(&fh);
+    }
+
+    fn handle_switch_to_quick_start(
+        &mut self,
+        _action: &SwitchToQuickStart,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::QuickStart, cx);
     }
 
     fn handle_switch_to_history(
@@ -3054,6 +3373,355 @@ impl HiveWorkspace {
         self.switch_to_panel(Panel::Network, cx);
     }
 
+    // -- Quick Start panel handlers -----------------------------------------
+
+    fn refresh_quick_start_data(&mut self, cx: &mut Context<Self>) {
+        let selected_template = self.quick_start_data.selected_template.clone();
+        let last_launch_status = self.quick_start_data.last_launch_status.clone();
+        self.quick_start_data = Self::build_quick_start_data(
+            &self.current_project_root,
+            &self.current_project_name,
+            &self.chat_service,
+            &selected_template,
+            last_launch_status,
+            cx,
+        );
+    }
+
+    fn build_quick_start_data(
+        project_root: &Path,
+        project_name: &str,
+        chat_service: &Entity<ChatService>,
+        selected_template: &str,
+        last_launch_status: Option<String>,
+        cx: &App,
+    ) -> QuickStartPanelData {
+        let templates = quick_start_templates();
+        let selected_template = templates
+            .iter()
+            .find(|template| template.id == selected_template)
+            .map(|template| template.id.clone())
+            .unwrap_or_else(|| "dogfood".into());
+
+        let current_model = chat_service.read(cx).current_model().to_string();
+        let has_selected_model = !current_model.trim().is_empty();
+
+        let (has_cloud_runtime, has_local_runtime) = if cx.has_global::<AppAiService>() {
+            let ai = &cx.global::<AppAiService>().0;
+            let has_cloud = ai.available_providers().iter().any(|provider| {
+                matches!(
+                    provider,
+                    hive_ai::types::ProviderType::Anthropic
+                        | hive_ai::types::ProviderType::OpenAI
+                        | hive_ai::types::ProviderType::OpenRouter
+                        | hive_ai::types::ProviderType::Google
+                        | hive_ai::types::ProviderType::Groq
+                        | hive_ai::types::ProviderType::HuggingFace
+                        | hive_ai::types::ProviderType::XAI
+                        | hive_ai::types::ProviderType::Mistral
+                        | hive_ai::types::ProviderType::Venice
+                )
+            });
+            let has_local = ai
+                .discovery()
+                .map(|discovery| discovery.snapshot().any_online())
+                .unwrap_or(false);
+            (has_cloud, has_local)
+        } else {
+            (false, false)
+        };
+        let has_ai_runtime = has_cloud_runtime || has_local_runtime;
+
+        let knowledge_files = if cx.has_global::<AppKnowledgeFiles>() {
+            cx.global::<AppKnowledgeFiles>().0.len()
+        } else {
+            0
+        };
+
+        let remote_agents = if cx.has_global::<AppA2aClient>() {
+            cx.global::<AppA2aClient>()
+                .0
+                .list_agents()
+                .map(|agents| agents.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        let (project_summary, total_files, key_symbols, dependencies) =
+            if cx.has_global::<AppQuickIndex>() {
+                let quick_index = cx.global::<AppQuickIndex>().0.clone();
+                let summary = if quick_index.file_tree.summary.trim().is_empty() {
+                    format!("Using {} as the active project root.", project_root.display())
+                } else {
+                    quick_index.file_tree.summary.clone()
+                };
+                (
+                    summary,
+                    quick_index.file_tree.total_files,
+                    quick_index.key_symbols.len(),
+                    quick_index.dependencies.len(),
+                )
+            } else {
+                (
+                    format!("Using {} as the active project root.", project_root.display()),
+                    0,
+                    0,
+                    0,
+                )
+            };
+
+        let launch_ready = has_ai_runtime && has_selected_model;
+        let launch_hint = if !has_ai_runtime {
+            "Connect at least one cloud or local model runtime in Settings before starting a guided run."
+                .into()
+        } else if !has_selected_model {
+            "Choose a default model in Settings so Quick Start knows where to launch the project run."
+                .into()
+        } else {
+            format!(
+                "Ready to launch a fresh project run in Chat with {}.",
+                current_model
+            )
+        };
+
+        let setup = vec![
+            QuickStartSetupDisplay {
+                title: "Project context".into(),
+                detail: format!(
+                    "Workspace root: {}. Knowledge files loaded: {}.",
+                    project_root.display(),
+                    knowledge_files
+                ),
+                status_label: "Ready".into(),
+                tone: QuickStartTone::Ready,
+                action_label: Some("Open Files".into()),
+                action_panel: Some(Panel::Files.to_stored().into()),
+            },
+            QuickStartSetupDisplay {
+                title: "AI runtime".into(),
+                detail: if has_ai_runtime {
+                    format!(
+                        "Cloud runtime: {}. Local runtime: {}.",
+                        if has_cloud_runtime {
+                            "connected"
+                        } else {
+                            "not connected"
+                        },
+                        if has_local_runtime { "online" } else { "offline" }
+                    )
+                } else {
+                    "No cloud or local models are available yet.".into()
+                },
+                status_label: if has_ai_runtime {
+                    "Connected".into()
+                } else {
+                    "Needs setup".into()
+                },
+                tone: if has_ai_runtime {
+                    QuickStartTone::Ready
+                } else {
+                    QuickStartTone::Action
+                },
+                action_label: Some(if has_ai_runtime {
+                    "Review Settings".into()
+                } else {
+                    "Connect Models".into()
+                }),
+                action_panel: Some(Panel::Settings.to_stored().into()),
+            },
+            QuickStartSetupDisplay {
+                title: "Default model".into(),
+                detail: if has_selected_model {
+                    format!("Current launch model: {}.", current_model)
+                } else {
+                    "No default model is selected for Chat yet.".into()
+                },
+                status_label: if has_selected_model {
+                    "Selected".into()
+                } else {
+                    "Choose one".into()
+                },
+                tone: if has_selected_model {
+                    QuickStartTone::Ready
+                } else {
+                    QuickStartTone::Action
+                },
+                action_label: Some("Open Settings".into()),
+                action_panel: Some(Panel::Settings.to_stored().into()),
+            },
+            QuickStartSetupDisplay {
+                title: "Git and agent accelerators".into(),
+                detail: format!(
+                    "Git repo: {}. Remote A2A agents configured: {}.",
+                    if project_root.join(".git").exists() {
+                        "yes"
+                    } else {
+                        "no"
+                    },
+                    remote_agents
+                ),
+                status_label: if remote_agents > 0 {
+                    "Optional boost".into()
+                } else {
+                    "Optional".into()
+                },
+                tone: QuickStartTone::Optional,
+                action_label: Some("Open Agents".into()),
+                action_panel: Some(Panel::Agents.to_stored().into()),
+            },
+        ];
+
+        let next_steps = vec![
+            QuickStartNextStepDisplay {
+                title: "Review".into(),
+                detail: "Inspect git status, diffs, and release readiness after the kickoff run starts."
+                    .into(),
+                panel: Panel::Review.to_stored().into(),
+                action_label: "Open Git Ops".into(),
+            },
+            QuickStartNextStepDisplay {
+                title: "Specs".into(),
+                detail: "Turn the kickoff outcome into a crisp implementation plan when the work needs structure."
+                    .into(),
+                panel: Panel::Specs.to_stored().into(),
+                action_label: "Open Specs".into(),
+            },
+            QuickStartNextStepDisplay {
+                title: "Agents".into(),
+                detail: "Use workflows or remote A2A agents when parts of the job should be delegated."
+                    .into(),
+                panel: Panel::Agents.to_stored().into(),
+                action_label: "Open Agents".into(),
+            },
+            QuickStartNextStepDisplay {
+                title: "Kanban".into(),
+                detail: "Track execution once the first run identifies concrete follow-up tasks."
+                    .into(),
+                panel: Panel::Kanban.to_stored().into(),
+                action_label: "Open Kanban".into(),
+            },
+        ];
+
+        QuickStartPanelData {
+            project_name: project_name.into(),
+            project_root: project_root.display().to_string(),
+            project_summary,
+            total_files,
+            key_symbols,
+            dependencies,
+            selected_template,
+            templates,
+            setup,
+            next_steps,
+            launch_ready,
+            launch_hint,
+            last_launch_status,
+        }
+    }
+
+    fn handle_quick_start_select_template(
+        &mut self,
+        action: &QuickStartSelectTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.quick_start_data.selected_template = action.template_id.clone();
+        self.quick_start_goal_input.update(cx, |input, cx| {
+            input.set_placeholder(
+                quick_start_template_placeholder(&action.template_id),
+                window,
+                cx,
+            );
+        });
+        self.quick_start_data.last_launch_status = Some(format!(
+            "Selected '{}' as the current Quick Start mission.",
+            quick_start_template_title(&action.template_id)
+        ));
+        self.refresh_quick_start_data(cx);
+        cx.notify();
+    }
+
+    fn handle_quick_start_open_panel(
+        &mut self,
+        action: &QuickStartOpenPanel,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::from_stored(&action.panel), cx);
+    }
+
+    fn handle_quick_start_run_project(
+        &mut self,
+        action: &QuickStartRunProject,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.chat_service.read(cx).is_streaming() {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Quick Start",
+                "Wait for the current chat run to finish before starting another guided run.",
+            );
+            return;
+        }
+
+        if !self.quick_start_data.launch_ready {
+            let message = if self
+                .quick_start_data
+                .setup
+                .get(1)
+                .is_some_and(|item| item.tone != QuickStartTone::Ready)
+            {
+                "Connect a cloud or local model runtime in Settings before launching Quick Start."
+            } else {
+                "Choose a default model in Settings before launching Quick Start."
+            };
+
+            self.quick_start_data.last_launch_status = Some(message.into());
+            self.push_notification(cx, NotificationType::Warning, "Quick Start", message);
+            self.switch_to_panel(Panel::Settings, cx);
+            return;
+        }
+
+        let prompt = self.build_quick_start_prompt(&action.template_id, &action.detail);
+        let template_title = quick_start_template_title(&action.template_id);
+        self.quick_start_data.last_launch_status = Some(format!(
+            "Started '{}' for {}.",
+            template_title, self.current_project_name
+        ));
+        self.quick_start_goal_input.update(cx, |input, cx| {
+            input.set_value(String::new(), window, cx);
+        });
+
+        self.chat_service.update(cx, |svc, _cx| {
+            svc.new_conversation();
+        });
+        self.cached_chat_data.markdown_cache.clear();
+        self.refresh_history();
+        self.switch_to_panel(Panel::Chat, cx);
+        self.handle_send_text(prompt, window, cx);
+    }
+
+    fn build_quick_start_prompt(&self, template_id: &str, detail: &str) -> String {
+        let mission = quick_start_template_instruction(template_id);
+        let user_focus = if detail.trim().is_empty() {
+            "Use your judgment from the current repository state and start with the highest-impact opportunity."
+        } else {
+            detail.trim()
+        };
+
+        format!(
+            "You are kicking off work on the active project.\n\nProject: {}\nWorkspace root: {}\nMission: {}\nSpecific focus: {}\n\nExecution rules:\n1. Inspect the codebase, README or HIVE docs, and current git state before changing code.\n2. Summarize the relevant context briefly.\n3. Produce a concise impact-ordered execution plan.\n4. Start the first concrete task immediately instead of stopping at analysis.\n5. Keep changes integrated with the existing modules, tabs, and shared services.\n6. Use Review, Specs, Agents, and Kanban when they are the right handoff surfaces.\n\nMission details:\n{}",
+            self.current_project_name,
+            self.current_project_root.display(),
+            quick_start_template_title(template_id),
+            user_focus,
+            mission,
+        )
+    }
+
     // -- Network panel handlers ----------------------------------------------
 
     fn handle_network_refresh(
@@ -3074,12 +3742,69 @@ impl HiveWorkspace {
         }
         let node = &cx.global::<AppNetwork>().0;
         self.network_peer_data.our_peer_id = node.peer_id().to_string();
-        // HiveNode::peers() is async; peer list populated via future async
-        // wiring. For now the panel shows the peer ID and empty-state.
-        self.network_peer_data.peers.clear();
+        let mut peers: Vec<PeerDisplayInfo> = node
+            .peers_snapshot()
+            .into_iter()
+            .map(|peer| PeerDisplayInfo {
+                name: peer.identity.name,
+                status: network_peer_status_label(&peer.state),
+                address: peer.addr.to_string(),
+                latency_ms: peer.latency_ms,
+                last_seen: format_network_relative_time(peer.last_seen),
+            })
+            .collect();
+
+        peers.sort_by(|a, b| {
+            network_peer_status_rank(&a.status)
+                .cmp(&network_peer_status_rank(&b.status))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
+        self.network_peer_data.peers = peers;
     }
 
     // -- Agents panel handlers -----------------------------------------------
+
+    fn handle_agents_refresh_remote_agents(
+        &mut self,
+        _action: &AgentsRefreshRemoteAgents,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppA2aClient>() {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Remote Agents",
+                "A2A client is not available",
+            );
+            return;
+        }
+
+        match cx.global::<AppA2aClient>().0.reload() {
+            Ok(()) => {
+                self.refresh_agents_data(cx);
+                self.agents_data.remote_status = Some("Reloaded remote A2A agent config".into());
+                self.push_notification(
+                    cx,
+                    NotificationType::Success,
+                    "Remote Agents",
+                    "Reloaded ~/.hive/a2a.toml",
+                );
+                cx.notify();
+            }
+            Err(e) => {
+                self.agents_data.remote_status = Some(format!("Failed to reload config: {e}"));
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Remote Agents",
+                    format!("Failed to reload A2A config: {e}"),
+                );
+                cx.notify();
+            }
+        }
+    }
 
     fn handle_agents_reload_workflows(
         &mut self,
@@ -3124,6 +3849,237 @@ impl HiveWorkspace {
 
         self.refresh_agents_data(cx);
         cx.notify();
+    }
+
+    fn handle_agents_select_remote_agent(
+        &mut self,
+        action: &AgentsSelectRemoteAgent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.agents_data.selected_remote_agent = Some(action.agent_name.clone());
+        if let Some(agent) = self
+            .agents_data
+            .remote_agents
+            .iter()
+            .find(|agent| agent.name == action.agent_name)
+        {
+            let skill_is_valid = self.agents_data.selected_remote_skill.as_ref().is_none_or(
+                |skill| agent.skills.iter().any(|candidate| candidate == skill),
+            );
+            if !skill_is_valid {
+                self.agents_data.selected_remote_skill = None;
+            }
+        }
+        self.agents_data.remote_status =
+            Some(format!("Selected remote agent '{}'", action.agent_name));
+        cx.notify();
+    }
+
+    fn handle_agents_select_remote_skill(
+        &mut self,
+        action: &AgentsSelectRemoteSkill,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.agents_data.selected_remote_agent = Some(action.agent_name.clone());
+        self.agents_data.selected_remote_skill = action.skill_id.clone();
+        self.agents_data.remote_status = Some(if let Some(skill_id) = action.skill_id.as_ref() {
+            format!("Pinned remote skill '{skill_id}'")
+        } else {
+            "Remote skill selection reset to auto".into()
+        });
+        cx.notify();
+    }
+
+    fn handle_agents_discover_remote_agent(
+        &mut self,
+        action: &AgentsDiscoverRemoteAgent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppA2aClient>() {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Remote Agents",
+                "A2A client is not available",
+            );
+            return;
+        }
+
+        self.agents_data.remote_busy = true;
+        self.agents_data.remote_status =
+            Some(format!("Discovering remote agent '{}'...", action.agent_name));
+        cx.notify();
+
+        let client = cx.global::<AppA2aClient>().0.clone();
+        let agent_name = action.agent_name.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(client.discover_agent(&agent_name))
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.agents_data.remote_busy = false;
+                match result {
+                    Ok(summary) => {
+                        let skill_count = summary.skills.len();
+                        let agent_name = summary.name.clone();
+                        this.refresh_agents_data(cx);
+                        this.agents_data.selected_remote_agent = Some(agent_name.clone());
+                        this.agents_data.selected_remote_skill = None;
+                        this.agents_data.remote_status = Some(format!(
+                            "Discovered '{}' ({} skill{})",
+                            agent_name,
+                            skill_count,
+                            if skill_count == 1 { "" } else { "s" }
+                        ));
+                        this.push_notification(
+                            cx,
+                            NotificationType::Success,
+                            "Remote Agents",
+                            format!("Discovered remote agent '{}'", agent_name),
+                        );
+                    }
+                    Err(e) => {
+                        this.agents_data.remote_status =
+                            Some(format!("Remote discovery failed: {e}"));
+                        this.push_notification(
+                            cx,
+                            NotificationType::Error,
+                            "Remote Agents",
+                            format!("Failed to discover remote agent: {e}"),
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn handle_agents_run_remote_agent(
+        &mut self,
+        action: &AgentsRunRemoteAgent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prompt = action.prompt.trim();
+        if prompt.is_empty() {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Remote Agents",
+                "Enter a prompt before running a remote task",
+            );
+            return;
+        }
+        if !cx.has_global::<AppA2aClient>() {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Remote Agents",
+                "A2A client is not available",
+            );
+            return;
+        }
+
+        self.agents_data.remote_busy = true;
+        self.agents_data.remote_status =
+            Some(format!("Running remote task on '{}'...", action.agent_name));
+        cx.notify();
+
+        let client = cx.global::<AppA2aClient>().0.clone();
+        let agent_name = action.agent_name.clone();
+        let prompt = prompt.to_string();
+        let skill_id = action.skill_id.clone();
+        let agent_name_for_error = agent_name.clone();
+        let skill_id_for_error = skill_id.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        std::thread::spawn(move || {
+            let result = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt
+                    .block_on(client.run_task(&agent_name, &prompt, skill_id.as_deref()))
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(format!("tokio runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |this, app: &mut AsyncApp| {
+            let result = rx.await.unwrap_or(Err("channel closed".into()));
+            let _ = this.update(app, |this, cx| {
+                this.agents_data.remote_busy = false;
+                match result {
+                    Ok(run) => {
+                        this.agents_data.remote_status = Some(format!(
+                            "Remote task '{}' completed on '{}'",
+                            run.task_id, run.agent_name
+                        ));
+                        this.agents_data.remote_run_history.insert(
+                            0,
+                            hive_ui_panels::panels::agents::RemoteTaskDisplay {
+                                agent_name: run.agent_name.clone(),
+                                task_id: run.task_id.clone(),
+                                state: run.state.clone(),
+                                skill_id: run.skill_id.clone(),
+                                output: run.output.clone(),
+                                completed_at: Utc::now().format("%Y-%m-%d %H:%M").to_string(),
+                                error: None,
+                            },
+                        );
+                        this.agents_data.remote_run_history.truncate(8);
+                        this.refresh_agents_data(cx);
+                        this.agents_data.selected_remote_agent = Some(run.agent_name.clone());
+                        this.push_notification(
+                            cx,
+                            NotificationType::Success,
+                            "Remote Agents",
+                            format!(
+                                "Remote task '{}' completed on '{}'",
+                                run.task_id, run.agent_name
+                            ),
+                        );
+                    }
+                    Err(e) => {
+                        this.agents_data.remote_status =
+                            Some(format!("Remote task failed: {e}"));
+                        this.agents_data.remote_run_history.insert(
+                            0,
+                            hive_ui_panels::panels::agents::RemoteTaskDisplay {
+                                agent_name: agent_name_for_error.clone(),
+                                task_id: "error".into(),
+                                state: "Failed".into(),
+                                skill_id: skill_id_for_error.clone(),
+                                output: String::new(),
+                                completed_at: Utc::now().format("%Y-%m-%d %H:%M").to_string(),
+                                error: Some(e.clone()),
+                            },
+                        );
+                        this.agents_data.remote_run_history.truncate(8);
+                        this.push_notification(
+                            cx,
+                            NotificationType::Error,
+                            "Remote Agents",
+                            format!("Remote task failed: {e}"),
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn handle_agents_run_workflow(
@@ -6368,6 +7324,337 @@ impl HiveWorkspace {
 
     // -- Token Launch panel handlers -----------------------------------------
 
+    fn sync_token_launch_inputs_to_data(&mut self, cx: &App) {
+        self.token_launch_data.token_name = self
+            .token_launch_inputs
+            .token_name
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        self.token_launch_data.token_symbol = self
+            .token_launch_inputs
+            .token_symbol
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        self.token_launch_data.total_supply = self
+            .token_launch_inputs
+            .total_supply
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+
+        let default_decimals = self
+            .token_launch_data
+            .selected_chain
+            .map(|chain| chain.default_decimals())
+            .unwrap_or(9);
+        self.token_launch_data.decimals = self
+            .token_launch_inputs
+            .decimals
+            .read(cx)
+            .value()
+            .trim()
+            .parse::<u8>()
+            .unwrap_or(default_decimals);
+
+        if !matches!(
+            self.token_launch_data.deploy_status,
+            hive_ui_panels::panels::token_launch::DeployStatus::Deploying
+        ) {
+            self.token_launch_data.deploy_status =
+                hive_ui_panels::panels::token_launch::DeployStatus::NotStarted;
+        }
+    }
+
+    fn token_launch_wallet_password() -> &'static str {
+        // Password entry is still a future UX improvement. Use a stable
+        // passphrase so the wallet store remains readable across restarts.
+        "hive-wallet-default"
+    }
+
+    fn token_launch_wallet_path() -> PathBuf {
+        HiveConfig::base_dir()
+            .map(|dir| dir.join("wallets.enc"))
+            .unwrap_or_else(|_| PathBuf::from("wallets.enc"))
+    }
+
+    fn token_launch_rpc_config_path() -> PathBuf {
+        HiveConfig::base_dir()
+            .map(|dir| dir.join("rpc_config.json"))
+            .unwrap_or_else(|_| PathBuf::from("rpc_config.json"))
+    }
+
+    fn token_launch_chain(
+        option: hive_ui_panels::panels::token_launch::ChainOption,
+    ) -> hive_blockchain::Chain {
+        match option {
+            hive_ui_panels::panels::token_launch::ChainOption::Solana => hive_blockchain::Chain::Solana,
+            hive_ui_panels::panels::token_launch::ChainOption::Ethereum => hive_blockchain::Chain::Ethereum,
+            hive_ui_panels::panels::token_launch::ChainOption::Base => hive_blockchain::Chain::Base,
+        }
+    }
+
+    fn token_launch_secret_placeholder(
+        option: Option<hive_ui_panels::panels::token_launch::ChainOption>,
+    ) -> &'static str {
+        match option {
+            Some(hive_ui_panels::panels::token_launch::ChainOption::Solana) => {
+                "Solana private key (hex or base58)"
+            }
+            Some(
+                hive_ui_panels::panels::token_launch::ChainOption::Ethereum
+                | hive_ui_panels::panels::token_launch::ChainOption::Base,
+            ) => "EVM private key (hex)",
+            None => "Select a chain to configure wallet import",
+        }
+    }
+
+    fn token_launch_current_rpc_url(
+        chain: hive_blockchain::Chain,
+        cx: &App,
+    ) -> String {
+        if cx.has_global::<AppRpcConfig>() {
+            return cx
+                .global::<AppRpcConfig>()
+                .0
+                .get_rpc(chain)
+                .map(|config| config.url.clone())
+                .unwrap_or_default();
+        }
+
+        hive_blockchain::RpcConfigStore::with_defaults()
+            .get_rpc(chain)
+            .map(|config| config.url.clone())
+            .unwrap_or_default()
+    }
+
+    fn sync_token_launch_rpc_input(
+        &self,
+        option: Option<hive_ui_panels::panels::token_launch::ChainOption>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (value, placeholder) = match option {
+            Some(chain) => {
+                let chain = Self::token_launch_chain(chain);
+                (
+                    Self::token_launch_current_rpc_url(chain, cx),
+                    "https://rpc.example.com",
+                )
+            }
+            None => (
+                String::new(),
+                "Select a chain to configure RPC",
+            ),
+        };
+
+        self.token_launch_inputs.rpc_url.update(cx, |state, cx| {
+            state.set_placeholder(placeholder, window, cx);
+            state.set_value(value, window, cx);
+        });
+    }
+
+    fn persist_token_launch_rpc_config(&self, cx: &mut Context<Self>) -> anyhow::Result<()> {
+        if !cx.has_global::<AppRpcConfig>() {
+            return Ok(());
+        }
+
+        let rpc_path = Self::token_launch_rpc_config_path();
+        if let Some(parent) = rpc_path.parent()
+            && !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+        cx.global::<AppRpcConfig>().0.save_to_file(&rpc_path)?;
+        Ok(())
+    }
+
+    fn persist_token_launch_wallets(&self, cx: &mut Context<Self>) -> anyhow::Result<()> {
+        if !cx.has_global::<AppWallets>() {
+            return Ok(());
+        }
+
+        let wallet_path = Self::token_launch_wallet_path();
+        if let Some(parent) = wallet_path.parent()
+            && !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+        cx.global::<AppWallets>().0.save_to_file(&wallet_path)?;
+        Ok(())
+    }
+
+    fn clear_token_launch_wallet_secret(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.token_launch_inputs.wallet_secret.update(cx, |state, cx| {
+            state.set_value(String::new(), window, cx);
+        });
+    }
+
+    fn sync_token_launch_saved_wallets(
+        &mut self,
+        preserve_current: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.token_launch_data.available_wallets.clear();
+            self.token_launch_data.wallet_id = None;
+            self.token_launch_data.wallet_address = None;
+            self.token_launch_data.wallet_balance = None;
+            self.token_launch_inputs.wallet_name.update(cx, |state, cx| {
+                state.set_value(String::new(), window, cx);
+            });
+            return;
+        };
+
+        let chain = Self::token_launch_chain(option);
+        let current_wallet_id = if preserve_current {
+            self.token_launch_data.wallet_id.clone()
+        } else {
+            None
+        };
+
+        let available_wallets = if cx.has_global::<AppWallets>() {
+            let mut wallets = cx
+                .global::<AppWallets>()
+                .0
+                .list_wallets()
+                .into_iter()
+                .filter(|wallet| wallet.chain == chain)
+                .collect::<Vec<_>>();
+            wallets.sort_by_key(|wallet| std::cmp::Reverse(wallet.created_at));
+            wallets
+                .into_iter()
+                .map(|wallet| hive_ui_panels::panels::token_launch::SavedWalletOption {
+                    id: wallet.id.clone(),
+                    name: wallet.name.clone(),
+                    address: wallet.address.clone(),
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        self.token_launch_data.available_wallets = available_wallets;
+        let selected_wallet = current_wallet_id
+            .as_deref()
+            .and_then(|id| {
+                self.token_launch_data
+                    .available_wallets
+                    .iter()
+                    .find(|wallet| wallet.id == id)
+            })
+            .or_else(|| self.token_launch_data.available_wallets.first())
+            .cloned();
+
+        if let Some(wallet) = selected_wallet {
+            self.token_launch_data.wallet_id = Some(wallet.id.clone());
+            self.token_launch_data.wallet_address = Some(wallet.address.clone());
+            self.token_launch_inputs.wallet_name.update(cx, |state, cx| {
+                state.set_value(wallet.name.clone(), window, cx);
+            });
+            self.refresh_token_launch_balance(cx);
+        } else {
+            self.token_launch_data.wallet_id = None;
+            self.token_launch_data.wallet_address = None;
+            self.token_launch_data.wallet_balance = None;
+            self.token_launch_inputs.wallet_name.update(cx, |state, cx| {
+                state.set_value(String::new(), window, cx);
+            });
+        }
+
+        self.clear_token_launch_wallet_secret(window, cx);
+    }
+
+    fn restore_token_launch_wallet_for_chain(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_token_launch_saved_wallets(false, window, cx);
+    }
+
+    fn refresh_token_launch_cost(&mut self, cx: &mut Context<Self>) {
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.token_launch_data.estimated_cost = None;
+            cx.notify();
+            return;
+        };
+        let chain = Self::token_launch_chain(option);
+        let rpc_url = Self::token_launch_current_rpc_url(chain, cx);
+
+        cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+            let estimated_cost = match option {
+                hive_ui_panels::panels::token_launch::ChainOption::Solana => {
+                    hive_blockchain::solana::estimate_deploy_cost_with_rpc(Some(rpc_url.as_str()))
+                        .await
+                        .ok()
+                }
+                hive_ui_panels::panels::token_launch::ChainOption::Ethereum
+                | hive_ui_panels::panels::token_launch::ChainOption::Base => {
+                    hive_blockchain::evm::estimate_deploy_cost_with_rpc(
+                        Self::token_launch_chain(option),
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                    .ok()
+                }
+            };
+
+            let _ = this.update(app, |this, cx| {
+                this.token_launch_data.estimated_cost = estimated_cost;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_token_launch_balance(&mut self, cx: &mut Context<Self>) {
+        let (Some(option), Some(address)) = (
+            self.token_launch_data.selected_chain,
+            self.token_launch_data.wallet_address.clone(),
+        ) else {
+            self.token_launch_data.wallet_balance = None;
+            cx.notify();
+            return;
+        };
+        let chain = Self::token_launch_chain(option);
+        let rpc_url = Self::token_launch_current_rpc_url(chain, cx);
+
+        cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+            let balance = match option {
+                hive_ui_panels::panels::token_launch::ChainOption::Solana => {
+                    hive_blockchain::solana::get_balance_with_rpc(
+                        &address,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                    .ok()
+                }
+                hive_ui_panels::panels::token_launch::ChainOption::Ethereum
+                | hive_ui_panels::panels::token_launch::ChainOption::Base => {
+                    hive_blockchain::evm::get_balance_with_rpc(
+                        &address,
+                        Self::token_launch_chain(option),
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                    .ok()
+                }
+            };
+
+            let _ = this.update(app, |this, cx| {
+                this.token_launch_data.wallet_balance = balance;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn handle_token_launch_set_step(
         &mut self,
         action: &TokenLaunchSetStep,
@@ -6388,7 +7675,7 @@ impl HiveWorkspace {
     fn handle_token_launch_select_chain(
         &mut self,
         action: &TokenLaunchSelectChain,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         use hive_ui_panels::panels::token_launch::ChainOption;
@@ -6402,16 +7689,413 @@ impl HiveWorkspace {
 
         if let Some(chain) = self.token_launch_data.selected_chain {
             self.token_launch_data.decimals = chain.default_decimals();
-            self.token_launch_data.estimated_cost = Some(match chain {
-                ChainOption::Solana => 0.05,
-                ChainOption::Ethereum => 0.015,
-                ChainOption::Base => 0.0001,
+            self.token_launch_inputs.decimals.update(cx, |state, cx| {
+                state.set_value(chain.default_decimals().to_string(), window, cx);
+            });
+            self.token_launch_inputs.wallet_secret.update(cx, |state, cx| {
+                state.set_placeholder(Self::token_launch_secret_placeholder(Some(chain)), window, cx);
             });
         } else {
             self.token_launch_data.estimated_cost = None;
+            self.token_launch_inputs.wallet_secret.update(cx, |state, cx| {
+                state.set_placeholder(Self::token_launch_secret_placeholder(None), window, cx);
+            });
         }
 
+        self.sync_token_launch_inputs_to_data(cx);
+        self.sync_token_launch_rpc_input(self.token_launch_data.selected_chain, window, cx);
+        self.restore_token_launch_wallet_for_chain(window, cx);
+        self.refresh_token_launch_cost(cx);
         cx.notify();
+    }
+
+    fn handle_token_launch_save_rpc_config(
+        &mut self,
+        _action: &TokenLaunchSaveRpcConfig,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                "Select a target chain before saving an RPC endpoint.",
+            );
+            return;
+        };
+
+        let rpc_url = self
+            .token_launch_inputs
+            .rpc_url
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        if rpc_url.is_empty() {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                "RPC endpoint cannot be empty. Use Reset RPC to restore the default.",
+            );
+            return;
+        }
+
+        let chain = Self::token_launch_chain(option);
+        let result = if cx.has_global::<AppRpcConfig>() {
+            cx.global_mut::<AppRpcConfig>().0.set_custom_rpc(chain, rpc_url.clone())
+        } else {
+            Err(anyhow::anyhow!("RPC config store is not available."))
+        };
+
+        match result {
+            Ok(()) => {
+                if let Err(e) = self.persist_token_launch_rpc_config(cx) {
+                    self.push_notification(
+                        cx,
+                        NotificationType::Warning,
+                        "Token Launch",
+                        format!("RPC endpoint saved, but persistence failed: {e}"),
+                    );
+                }
+                self.refresh_token_launch_cost(cx);
+                self.refresh_token_launch_balance(cx);
+                self.push_notification(
+                    cx,
+                    NotificationType::Success,
+                    "Token Launch",
+                    format!("Saved custom RPC for {}.", chain.label()),
+                );
+                cx.notify();
+            }
+            Err(e) => {
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Token Launch",
+                    format!("Invalid RPC endpoint: {e}"),
+                );
+            }
+        }
+    }
+
+    fn handle_token_launch_reset_rpc_config(
+        &mut self,
+        _action: &TokenLaunchResetRpcConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                "Select a target chain before resetting an RPC endpoint.",
+            );
+            return;
+        };
+
+        let chain = Self::token_launch_chain(option);
+        if cx.has_global::<AppRpcConfig>() {
+            cx.global_mut::<AppRpcConfig>().0.reset_to_default(chain);
+        } else {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Token Launch",
+                "RPC config store is not available.",
+            );
+            return;
+        }
+
+        if let Err(e) = self.persist_token_launch_rpc_config(cx) {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                format!("RPC endpoint reset, but persistence failed: {e}"),
+            );
+        }
+
+        self.sync_token_launch_rpc_input(Some(option), window, cx);
+        self.refresh_token_launch_cost(cx);
+        self.refresh_token_launch_balance(cx);
+        self.push_notification(
+            cx,
+            NotificationType::Success,
+            "Token Launch",
+            format!("Restored default RPC for {}.", chain.label()),
+        );
+        cx.notify();
+    }
+
+    fn handle_token_launch_create_wallet(
+        &mut self,
+        _action: &TokenLaunchCreateWallet,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_token_launch_inputs_to_data(cx);
+
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                "Select a target chain before creating a wallet.",
+            );
+            return;
+        };
+
+        let chain = Self::token_launch_chain(option);
+        let wallet_name = self
+            .token_launch_inputs
+            .wallet_name
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let wallet_name = if wallet_name.is_empty() {
+            format!("{} Wallet", chain.label())
+        } else {
+            wallet_name
+        };
+
+        let (private_key, address) = match hive_blockchain::generate_wallet_material(chain) {
+            Ok(material) => material,
+            Err(e) => {
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Token Launch",
+                    format!("Wallet creation failed: {e}"),
+                );
+                return;
+            }
+        };
+
+        let encrypted_key = match hive_blockchain::encrypt_key(
+            &private_key,
+            Self::token_launch_wallet_password(),
+        ) {
+            Ok(encrypted) => encrypted,
+            Err(e) => {
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Token Launch",
+                    format!("Wallet encryption failed: {e}"),
+                );
+                return;
+            }
+        };
+
+        let wallet_id = if cx.has_global::<AppWallets>() {
+            cx.global_mut::<AppWallets>()
+                .0
+                .add_wallet(wallet_name.clone(), chain, address.clone(), encrypted_key)
+        } else {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Token Launch",
+                "Wallet store is not available.",
+            );
+            return;
+        };
+
+        if let Err(e) = self.persist_token_launch_wallets(cx) {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                format!("Wallet created, but saving failed: {e}"),
+            );
+        }
+
+        self.token_launch_data.wallet_id = Some(wallet_id);
+        self.token_launch_data.wallet_address = Some(address);
+        self.token_launch_data.wallet_balance = None;
+        self.sync_token_launch_saved_wallets(true, window, cx);
+        self.token_launch_inputs.wallet_name.update(cx, |state, cx| {
+            state.set_value(wallet_name, window, cx);
+        });
+        self.clear_token_launch_wallet_secret(window, cx);
+        self.refresh_token_launch_balance(cx);
+        self.push_notification(
+            cx,
+            NotificationType::Success,
+            "Token Launch",
+            "Wallet created and connected.",
+        );
+        cx.notify();
+    }
+
+    fn handle_token_launch_import_wallet(
+        &mut self,
+        _action: &TokenLaunchImportWallet,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_token_launch_inputs_to_data(cx);
+
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                "Select a target chain before importing a wallet.",
+            );
+            return;
+        };
+
+        let chain = Self::token_launch_chain(option);
+        let wallet_name = self
+            .token_launch_inputs
+            .wallet_name
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let wallet_name = if wallet_name.is_empty() {
+            format!("Imported {}", chain.label())
+        } else {
+            wallet_name
+        };
+        let secret = self
+            .token_launch_inputs
+            .wallet_secret
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+
+        let (private_key, address) = match hive_blockchain::import_wallet_material(chain, &secret) {
+            Ok(material) => material,
+            Err(e) => {
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Token Launch",
+                    format!("Wallet import failed: {e}"),
+                );
+                return;
+            }
+        };
+
+        let encrypted_key = match hive_blockchain::encrypt_key(
+            &private_key,
+            Self::token_launch_wallet_password(),
+        ) {
+            Ok(encrypted) => encrypted,
+            Err(e) => {
+                self.push_notification(
+                    cx,
+                    NotificationType::Error,
+                    "Token Launch",
+                    format!("Wallet encryption failed: {e}"),
+                );
+                return;
+            }
+        };
+
+        let wallet_id = if cx.has_global::<AppWallets>() {
+            cx.global_mut::<AppWallets>()
+                .0
+                .add_wallet(wallet_name.clone(), chain, address.clone(), encrypted_key)
+        } else {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Token Launch",
+                "Wallet store is not available.",
+            );
+            return;
+        };
+
+        if let Err(e) = self.persist_token_launch_wallets(cx) {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                format!("Wallet imported, but saving failed: {e}"),
+            );
+        }
+
+        self.token_launch_data.wallet_id = Some(wallet_id);
+        self.token_launch_data.wallet_address = Some(address);
+        self.token_launch_data.wallet_balance = None;
+        self.sync_token_launch_saved_wallets(true, window, cx);
+        self.token_launch_inputs.wallet_name.update(cx, |state, cx| {
+            state.set_value(wallet_name, window, cx);
+        });
+        self.clear_token_launch_wallet_secret(window, cx);
+        self.refresh_token_launch_balance(cx);
+        self.push_notification(
+            cx,
+            NotificationType::Success,
+            "Token Launch",
+            "Wallet imported and connected.",
+        );
+        cx.notify();
+    }
+
+    fn handle_token_launch_select_wallet(
+        &mut self,
+        action: &TokenLaunchSelectWallet,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(option) = self.token_launch_data.selected_chain else {
+            self.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Token Launch",
+                "Select a target chain before choosing a wallet.",
+            );
+            return;
+        };
+
+        let chain = Self::token_launch_chain(option);
+        let selected_wallet = if cx.has_global::<AppWallets>() {
+            cx.global::<AppWallets>()
+                .0
+                .get_wallet(&action.wallet_id)
+                .filter(|wallet| wallet.chain == chain)
+                .map(|wallet| {
+                    (
+                        wallet.id.clone(),
+                        wallet.name.clone(),
+                        wallet.address.clone(),
+                    )
+                })
+        } else {
+            None
+        };
+
+        if let Some((wallet_id, wallet_name, wallet_address)) = selected_wallet {
+            self.token_launch_data.wallet_id = Some(wallet_id);
+            self.token_launch_data.wallet_address = Some(wallet_address);
+            self.token_launch_inputs.wallet_name.update(cx, |state, cx| {
+                state.set_value(wallet_name, window, cx);
+            });
+            self.sync_token_launch_saved_wallets(true, window, cx);
+            self.push_notification(
+                cx,
+                NotificationType::Success,
+                "Token Launch",
+                "Connected saved wallet.",
+            );
+            cx.notify();
+        } else {
+            self.push_notification(
+                cx,
+                NotificationType::Error,
+                "Token Launch",
+                "Saved wallet not found for the selected chain.",
+            );
+        }
     }
 
     fn handle_token_launch_deploy(
@@ -6422,6 +8106,7 @@ impl HiveWorkspace {
     ) {
         info!("TokenLaunch: deploy");
         use hive_ui_panels::panels::token_launch::DeployStatus;
+        self.sync_token_launch_inputs_to_data(cx);
 
         if self.token_launch_data.selected_chain.is_none() {
             self.token_launch_data.deploy_status =
@@ -6441,19 +8126,107 @@ impl HiveWorkspace {
             return;
         }
 
-        if self.token_launch_data.wallet_address.is_none() {
+        if self.token_launch_data.wallet_address.is_none() || self.token_launch_data.wallet_id.is_none() {
             self.token_launch_data.deploy_status =
                 DeployStatus::Failed("Connect a wallet before deploying.".to_string());
             cx.notify();
             return;
         }
 
+        if let (Some(balance), Some(cost)) = (
+            self.token_launch_data.wallet_balance,
+            self.token_launch_data.estimated_cost,
+        ) && balance < cost {
+            self.token_launch_data.deploy_status = DeployStatus::Failed(
+                "Connected wallet does not have enough funds for the estimated deployment cost."
+                    .to_string(),
+            );
+            cx.notify();
+            return;
+        }
+
+        let wallet_id = self.token_launch_data.wallet_id.clone().unwrap_or_default();
+        let private_key = if cx.has_global::<AppWallets>() {
+            match cx
+                .global::<AppWallets>()
+                .0
+                .decrypt_wallet_key(&wallet_id, Self::token_launch_wallet_password())
+            {
+                Ok(key) => key,
+                Err(e) => {
+                    self.token_launch_data.deploy_status =
+                        DeployStatus::Failed(format!("Failed to unlock wallet: {e}"));
+                    cx.notify();
+                    return;
+                }
+            }
+        } else {
+            self.token_launch_data.deploy_status =
+                DeployStatus::Failed("Wallet store is not available.".to_string());
+            cx.notify();
+            return;
+        };
+
+        let selected_chain = self.token_launch_data.selected_chain.unwrap();
+        let token_name = self.token_launch_data.token_name.clone();
+        let token_symbol = self.token_launch_data.token_symbol.clone();
+        let total_supply = self.token_launch_data.total_supply.clone();
+        let decimals = self.token_launch_data.decimals;
+        let rpc_url =
+            Self::token_launch_current_rpc_url(Self::token_launch_chain(selected_chain), cx);
+
         self.token_launch_data.deploy_status = DeployStatus::Deploying;
-        self.token_launch_data.deploy_status = DeployStatus::Failed(
-            "On-chain deployment is not enabled in this build yet. Use the wizard to validate configuration, then deploy via backend blockchain APIs once enabled."
-                .to_string(),
-        );
         cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+            let deploy_result = match selected_chain {
+                hive_ui_panels::panels::token_launch::ChainOption::Solana => {
+                    match total_supply.parse::<u64>() {
+                        Ok(supply) => hive_blockchain::solana::create_spl_token_with_rpc(
+                            hive_blockchain::SplTokenParams {
+                                name: token_name,
+                                symbol: token_symbol,
+                                decimals,
+                                supply,
+                                metadata_uri: None,
+                            },
+                            &private_key,
+                            Some(rpc_url.as_str()),
+                        )
+                        .await
+                        .map(|result| result.mint_address),
+                        Err(_) => Err(anyhow::anyhow!(
+                            "Total supply must fit into an unsigned 64-bit integer for Solana deployments."
+                        )),
+                    }
+                }
+                hive_ui_panels::panels::token_launch::ChainOption::Ethereum
+                | hive_ui_panels::panels::token_launch::ChainOption::Base => {
+                    hive_blockchain::evm::deploy_token_with_rpc(
+                        hive_blockchain::TokenDeployParams {
+                            name: token_name,
+                            symbol: token_symbol,
+                            decimals,
+                            total_supply,
+                            chain: Self::token_launch_chain(selected_chain),
+                        },
+                        &private_key,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                    .map(|result| result.contract_address)
+                }
+            };
+
+            let _ = this.update(app, |this, cx| {
+                this.token_launch_data.deploy_status = match deploy_result {
+                    Ok(address) => DeployStatus::Success(address),
+                    Err(e) => DeployStatus::Failed(e.to_string()),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     // -- Settings panel handlers ---------------------------------------------
@@ -6798,6 +8571,67 @@ impl HiveWorkspace {
         cx.notify();
     }
 
+    fn refresh_runtime_integrations_from_config(&mut self, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppConfig>() {
+            return;
+        }
+
+        let config = cx.global::<AppConfig>().0.get();
+        cx.set_global(AppOllamaManager(std::sync::Arc::new(
+            hive_terminal::local_ai::OllamaManager::new(Some(config.ollama_url.clone())),
+        )));
+
+        let hue_client = config
+            .hue_bridge_ip
+            .as_deref()
+            .zip(config.hue_api_key.as_deref())
+            .map(|(bridge_ip, api_key)| {
+                std::sync::Arc::new(hive_integrations::smart_home::PhilipsHueClient::new(
+                    bridge_ip,
+                    api_key,
+                ))
+            });
+        cx.set_global(AppHueClient(hue_client));
+
+        self.rewire_mcp_integrations(cx);
+    }
+
+    fn rewire_mcp_integrations(&mut self, cx: &mut Context<Self>) {
+        if !cx.has_global::<AppMcpServer>() {
+            return;
+        }
+
+        use hive_agents::integration_tools::IntegrationServices;
+        let docs_indexer = if cx.has_global::<AppDocsIndexer>() {
+            cx.global::<AppDocsIndexer>().0.clone()
+        } else {
+            std::sync::Arc::new(
+                hive_integrations::docs_indexer::DocsIndexer::new().unwrap_or_else(|e| {
+                    warn!("DocsIndexer fallback creation failed: {e}");
+                    hive_integrations::docs_indexer::DocsIndexer::empty()
+                }),
+            )
+        };
+
+        let services = IntegrationServices {
+            messaging: cx.global::<AppMessaging>().0.clone(),
+            project_management: cx.global::<AppProjectManagement>().0.clone(),
+            knowledge: cx.global::<AppKnowledge>().0.clone(),
+            database: cx.global::<AppIntegrationDb>().0.clone(),
+            docker: cx.global::<AppDocker>().0.clone(),
+            kubernetes: cx.global::<AppKubernetes>().0.clone(),
+            a2a: cx.global::<AppA2aClient>().0.clone(),
+            browser: cx.global::<AppBrowser>().0.clone(),
+            ollama: cx.global::<AppOllamaManager>().0.clone(),
+            hue: cx.global::<AppHueClient>().0.clone(),
+            aws: cx.global::<AppAws>().0.clone(),
+            azure: cx.global::<AppAzure>().0.clone(),
+            gcp: cx.global::<AppGcp>().0.clone(),
+            docs_indexer,
+        };
+        cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
+    }
+
     fn handle_settings_save_from_view(&mut self, cx: &mut Context<Self>) {
         info!("Settings: persisting from SettingsView");
 
@@ -6812,6 +8646,7 @@ impl HiveWorkspace {
                 cfg.lmstudio_url = snapshot.lmstudio_url.clone();
                 cfg.litellm_url = snapshot.litellm_url.clone();
                 cfg.local_provider_url = snapshot.custom_url.clone();
+                cfg.hue_bridge_ip = snapshot.hue_bridge_ip.clone();
                 cfg.default_model = snapshot.default_model.clone();
                 cfg.daily_budget_usd = snapshot.daily_budget;
                 cfg.monthly_budget_usd = snapshot.monthly_budget;
@@ -6849,6 +8684,7 @@ impl HiveWorkspace {
                 ("litellm", &snapshot.litellm_key),
                 ("elevenlabs", &snapshot.elevenlabs_key),
                 ("telnyx", &snapshot.telnyx_key),
+                ("hue", &snapshot.hue_api_key),
                 ("notion", &snapshot.notion_key),
             ];
             for (provider, key) in key_pairs {
@@ -6878,6 +8714,10 @@ impl HiveWorkspace {
 
         // Rebuild knowledge hub so changed vault paths and Notion keys take effect.
         self.rebuild_knowledge_hub(cx);
+
+        // Rebuild shared runtime integrations so UI and MCP use the same
+        // up-to-date Ollama and Hue service instances after every save.
+        self.refresh_runtime_integrations_from_config(cx);
 
         // Re-push API keys to the models browser so new/changed keys take effect
         // immediately without requiring the user to switch away and back.
@@ -7757,6 +9597,63 @@ impl HiveWorkspace {
     }
 }
 
+fn network_peer_status_label(state: &hive_network::PeerState) -> String {
+    match state {
+        hive_network::PeerState::Connected => "Connected",
+        hive_network::PeerState::Connecting => "Connecting",
+        hive_network::PeerState::Discovered => "Discovered",
+        hive_network::PeerState::Disconnected => "Disconnected",
+        hive_network::PeerState::Banned => "Banned",
+    }
+    .to_string()
+}
+
+fn network_peer_status_rank(status: &str) -> u8 {
+    match status {
+        "Connected" => 0,
+        "Connecting" => 1,
+        "Discovered" => 2,
+        "Disconnected" => 3,
+        "Banned" => 4,
+        _ => 5,
+    }
+}
+
+fn format_network_relative_time(dt: chrono::DateTime<Utc>) -> String {
+    let duration = Utc::now().signed_duration_since(dt);
+    let total_seconds = duration.num_seconds();
+
+    if total_seconds < 60 {
+        return "Just now".to_string();
+    }
+
+    let minutes = duration.num_minutes();
+    if minutes == 1 {
+        return "1 minute ago".to_string();
+    }
+    if minutes < 60 {
+        return format!("{minutes} minutes ago");
+    }
+
+    let hours = duration.num_hours();
+    if hours == 1 {
+        return "1 hour ago".to_string();
+    }
+    if hours < 24 {
+        return format!("{hours} hours ago");
+    }
+
+    let days = duration.num_days();
+    if days == 1 {
+        return "Yesterday".to_string();
+    }
+    if days < 7 {
+        return format!("{days} days ago");
+    }
+
+    dt.format("%b %-d, %Y").to_string()
+}
+
 impl Render for HiveWorkspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Capture the current window size for session persistence.
@@ -7803,6 +9700,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_new_conversation))
             .on_action(cx.listener(Self::handle_clear_chat))
             .on_action(cx.listener(Self::handle_switch_to_chat))
+            .on_action(cx.listener(Self::handle_switch_to_quick_start))
             .on_action(cx.listener(Self::handle_switch_to_history))
             .on_action(cx.listener(Self::handle_switch_to_files))
             .on_action(cx.listener(Self::handle_switch_to_kanban))
@@ -7914,17 +9812,31 @@ impl Render for HiveWorkspace {
             // Token Launch
             .on_action(cx.listener(Self::handle_token_launch_set_step))
             .on_action(cx.listener(Self::handle_token_launch_select_chain))
+            .on_action(cx.listener(Self::handle_token_launch_select_wallet))
+            .on_action(cx.listener(Self::handle_token_launch_create_wallet))
+            .on_action(cx.listener(Self::handle_token_launch_import_wallet))
+            .on_action(cx.listener(Self::handle_token_launch_save_rpc_config))
+            .on_action(cx.listener(Self::handle_token_launch_reset_rpc_config))
             .on_action(cx.listener(Self::handle_token_launch_deploy))
             // Settings
             .on_action(cx.listener(Self::handle_settings_save))
             .on_action(cx.listener(Self::handle_export_config))
             .on_action(cx.listener(Self::handle_import_config))
+            // Quick Start
+            .on_action(cx.listener(Self::handle_quick_start_select_template))
+            .on_action(cx.listener(Self::handle_quick_start_open_panel))
+            .on_action(cx.listener(Self::handle_quick_start_run_project))
             // Theme
             .on_action(cx.listener(Self::handle_theme_changed))
             // Monitor
             .on_action(cx.listener(Self::handle_monitor_refresh))
             // Agents
+            .on_action(cx.listener(Self::handle_agents_refresh_remote_agents))
             .on_action(cx.listener(Self::handle_agents_reload_workflows))
+            .on_action(cx.listener(Self::handle_agents_select_remote_agent))
+            .on_action(cx.listener(Self::handle_agents_select_remote_skill))
+            .on_action(cx.listener(Self::handle_agents_discover_remote_agent))
+            .on_action(cx.listener(Self::handle_agents_run_remote_agent))
             .on_action(cx.listener(Self::handle_agents_run_workflow))
             // Connected Accounts
             .on_action(cx.listener(Self::handle_account_connect_platform))
@@ -8028,7 +9940,7 @@ impl HiveWorkspace {
                     .gap(theme.space_2)
                     .child(render_sidebar_section(
                         "Core",
-                        &[Panel::Chat, Panel::History, Panel::Files, Panel::Specs],
+                        &[Panel::QuickStart, Panel::Chat, Panel::History, Panel::Files, Panel::Specs],
                         active,
                         theme,
                         cx,
@@ -8172,6 +10084,86 @@ fn render_sidebar_item(
                 .child(panel.label()),
         )
         .into_any_element()
+}
+
+fn quick_start_templates() -> Vec<QuickStartTemplateDisplay> {
+    vec![
+        QuickStartTemplateDisplay {
+            id: "dogfood".into(),
+            title: "Improve This Codebase".into(),
+            description: "Use Hive to find the highest-leverage gaps in the current project and start closing them."
+                .into(),
+            outcome: "Best when you want HiveCode to improve HiveCode itself.".into(),
+        },
+        QuickStartTemplateDisplay {
+            id: "feature".into(),
+            title: "Ship A Feature".into(),
+            description: "Trace the relevant code, define the change, implement it, and verify the result."
+                .into(),
+            outcome: "Best when you already know the product outcome you want.".into(),
+        },
+        QuickStartTemplateDisplay {
+            id: "bug".into(),
+            title: "Fix A Bug".into(),
+            description: "Reproduce the problem, isolate root cause, patch it, and confirm the regression is closed."
+                .into(),
+            outcome: "Best when the project is blocked by a failure or broken workflow.".into(),
+        },
+        QuickStartTemplateDisplay {
+            id: "understand".into(),
+            title: "Understand The Project".into(),
+            description: "Map the architecture, explain how the pieces fit, and identify the real risks."
+                .into(),
+            outcome: "Best when a human needs a clear read on the codebase before deciding.".into(),
+        },
+        QuickStartTemplateDisplay {
+            id: "review".into(),
+            title: "Review Current State".into(),
+            description: "Inspect git state and the working tree, then call out problems, regressions, and next actions."
+                .into(),
+            outcome: "Best when you want an informed starting point before more coding.".into(),
+        },
+    ]
+}
+
+fn quick_start_template_title(template_id: &str) -> &'static str {
+    match template_id {
+        "feature" => "Ship A Feature",
+        "bug" => "Fix A Bug",
+        "understand" => "Understand The Project",
+        "review" => "Review Current State",
+        _ => "Improve This Codebase",
+    }
+}
+
+fn quick_start_template_placeholder(template_id: &str) -> &'static str {
+    match template_id {
+        "feature" => "Describe the feature outcome, user flow, or missing integration to ship",
+        "bug" => "Describe the failure, broken behavior, or user-facing bug to fix",
+        "understand" => "Describe the architecture, workflow, or module you want Hive to explain",
+        "review" => "Describe what you want reviewed, for example the current diff, release readiness, or regressions",
+        _ => "Describe what Hive should improve, complete, or tighten in this project",
+    }
+}
+
+fn quick_start_template_instruction(template_id: &str) -> &'static str {
+    match template_id {
+        "feature" => {
+            "Trace the feature area, identify the files and interfaces involved, implement the change end-to-end, and verify the result with the right checks."
+        }
+        "bug" => {
+            "Reproduce the failure from repo context, isolate the root cause, implement a precise fix, and verify that the bug is actually closed."
+        }
+        "understand" => {
+            "Build a practical map of the codebase, call out the major modules and dependencies, identify incomplete or risky seams, and recommend the next high-impact work."
+        }
+        "review" => {
+            "Start with repository state and current changes, identify the most important risks or regressions, and recommend the next concrete actions to move the project forward."
+        }
+        _ => {
+            "Treat this as a dogfooding and completion run: find the highest-impact gaps in the product, prioritize what will make the app more integrated and more usable, and begin closing those gaps."
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

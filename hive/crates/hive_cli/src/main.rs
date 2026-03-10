@@ -10,6 +10,7 @@ mod commands;
 mod ui;
 
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "hive", version, about = "Hive AI terminal client")]
@@ -46,6 +47,35 @@ enum Commands {
     },
     /// List available AI models
     Models,
+    /// Invoke the shared local tool surface used by the desktop app
+    Tool {
+        #[command(subcommand)]
+        action: ToolAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolAction {
+    /// List all available local tools
+    List {
+        /// Print machine-readable JSON
+        #[arg(long)]
+        json: bool,
+        /// Workspace root for file/git/shell tools
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+    },
+    /// Call a local tool with JSON arguments
+    Call {
+        /// Tool name, for example browse_url or a2a_run_task
+        name: String,
+        /// JSON object of tool arguments
+        #[arg(long, default_value = "{}")]
+        args: String,
+        /// Workspace root for file/git/shell tools
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -92,5 +122,13 @@ async fn main() -> anyhow::Result<()> {
         Commands::Remote => commands::remote::run().await,
         Commands::Config { key, value } => commands::config::run(key, value).await,
         Commands::Models => commands::models::run().await,
+        Commands::Tool { action } => match action {
+            ToolAction::List { json, workspace } => commands::tools::list(workspace, json).await,
+            ToolAction::Call {
+                name,
+                args,
+                workspace,
+            } => commands::tools::call(workspace, &name, &args).await,
+        },
     }
 }

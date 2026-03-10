@@ -67,9 +67,7 @@ async fn main() -> Result<()> {
                     (_, KeyCode::Char('q')) if !app.search_active => break,
                     (KeyModifiers::CONTROL, KeyCode::Char('c')) => break,
                     (_, KeyCode::Tab) if !app.search_active => app.next_tab(),
-                    (KeyModifiers::SHIFT, KeyCode::BackTab) if !app.search_active => {
-                        app.prev_tab()
-                    }
+                    (KeyModifiers::SHIFT, KeyCode::BackTab) if !app.search_active => app.prev_tab(),
                     (_, KeyCode::Char('r')) if !app.search_active => {
                         app.refresh_data().await;
                         last_tick = Instant::now();

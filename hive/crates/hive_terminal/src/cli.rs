@@ -389,12 +389,11 @@ impl CliService {
     }
 
     fn check_disk_space(&self) -> DoctorCheck {
-        // Check available disk space on the Hive data directory or current dir.
-        let check_path = hive_core::config::HiveConfig::base_dir()
-            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
-
         #[cfg(unix)]
         {
+            // Check available disk space on the Hive data directory or current dir.
+            let check_path = hive_core::config::HiveConfig::base_dir()
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
             use std::mem::MaybeUninit;
             let c_path = std::ffi::CString::new(
                 check_path.to_string_lossy().as_bytes(),
@@ -443,60 +442,92 @@ impl CliService {
 
         #[cfg(not(unix))]
         {
-            // On Windows, try using the `df` command via shell.
-            match std::process::Command::new("cmd")
-                .args(["/C", "wmic", "logicaldisk", "get", "freespace,caption"])
-                .output()
-            {
-                Ok(output) if output.status.success() => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
+            use std::os::windows::ffi::OsStrExt;
+
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn GetDiskFreeSpaceExW(
+                    lpDirectoryName: *const u16,
+                    lpFreeBytesAvailableToCaller: *mut u64,
+                    lpTotalNumberOfBytes: *mut u64,
+                    lpTotalNumberOfFreeBytes: *mut u64,
+                ) -> i32;
+            }
+
+            let check_path = hive_core::config::HiveConfig::base_dir()
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+            let wide_path = check_path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>();
+            let mut available_bytes = 0u64;
+            let result = unsafe {
+                GetDiskFreeSpaceExW(
+                    wide_path.as_ptr(),
+                    &mut available_bytes,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+
+            if result != 0 {
+                let available_gb = available_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                let min_gb = 1.0;
+                if available_gb >= min_gb {
                     DoctorCheck {
                         name: "Disk Space".to_string(),
                         description: "Check available disk space".to_string(),
                         status: CheckStatus::Pass,
-                        message: format!("Disk info retrieved ({})", stdout.lines().count()),
+                        message: format!("{available_gb:.1} GB available"),
                         fix_suggestion: None,
                     }
+                } else {
+                    DoctorCheck {
+                        name: "Disk Space".to_string(),
+                        description: "Check available disk space".to_string(),
+                        status: CheckStatus::Warn,
+                        message: format!(
+                            "Only {available_gb:.1} GB available (recommend >= {min_gb:.0} GB)"
+                        ),
+                        fix_suggestion: Some(
+                            "Free up disk space to ensure Hive can store conversations and models"
+                                .to_string(),
+                        ),
+                    }
                 }
-                _ => DoctorCheck {
+            } else {
+                DoctorCheck {
                     name: "Disk Space".to_string(),
                     description: "Check available disk space".to_string(),
                     status: CheckStatus::Warn,
-                    message: "Could not determine available disk space".to_string(),
+                    message: format!(
+                        "Could not determine available disk space for {}",
+                        check_path.display()
+                    ),
                     fix_suggestion: None,
-                },
+                }
             }
         }
     }
 
     fn check_network(&self) -> DoctorCheck {
-        // Perform a quick DNS resolution check as a lightweight connectivity test.
-        // We avoid making actual HTTP requests to keep the doctor fast.
-        match std::net::ToSocketAddrs::to_socket_addrs(&("api.anthropic.com", 443)) {
-            Ok(mut addrs) => {
-                if addrs.next().is_some() {
-                    DoctorCheck {
-                        name: "Network".to_string(),
-                        description: "Basic network connectivity check".to_string(),
-                        status: CheckStatus::Pass,
-                        message: "DNS resolution OK (api.anthropic.com reachable)".to_string(),
-                        fix_suggestion: None,
-                    }
-                } else {
-                    DoctorCheck {
-                        name: "Network".to_string(),
-                        description: "Basic network connectivity check".to_string(),
-                        status: CheckStatus::Warn,
-                        message: "DNS resolution returned no addresses".to_string(),
-                        fix_suggestion: Some("Check your network connection and DNS settings".to_string()),
-                    }
-                }
-            }
+        let target = std::net::SocketAddr::from(([1, 1, 1, 1], 443));
+        let timeout = std::time::Duration::from_secs(2);
+
+        match std::net::TcpStream::connect_timeout(&target, timeout) {
+            Ok(_stream) => DoctorCheck {
+                name: "Network".to_string(),
+                description: "Basic network connectivity check".to_string(),
+                status: CheckStatus::Pass,
+                message: format!("TCP connectivity OK ({target} reachable)"),
+                fix_suggestion: None,
+            },
             Err(e) => DoctorCheck {
                 name: "Network".to_string(),
                 description: "Basic network connectivity check".to_string(),
-                status: CheckStatus::Fail,
-                message: format!("DNS resolution failed: {e}"),
+                status: CheckStatus::Warn,
+                message: format!("Timed network probe to {target} failed: {e}"),
                 fix_suggestion: Some(
                     "Check your internet connection. Hive can still work offline with local AI models (Ollama, LM Studio)."
                         .to_string(),
@@ -804,19 +835,21 @@ mod tests {
     }
 
     #[test]
-    fn disk_space_always_passes() {
+    fn disk_space_check_returns_valid_status() {
         let service = CliService::new();
         let checks = service.run_doctor();
         let disk = checks.iter().find(|c| c.name == "Disk Space").unwrap();
-        assert_eq!(disk.status, CheckStatus::Pass);
+        assert!(matches!(disk.status, CheckStatus::Pass | CheckStatus::Warn));
+        assert!(!disk.message.is_empty());
     }
 
     #[test]
-    fn network_always_passes() {
+    fn network_check_returns_valid_status() {
         let service = CliService::new();
         let checks = service.run_doctor();
         let net = checks.iter().find(|c| c.name == "Network").unwrap();
-        assert_eq!(net.status, CheckStatus::Pass);
+        assert!(matches!(net.status, CheckStatus::Pass | CheckStatus::Warn));
+        assert!(!net.message.is_empty());
     }
 
     // -- Doctor summary ------------------------------------------------------

@@ -1,7 +1,7 @@
 use gpui::*;
 use gpui_component::{Icon, IconName};
 
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{HiveTheme, SwitchToQuickStart};
 
 // ---------------------------------------------------------------------------
 // HelpPanel
@@ -297,39 +297,50 @@ fn render_quick_start(theme: &HiveTheme) -> AnyElement {
     card(theme)
         .child(section_title("\u{1F680}", "Quick Start", theme))
         .child(section_desc(
-            "Get up and running in four simple steps.",
+            "Open the guided Quick Start panel to choose a project mission, validate setup, and launch the first run.",
             theme,
         ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .px(theme.space_3)
+                .py(theme.space_2)
+                .rounded(theme.radius_md)
+                .bg(theme.accent_cyan)
+                .text_size(theme.font_size_sm)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_on_accent)
+                .hover(|style| style.bg(theme.accent_aqua))
+                .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                    window.dispatch_action(Box::new(SwitchToQuickStart), cx);
+                })
+                .child("Open Guided Quick Start"),
+        )
         .child(separator(theme))
         .child(step_row(
             1,
-            "Set an API key",
-            "Open Settings (Ctrl+,) and add your Anthropic, OpenAI, or OpenRouter key. \
-             Or skip this step to use local models.",
+            "Choose the mission",
+            "Open Quick Start from the Core section in the sidebar, pick a goal like Improve This Codebase, Ship A Feature, or Fix A Bug, then describe the specific outcome you want.",
             theme,
         ))
         .child(step_row(
             2,
-            "Choose your models",
-            "Open the Models panel in the sidebar to browse catalogs from OpenRouter, \
-             Groq, OpenAI, Anthropic, Google, and local providers. Add models to your \
-             project list \u{2014} the Settings model selector will show only those you picked. \
-             Enable Auto Routing and Hive assigns the best model per task automatically.",
+            "Validate setup",
+            "Quick Start checks the active project root, model runtime, default model, and optional remote agents. Use its action buttons to jump straight into Settings, Files, or Agents when something needs attention.",
             theme,
         ))
         .child(step_row(
             3,
-            "Start chatting",
-            "Type a message in the chat input at the bottom and press Enter. \
-             Hive streams responses with full markdown and code highlighting.",
+            "Launch the run",
+            "Quick Start opens a fresh Chat run with the current project context, so Hive starts from a clean brief instead of a stale conversation.",
             theme,
         ))
         .child(step_row(
             4,
-            "Explore features",
-            "Use the grouped navigation: Core, Flow, Observe, Project, and System. \
-             Open Workflows for the visual drag-and-drop builder, Channels for AI agent \
-             messaging, and Settings to connect Google, GitHub, Slack, and more.",
+            "Follow through in the other tabs",
+            "Use Review for git state, Specs for planning, Agents for delegation, and Kanban for tracking once the kickoff run identifies the real work queue.",
             theme,
         ))
         .child(step_row(

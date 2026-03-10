@@ -12,6 +12,7 @@ pub mod config;
 pub mod error;
 pub mod remote_agent;
 pub mod server;
+pub mod service;
 pub mod streaming;
 pub mod task_handler;
 
@@ -20,4 +21,6 @@ pub use client::{discover_agent, DiscoveryCache};
 pub use config::A2aConfig;
 pub use error::A2aError;
 pub use remote_agent::RemoteAgent;
-pub use server::start_server;
+pub use service::{A2aClientService, RemoteAgentRunResult, RemoteAgentSummary};
+pub use server::{start_server, start_server_with_handler, TaskHandlerAdapter};
+pub use task_handler::{HiveTaskHandler, ProviderExecutor};

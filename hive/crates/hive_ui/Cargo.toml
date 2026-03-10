@@ -7,6 +7,7 @@ license = "MIT"
 [dependencies]
 hive_ui_core = { path = "../hive_ui_core" }
 hive_ui_panels = { path = "../hive_ui_panels" }
+hive_a2a = { path = "../hive_a2a" }
 hive_core = { path = "../hive_core" }
 hive_ai = { path = "../hive_ai" }
 hive_fs = { path = "../hive_fs" }
@@ -17,6 +18,7 @@ hive_terminal = { path = "../hive_terminal" }
 hive_assistant = { path = "../hive_assistant" }
 hive_blockchain = { path = "../hive_blockchain" }
 hive_integrations = { path = "../hive_integrations" }
+hive_network = { path = "../hive_network" }
 
 dirs.workspace = true
 gpui.workspace = true

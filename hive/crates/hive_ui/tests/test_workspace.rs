@@ -53,6 +53,7 @@ fn test_action_types_implement_action_trait() {
     assert_action::<NewConversation>();
     assert_action::<ClearChat>();
     assert_action::<SwitchToChat>();
+    assert_action::<SwitchToQuickStart>();
     assert_action::<SwitchToHistory>();
     assert_action::<SwitchToFiles>();
     assert_action::<SwitchToWorkflows>();

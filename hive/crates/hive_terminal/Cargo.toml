@@ -6,6 +6,7 @@ license = "MIT"
 
 [dependencies]
 hive_core = { path = "../hive_core" }
+hive_integrations = { path = "../hive_integrations" }
 
 tokio.workspace = true
 reqwest.workspace = true

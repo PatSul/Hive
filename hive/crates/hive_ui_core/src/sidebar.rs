@@ -1,9 +1,10 @@
 use gpui_component::IconName;
 
-/// The 22 navigable panels in the application.
+/// The 23 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
+    QuickStart,
     History,
     Files,
     Specs,
@@ -28,7 +29,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 22] = [
+    pub const ALL: [Panel; 23] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
@@ -51,11 +52,13 @@ impl Panel {
         Panel::Network,
         Panel::Settings,
         Panel::Help,
+        Panel::QuickStart,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Chat => "Chat",
+            Self::QuickStart => "Quick Start",
             Self::History => "History",
             Self::Files => "Files",
             Self::Specs => "Specs",
@@ -93,6 +96,7 @@ impl Panel {
     pub fn icon(self) -> IconName {
         match self {
             Self::Chat => IconName::Bot,
+            Self::QuickStart => IconName::Star,
             Self::History => IconName::Calendar,
             Self::Files => IconName::Folder,
             Self::Specs => IconName::File,
@@ -124,6 +128,7 @@ impl Panel {
     pub fn from_stored(s: &str) -> Self {
         match s {
             "Chat" => Self::Chat,
+            "QuickStart" => Self::QuickStart,
             "History" => Self::History,
             "Files" => Self::Files,
             "Specs" => Self::Specs,
@@ -153,6 +158,7 @@ impl Panel {
     pub fn to_stored(self) -> &'static str {
         match self {
             Self::Chat => "Chat",
+            Self::QuickStart => "QuickStart",
             Self::History => "History",
             Self::Files => "Files",
             Self::Specs => "Specs",

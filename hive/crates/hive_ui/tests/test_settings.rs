@@ -11,9 +11,11 @@ fn test_settings_data_default() {
     assert!(!d.has_openai_key);
     assert!(!d.has_openrouter_key);
     assert!(!d.has_google_key);
+    assert!(!d.has_hue_key);
     assert_eq!(d.ollama_url, "http://localhost:11434");
     assert_eq!(d.lmstudio_url, "http://localhost:1234");
     assert!(d.local_provider_url.is_none());
+    assert!(d.hue_bridge_ip.is_none());
     assert!(!d.privacy_mode);
     assert!(d.auto_routing);
     assert_eq!(d.daily_budget_usd, 10.0);
@@ -87,11 +89,13 @@ fn test_settings_data_preserves_urls() {
     cfg.ollama_url = "http://my-server:11434".to_string();
     cfg.lmstudio_url = "http://my-server:1234".to_string();
     cfg.local_provider_url = Some("http://custom:8080".to_string());
+    cfg.hue_bridge_ip = Some("192.168.1.10".to_string());
 
     let d = SettingsData::from_config(&cfg);
     assert_eq!(d.ollama_url, "http://my-server:11434");
     assert_eq!(d.lmstudio_url, "http://my-server:1234");
     assert_eq!(d.local_provider_url.as_deref(), Some("http://custom:8080"));
+    assert_eq!(d.hue_bridge_ip.as_deref(), Some("192.168.1.10"));
 }
 
 #[test]
@@ -171,6 +175,17 @@ fn test_settings_data_tts_from_config() {
     assert_eq!(d.tts_provider, "elevenlabs");
     assert!((d.tts_speed - 1.5).abs() < f32::EPSILON);
     assert!(d.clawdtalk_enabled);
+}
+
+#[test]
+fn test_settings_data_hue_from_config() {
+    let mut cfg = hive_core::HiveConfig::default();
+    cfg.hue_api_key = Some("hue-key".to_string());
+    cfg.hue_bridge_ip = Some("192.168.1.50".to_string());
+
+    let d = SettingsData::from_config(&cfg);
+    assert!(d.has_hue_key);
+    assert_eq!(d.hue_bridge_ip.as_deref(), Some("192.168.1.50"));
 }
 
 // ---------------------------------------------------------------------------

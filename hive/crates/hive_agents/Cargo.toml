@@ -12,6 +12,7 @@ hive_integrations = { path = "../hive_integrations" }
 hive_learn = { path = "../hive_learn" }
 hive_terminal = { path = "../hive_terminal" }
 
+async-trait.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -31,3 +32,4 @@ enigo = "0.6.1"
 
 [dev-dependencies]
 tempfile = "3"
+axum = { version = "0.7", features = ["macros"] }
