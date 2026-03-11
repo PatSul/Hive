@@ -15,12 +15,12 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.17-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.18-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-tracked-yellow" alt="Warnings" />
-  <img src="https://img.shields.io/badge/lines-177k%2B-informational" alt="Lines of Rust" />
+  <img src="https://img.shields.io/badge/lines-192k%2B-informational" alt="Lines of Rust" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
   <img src="https://img.shields.io/badge/UI-GPUI-blueviolet" alt="GPUI" />
 </p>
@@ -66,6 +66,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - P2P federation across instances
 - **Remote control** (WebSocket relay, QR pairing, web UI)
 - **Terminal CLI client** (chat, sync, config, models)
+- **A2A protocol** (Agent-to-Agent interoperability)
 
 </td>
 <td width="33%" valign="top">
@@ -531,7 +532,7 @@ On startup, Hive automatically backfills any JSON-only conversations into SQLite
 
 ---
 
-## Architecture — 20-Crate Workspace
+## Architecture — 21-Crate Workspace
 
 ```
 hive/crates/
@@ -577,6 +578,8 @@ hive/crates/
 │                      4 files · 300+ lines [binary: hive_cloud]
 ├── hive_admin         Cloud admin TUI dashboard (6 tabs: dashboard, users, gateway, relay, sync, teams)
 │                      11 files · 905 lines  [binary: hive-admin]
+├── hive_a2a           Agent-to-Agent protocol — HTTP server, SSE streaming, task handler, bridge
+│                      8 files · 1,200+ lines
 └── hive_cli           Terminal AI client (chat, sync, config, models, login, remote, status)
                        12 files · 938 lines  [binary: hive]
 ```
@@ -601,6 +604,7 @@ hive_app
         ├── hive_network
         └── hive_remote ──── hive_core, hive_ai, hive_agents, hive_network
 
+hive_a2a ─────────────── hive_core, hive_agents
 hive_admin (standalone binary)
 hive_cloud (standalone binary) ── hive_core, hive_remote
 hive_cli   (standalone binary) ── hive_core
@@ -786,10 +790,10 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.17 |
+| Version | 0.3.18 |
 | Crates | 21 |
-| Rust source files | 375 |
-| Lines of Rust | 180,600+ |
+| Rust source files | 394 |
+| Lines of Rust | 192,500+ |
 | Tests | Targeted verification matrix |
 | Compiler warnings | Tracked per validated slice |
 | Clippy warnings | Checked per validated slice |
@@ -799,7 +803,37 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 ---
 
+## Agent-to-Agent Protocol (A2A)
+
+Hive implements the [A2A protocol](https://google.github.io/A2A/) for interoperability with external AI agents:
+
+| Feature | Details |
+|---|---|
+| **HTTP Server** | Axum-based A2A endpoint with JSON-RPC request handling |
+| **Agent Card** | Auto-generated agent card advertising Hive's skills and capabilities |
+| **Task Handler** | Dispatches incoming A2A messages to the Hive orchestrator |
+| **SSE Streaming** | Server-Sent Events for real-time task progress streaming |
+| **Bridge** | Bidirectional type conversion between A2A and Hive internal types |
+| **Auth Middleware** | API key validation and URL security for incoming requests |
+| **Client Discovery** | Caches remote agent cards for efficient repeat communication |
+
+A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and delegating to other A2A-compatible agents across the network.
+
+---
+
 ## Changelog
+
+### v0.3.18
+
+**A2A Protocol + Cross-Crate Improvements**
+
+- **A2A Protocol** (`hive_a2a`) — Full Agent-to-Agent protocol implementation: HTTP server with Axum routes, SSE streaming, task handler dispatching to Hive orchestrator, agent card builder, client discovery cache, auth middleware, and bidirectional type bridge. Wired into app startup with round-trip integration test.
+- **UI Overhaul** — Workspace, agents panel, settings panel, help panel, and token launch panel refreshed with improved layout and functionality.
+- **Blockchain** — Enhanced wallet store, EVM and Solana integrations, and RPC configuration.
+- **CLI** — Updated chat, config, sync, and tools commands.
+- **Cloud** — Admin and main entry point improvements.
+- **MCP Server** — Expanded integration tools and MCP server capabilities.
+- **CI/CD** — Fixed missing `protoc` dependency on macOS and OpenSSL for ARM64 cross-compilation.
 
 ### v0.3.15
 
