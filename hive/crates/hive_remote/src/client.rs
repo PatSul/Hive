@@ -8,14 +8,31 @@ use tracing::{error, info, warn};
 
 /// A simple relay client for connecting to the hive-cloud WebSocket hub.
 pub struct RelayClient {
-    pub server_url: String,
+    server_url: String,
 }
 
 impl RelayClient {
-    pub fn new(url: &str) -> Self {
-        Self {
-            server_url: url.to_string(),
+    /// Create a new relay client.
+    ///
+    /// Requires `wss://` URLs in production. `ws://localhost` and
+    /// `ws://127.0.0.1` are allowed for local development only.
+    pub fn new(url: &str) -> Result<Self, String> {
+        if !url.starts_with("wss://")
+            && !url.starts_with("ws://localhost")
+            && !url.starts_with("ws://127.0.0.1")
+        {
+            return Err(
+                "Relay URL must use wss:// (except localhost for development)".into(),
+            );
         }
+        Ok(Self {
+            server_url: url.to_string(),
+        })
+    }
+
+    /// Return the relay server URL.
+    pub fn server_url(&self) -> &str {
+        &self.server_url
     }
 
     /// Connects to the relay server and spawns background tasks for reading and writing.
@@ -130,5 +147,30 @@ mod tests {
     fn resolve_session_token_rejects_blank_values() {
         let token = RelayClient::resolve_session_token(Some("   ".into()), Some("".into()));
         assert!(token.is_none());
+    }
+
+    #[test]
+    fn new_accepts_wss_url() {
+        let client = RelayClient::new("wss://relay.hive.cloud/ws");
+        assert!(client.is_ok());
+        assert_eq!(client.unwrap().server_url(), "wss://relay.hive.cloud/ws");
+    }
+
+    #[test]
+    fn new_accepts_ws_localhost() {
+        assert!(RelayClient::new("ws://localhost:8080/ws").is_ok());
+        assert!(RelayClient::new("ws://127.0.0.1:8080/ws").is_ok());
+    }
+
+    #[test]
+    fn new_rejects_plain_ws() {
+        let result = RelayClient::new("ws://relay.example.com/ws");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn new_rejects_http() {
+        let result = RelayClient::new("http://relay.example.com/ws");
+        assert!(result.is_err());
     }
 }

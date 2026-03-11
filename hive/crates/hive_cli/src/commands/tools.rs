@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 pub async fn list(workspace: Option<PathBuf>, as_json: bool) -> Result<()> {
     let workspace_root = resolve_workspace_root(workspace)?;
-    let server = build_server(workspace_root.clone())?;
+    let server = build_server(workspace_root.clone()).await?;
     let tools = server.list_tools();
 
     if as_json {
@@ -19,6 +19,7 @@ pub async fn list(workspace: Option<PathBuf>, as_json: bool) -> Result<()> {
         return Ok(());
     }
 
+    let tool_count = tools.len();
     println!("Hive Local Tools");
     println!("  Workspace: {}", workspace_root.display());
     println!();
@@ -28,13 +29,13 @@ pub async fn list(workspace: Option<PathBuf>, as_json: bool) -> Result<()> {
         println!("  {:<28} {}", tool.name, tool.description);
     }
     println!();
-    println!("  {} tools available", server.list_tools().len());
+    println!("  {} tools available", tool_count);
     Ok(())
 }
 
 pub async fn call(workspace: Option<PathBuf>, name: &str, args_json: &str) -> Result<()> {
     let workspace_root = resolve_workspace_root(workspace)?;
-    let server = build_server(workspace_root)?;
+    let server = build_server(workspace_root).await?;
     let args: Value = serde_json::from_str(args_json)
         .with_context(|| format!("Failed to parse --args JSON: {args_json}"))?;
     let result = server.call_tool_value(name, args).map_err(anyhow::Error::msg)?;
@@ -59,7 +60,7 @@ fn resolve_workspace_root(workspace: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
-fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
+async fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
     let config_manager = ConfigManager::new()?;
     let config = config_manager.get();
 
@@ -68,12 +69,7 @@ fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
     if let Some(ref vault_path) = config.obsidian_vault_path {
         if !vault_path.is_empty() {
             let mut obsidian = hive_integrations::knowledge::ObsidianProvider::new(vault_path);
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build();
-            if let Ok(rt) = rt {
-                let _ = rt.block_on(obsidian.index_vault());
-            }
+            let _ = obsidian.index_vault().await;
             knowledge_hub.register_provider(Box::new(obsidian));
         }
     }

@@ -5,13 +5,23 @@ use crate::ui;
 use anyhow::{Context, Result};
 
 pub async fn push(key: &str, file_path: &str) -> Result<()> {
+    let canonical = std::path::Path::new(file_path)
+        .canonicalize()
+        .with_context(|| format!("Invalid path: {file_path}"))?;
+    let path_str = canonical.to_string_lossy().to_lowercase();
+    for seg in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+        if path_str.contains(seg) {
+            anyhow::bail!("Access to sensitive path blocked: {seg}");
+        }
+    }
+
     let config = hive_core::HiveConfig::load()?;
     let client = CloudClient::new(config.cloud_api_url.as_deref(), config.cloud_jwt.as_deref());
-    let data =
-        std::fs::read(file_path).with_context(|| format!("Failed to read file: {}", file_path))?;
+    let data = std::fs::read(&canonical)
+        .with_context(|| format!("Failed to read file: {}", canonical.display()))?;
     println!(
         "  Pushing {} ({} bytes) as \"{}\"...",
-        file_path,
+        canonical.display(),
         data.len(),
         key
     );
@@ -21,13 +31,36 @@ pub async fn push(key: &str, file_path: &str) -> Result<()> {
 }
 
 pub async fn pull(key: &str, file_path: &str) -> Result<()> {
+    // For pull, the file may not exist yet, so canonicalize the parent directory
+    let path = std::path::Path::new(file_path);
+    let parent = path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let canonical_parent = parent
+        .canonicalize()
+        .with_context(|| format!("Invalid parent directory: {}", parent.display()))?;
+    let canonical = canonical_parent.join(
+        path.file_name()
+            .ok_or_else(|| anyhow::anyhow!("Invalid file path: {file_path}"))?,
+    );
+    let path_str = canonical.to_string_lossy().to_lowercase();
+    for seg in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+        if path_str.contains(seg) {
+            anyhow::bail!("Access to sensitive path blocked: {seg}");
+        }
+    }
+
     let config = hive_core::HiveConfig::load()?;
     let client = CloudClient::new(config.cloud_api_url.as_deref(), config.cloud_jwt.as_deref());
     println!("  Pulling \"{}\"...", key);
     let data = client.sync_pull(key).await?;
-    std::fs::write(file_path, &data)
-        .with_context(|| format!("Failed to write file: {}", file_path))?;
-    println!("  Done. Saved {} bytes to {}", data.len(), file_path);
+    std::fs::write(&canonical, &data)
+        .with_context(|| format!("Failed to write file: {}", canonical.display()))?;
+    println!(
+        "  Done. Saved {} bytes to {}",
+        data.len(),
+        canonical.display()
+    );
     Ok(())
 }
 

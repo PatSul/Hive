@@ -224,6 +224,10 @@ pub enum BrowserAction {
     Click {
         selector: String,
     },
+    /// SECURITY: `code` executes in the Node.js process context with full
+    /// filesystem and network access. Callers MUST ensure `code` comes from
+    /// trusted internal sources only. Never pass AI-generated or user-supplied
+    /// content to this action.
     EvaluateScript {
         code: String,
     },

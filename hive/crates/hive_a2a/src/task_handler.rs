@@ -264,6 +264,14 @@ impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
             .ok_or_else(|| A2aError::TaskNotFound(task_id.to_string()))
     }
 
+    /// Remove a task from the active tasks map.
+    ///
+    /// Used for deferred cleanup of completed/failed tasks to prevent
+    /// unbounded memory growth.
+    pub async fn remove_task(&self, task_id: &str) {
+        self.active_tasks.lock().await.remove(task_id);
+    }
+
     /// Subscribe to status update events for a given task.
     pub async fn subscribe(
         &self,

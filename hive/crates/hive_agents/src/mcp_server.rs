@@ -203,7 +203,7 @@ impl McpServer {
                         .get("path")
                         .and_then(|v| v.as_str())
                         .ok_or("Missing required argument 'path'")?;
-                    let path = resolve_path(&root, path_str);
+                    let path = resolve_path(&root, path_str)?;
                     let content = FileService::read_file(&path)
                         .map_err(|e| format!("Failed to read file: {e}"))?;
                     Ok(json!(content))
@@ -236,7 +236,7 @@ impl McpServer {
                         .get("content")
                         .and_then(|v| v.as_str())
                         .ok_or("Missing required argument 'content'")?;
-                    let path = resolve_path(&root, path_str);
+                    let path = resolve_path(&root, path_str)?;
                     FileService::write_file(&path, content)
                         .map_err(|e| format!("Failed to write file: {e}"))?;
                     Ok(json!(format!(
@@ -271,7 +271,7 @@ impl McpServer {
                         .ok_or("Missing required argument 'command'")?;
                     let cwd_str = args.get("cwd").and_then(|v| v.as_str());
                     let working_dir = match cwd_str {
-                        Some(dir) => resolve_path(&root, dir),
+                        Some(dir) => resolve_path(&root, dir)?,
                         None => root.as_ref().clone(),
                     };
                     let executor = CommandExecutor::new(working_dir)
@@ -313,7 +313,7 @@ impl McpServer {
                         .and_then(|v| v.as_str())
                         .ok_or("Missing required argument 'pattern'")?;
                     let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-                    let search_root = resolve_path(&root, path_str);
+                    let search_root = resolve_path(&root, path_str)?;
 
                     let file_pattern = args
                         .get("file_pattern")
@@ -374,7 +374,7 @@ impl McpServer {
                         .get("path")
                         .and_then(|v| v.as_str())
                         .ok_or("Missing required argument 'path'")?;
-                    let path = resolve_path(&root, path_str);
+                    let path = resolve_path(&root, path_str)?;
                     let entries = FileService::list_dir(&path)
                         .map_err(|e| format!("Failed to list directory: {e}"))?;
 
@@ -415,7 +415,7 @@ impl McpServer {
                 Box::new(move |args| {
                     let cwd_str = args.get("cwd").and_then(|v| v.as_str());
                     let repo_path = match cwd_str {
-                        Some(dir) => resolve_path(&root, dir),
+                        Some(dir) => resolve_path(&root, dir)?,
                         None => root.as_ref().clone(),
                     };
 
@@ -534,13 +534,30 @@ impl McpServer {
 // ---------------------------------------------------------------------------
 
 /// Resolve a path string relative to the workspace root, or as absolute.
-fn resolve_path(root: &Path, path_str: &str) -> PathBuf {
+///
+/// Canonicalizes the result and validates that:
+/// - Relative paths stay within the workspace root (no `../` traversal)
+/// - No path points into sensitive directories (`.ssh`, `.aws`, `.gnupg`, etc.)
+fn resolve_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
     let path = Path::new(path_str);
-    if path.is_absolute() {
+    let resolved = if path.is_absolute() {
         path.to_path_buf()
     } else {
         root.join(path)
+    };
+    let canonical = resolved
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {e}"))?;
+    let path_str_lower = canonical.to_string_lossy().to_lowercase();
+    for segment in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+        if path_str_lower.contains(segment) {
+            return Err(format!("Access to sensitive path blocked: {segment}"));
+        }
     }
+    if !path.is_absolute() && !canonical.starts_with(root) {
+        return Err("Path traversal outside workspace blocked".into());
+    }
+    Ok(canonical)
 }
 
 /// Execute a command via `CommandExecutor` by blocking on the tokio runtime.
@@ -1193,23 +1210,46 @@ mod tests {
     // -- resolve_path tests --
 
     #[test]
-    fn resolve_absolute_path_unchanged() {
-        let root = PathBuf::from("/workspace");
-        let result = resolve_path(&root, "/absolute/path");
-        assert_eq!(result, PathBuf::from("/absolute/path"));
+    fn resolve_path_rejects_nonexistent() {
+        let root = PathBuf::from("/nonexistent_workspace_xyz");
+        let result = resolve_path(&root, "some/path");
+        assert!(result.is_err());
     }
 
     #[test]
-    fn resolve_relative_path_joins_root() {
-        let root = PathBuf::from("/workspace");
-        let result = resolve_path(&root, "relative/path");
-        assert_eq!(result, PathBuf::from("/workspace/relative/path"));
+    fn resolve_path_blocks_sensitive_dirs() {
+        let tmp = std::env::temp_dir();
+        let ssh_dir = tmp.join(".ssh");
+        let _ = std::fs::create_dir_all(&ssh_dir);
+        let test_file = ssh_dir.join("test_key");
+        let _ = std::fs::write(&test_file, "fake");
+
+        let result = resolve_path(&tmp, ".ssh/test_key");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("sensitive path blocked"), "got: {err_msg}");
+
+        let _ = std::fs::remove_file(&test_file);
     }
 
     #[test]
-    fn resolve_dot_path() {
-        let root = PathBuf::from("/workspace");
-        let result = resolve_path(&root, ".");
-        assert_eq!(result, PathBuf::from("/workspace/."));
+    fn resolve_path_allows_valid_path() {
+        let tmp = std::env::temp_dir();
+        // temp_dir itself exists and is valid
+        let result = resolve_path(&tmp, ".");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn resolve_path_blocks_traversal_outside_root() {
+        let tmp = std::env::temp_dir();
+        let sub = tmp.join("hive_test_resolve");
+        let _ = std::fs::create_dir_all(&sub);
+
+        // ".." should resolve outside `sub` — blocked for relative paths
+        let result = resolve_path(&sub, "..");
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir(&sub);
     }
 }

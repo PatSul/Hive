@@ -121,8 +121,9 @@ pub fn coordinator_result_to_artifact(result: &CoordinatorResult) -> Artifact {
     let mut lines = Vec::new();
     for r in &result.results {
         let status_str = if r.success { "OK" } else { "FAIL" };
-        let preview = if r.output.len() > 200 {
-            format!("{}...", &r.output[..200])
+        let preview = if r.output.chars().count() > 200 {
+            let truncated: String = r.output.chars().take(200).collect();
+            format!("{truncated}...")
         } else {
             r.output.clone()
         };

@@ -447,6 +447,17 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         let svc = Arc::clone(&services.browser);
         tools.push((browse_url_tool(), Box::new(move |args: serde_json::Value| {
             let url = args["url"].as_str().unwrap_or("").to_string();
+            // SSRF validation: only allow http/https and block private/local hosts
+            let parsed = url::Url::parse(&url)
+                .map_err(|e| format!("Invalid URL: {e}"))?;
+            if parsed.scheme() != "https" && parsed.scheme() != "http" {
+                return Err("Only http/https URLs are allowed".into());
+            }
+            if let Some(host) = parsed.host_str() {
+                if is_private_or_local(host) {
+                    return Err("Access to private/internal hosts is blocked".into());
+                }
+            }
             let svc = Arc::clone(&svc);
             block_on_async(async move {
                 match svc.get_page_content(&url).await {
@@ -1178,6 +1189,41 @@ where
             .map_err(|e| format!("Failed to create runtime: {e}"))?;
         rt.block_on(future)
     }
+}
+
+/// Returns `true` if the host is a private, loopback, or link-local address (SSRF protection).
+fn is_private_or_local(host: &str) -> bool {
+    let h = host.trim_start_matches('[').trim_end_matches(']');
+
+    if matches!(h, "localhost" | "127.0.0.1" | "::1") {
+        return true;
+    }
+    if h.ends_with(".local") {
+        return true;
+    }
+    if h == "169.254.169.254" {
+        return true;
+    }
+
+    if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => {
+                let o = v4.octets();
+                o[0] == 10
+                    || (o[0] == 172 && (16..=31).contains(&o[1]))
+                    || (o[0] == 192 && o[1] == 168)
+                    || (o[0] == 169 && o[1] == 254)
+                    || v4.is_unspecified()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        };
+    }
+
+    false
 }
 
 fn parse_messaging_platform(s: &str) -> hive_integrations::messaging::Platform {

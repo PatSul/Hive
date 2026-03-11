@@ -820,27 +820,33 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                             })
                     };
 
-                    let bind_addr = a2a_config.bind_addr();
+                    if a2a_handler.is_none() {
+                        warn!("A2A server enabled but no AI provider configured; skipping");
+                    } else {
+                        let bind_addr = a2a_config.bind_addr();
 
-                    std::thread::Builder::new()
-                        .name("hive-a2a".into())
-                        .spawn(move || {
-                            let rt = tokio::runtime::Builder::new_current_thread()
-                                .enable_all()
-                                .build()
-                                .expect("A2A server tokio runtime");
-                            rt.block_on(async {
-                                if let Err(e) =
-                                    hive_a2a::start_server_with_handler(a2a_config, a2a_handler)
+                        std::thread::Builder::new()
+                            .name("hive-a2a".into())
+                            .spawn(move || {
+                                let rt = tokio::runtime::Builder::new_current_thread()
+                                    .enable_all()
+                                    .build()
+                                    .expect("A2A server tokio runtime");
+                                rt.block_on(async {
+                                    if let Err(e) =
+                                        hive_a2a::start_server_with_handler(
+                                            a2a_config, a2a_handler,
+                                        )
                                         .await
-                                {
-                                    error!("[A2A] Server error: {}", e);
-                                }
-                            });
-                        })
-                        .ok();
+                                    {
+                                        error!("[A2A] Server error: {}", e);
+                                    }
+                                });
+                            })
+                            .ok();
 
-                    info!("A2A server starting on {}", bind_addr);
+                        info!("A2A server starting on {}", bind_addr);
+                    }
                 } else {
                     info!("A2A server disabled in config");
                 }

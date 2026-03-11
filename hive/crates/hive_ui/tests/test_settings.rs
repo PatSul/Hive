@@ -77,6 +77,14 @@ fn test_settings_data_all_four_keys() {
 }
 
 #[test]
+fn configured_key_count_includes_litellm() {
+    let mut d = SettingsData::default();
+    d.has_litellm_key = true;
+    assert_eq!(d.configured_key_count(), 1);
+    assert!(d.has_any_cloud_key());
+}
+
+#[test]
 fn test_settings_data_from_trait() {
     let cfg = hive_core::HiveConfig::default();
     let d: SettingsData = (&cfg).into();

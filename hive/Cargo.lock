@@ -5448,6 +5448,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -5686,6 +5687,7 @@ dependencies = [
  "hive_ui_core",
  "hive_ui_panels",
  "pulldown-cmark",
+ "rand 0.9.2",
  "serde",
  "serde_json",
  "tempfile",
@@ -5733,6 +5735,7 @@ dependencies = [
  "hive_shield",
  "hive_terminal",
  "hive_ui_core",
+ "open",
  "pulldown-cmark",
  "serde",
  "serde_json",

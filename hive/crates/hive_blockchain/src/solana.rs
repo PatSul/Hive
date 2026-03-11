@@ -318,6 +318,11 @@ pub async fn estimate_deploy_cost() -> Result<f64> {
 
 /// Estimate deploy cost using the default Solana RPC endpoint or an override.
 pub async fn estimate_deploy_cost_with_rpc(rpc_url_override: Option<&str>) -> Result<f64> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     let rpc_url = resolved_rpc_url(rpc_url_override);
 
     let mint_rent = get_minimum_balance_for_rent(rpc_url.as_ref(), spl_token::state::Mint::LEN)
@@ -355,6 +360,11 @@ pub async fn create_spl_token_with_rpc(
     private_key: &[u8],
     rpc_url_override: Option<&str>,
 ) -> Result<SplDeployResult> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     let rpc_url = resolved_rpc_url(rpc_url_override);
     let payer = solana_keypair_from_private_key(private_key)?;
     let mint = Keypair::new();
@@ -381,7 +391,7 @@ pub async fn create_spl_token_with_rpc(
     );
     let raw_tx = bincode::serialize(&tx).context("failed to serialize Solana transaction")?;
     let signed_tx = signed_solana_tx(&raw_tx, &tx);
-    let tx_signature = signed_tx
+    let _tx_signature = signed_tx
         .signatures
         .first()
         .cloned()
@@ -399,14 +409,14 @@ pub async fn create_spl_token_with_rpc(
         mint_address = %mint.pubkey(),
         associated_token_address = %associated_token_address,
         amount = amount,
-        tx_signature = %tx_signature,
+        tx_signature = %rpc_signature,
         instruction_count = tx_blueprint.instructions.len(),
         "SPL token deployed"
     );
 
     Ok(SplDeployResult {
         mint_address: mint.pubkey().to_string(),
-        tx_signature,
+        tx_signature: rpc_signature,
     })
 }
 
@@ -417,6 +427,11 @@ pub async fn get_balance(address: &str) -> Result<f64> {
 
 /// Query the SOL balance using the default Solana RPC endpoint or an override.
 pub async fn get_balance_with_rpc(address: &str, rpc_url_override: Option<&str>) -> Result<f64> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     let rpc_url = resolved_rpc_url(rpc_url_override);
 
     let result = solana_rpc_call(rpc_url.as_ref(), "getBalance", serde_json::json!([address]))
@@ -445,6 +460,11 @@ pub async fn get_token_balances_with_rpc(
     address: &str,
     rpc_url_override: Option<&str>,
 ) -> Result<Vec<(String, f64)>> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     let rpc_url = resolved_rpc_url(rpc_url_override);
     let result = solana_rpc_call(
         rpc_url.as_ref(),

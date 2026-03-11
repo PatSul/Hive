@@ -43,7 +43,7 @@ pub struct DeployResult {
     pub gas_used: u64,
 }
 
-/// Infrastructure for an unsigned EVM transaction.
+/// Infrastructure for an unsigned EVM transaction (EIP-155 legacy format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnsignedEvmTransaction {
     pub chain_id: u64,
@@ -52,8 +52,11 @@ pub struct UnsignedEvmTransaction {
     pub value: String, // hex
     pub data: String,  // hex for bytecode/calldata
     pub gas_limit: u64,
-    pub max_fee_per_gas: String,
-    pub max_priority_fee_per_gas: String,
+    pub gas_price: String,
+    /// Unused in legacy (EIP-155) encoding; kept for forward-compatibility
+    /// with EIP-1559 transactions.
+    #[serde(default)]
+    pub _priority_fee: String,
 }
 
 /// Signed raw transaction data ready for broadcast.
@@ -77,8 +80,8 @@ pub fn build_erc20_deploy_tx(
         value: "0x0".to_string(),
         data: build_erc20_deploy_data(params)?,
         gas_limit,
-        max_fee_per_gas: format!("0x{:x}", gas_price),
-        max_priority_fee_per_gas: format!("0x{:x}", gas_price),
+        gas_price: format!("0x{:x}", gas_price),
+        _priority_fee: String::new(),
     })
 }
 
@@ -294,7 +297,7 @@ fn build_sample_deploy_data() -> Result<String> {
 }
 
 fn encode_unsigned_legacy_tx(tx: &UnsignedEvmTransaction) -> Result<Vec<u8>> {
-    let gas_price = parse_hex_u256(&tx.max_fee_per_gas)?;
+    let gas_price = parse_hex_u256(&tx.gas_price)?;
     let value = parse_hex_u256(&tx.value)?;
     let data = decode_hex(&tx.data)?;
 
@@ -316,7 +319,7 @@ fn encode_signed_legacy_tx(
     signature: &Signature,
     recovery_id: RecoveryId,
 ) -> Result<Vec<u8>> {
-    let gas_price = parse_hex_u256(&tx.max_fee_per_gas)?;
+    let gas_price = parse_hex_u256(&tx.gas_price)?;
     let value = parse_hex_u256(&tx.value)?;
     let data = decode_hex(&tx.data)?;
     let signature_bytes = signature.to_bytes();
@@ -437,6 +440,11 @@ pub async fn estimate_deploy_cost_with_rpc(
     chain: Chain,
     rpc_url_override: Option<&str>,
 ) -> Result<f64> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     if !chain.is_evm() {
         anyhow::bail!("{chain} is not an EVM chain");
     }
@@ -493,6 +501,11 @@ pub async fn deploy_token_with_rpc(
     private_key: &[u8],
     rpc_url_override: Option<&str>,
 ) -> Result<DeployResult> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     if !params.chain.is_evm() {
         anyhow::bail!("{} is not an EVM chain", params.chain);
     }
@@ -585,6 +598,11 @@ pub async fn get_balance_with_rpc(
     chain: Chain,
     rpc_url_override: Option<&str>,
 ) -> Result<f64> {
+    if let Some(url) = rpc_url_override {
+        if !crate::rpc_config::validate_url(url) {
+            anyhow::bail!("Invalid RPC URL: must be HTTPS and not target private IPs");
+        }
+    }
     if !chain.is_evm() {
         anyhow::bail!("{chain} is not an EVM chain");
     }
@@ -688,8 +706,8 @@ mod tests {
             value: "0x0".into(),
             data: build_sample_deploy_data().unwrap(),
             gas_limit: FALLBACK_DEPLOY_GAS,
-            max_fee_per_gas: format!("0x{:x}", DEFAULT_GAS_PRICE_WEI),
-            max_priority_fee_per_gas: format!("0x{:x}", DEFAULT_GAS_PRICE_WEI),
+            gas_price: format!("0x{:x}", DEFAULT_GAS_PRICE_WEI),
+            _priority_fee: String::new(),
         };
         let private_key =
             decode_hex("0x4c0883a69102937d6231471b5dbb6204fe5129617082790f8b1a4d7a8b798f8f")

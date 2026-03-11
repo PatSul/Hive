@@ -13,6 +13,10 @@ use sha3::{Digest, Keccak256};
 use tracing::info;
 
 const AES_NONCE_LEN: usize = 12;
+const AES_SALT_LEN: usize = 16;
+
+/// The fixed salt used by the legacy (v1) encryption format.
+const LEGACY_SALT: &[u8] = b"hive-wallet-key-v1";
 
 /// Supported blockchain networks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -141,19 +145,26 @@ impl WalletStore {
         self.wallets.is_empty()
     }
 
-    /// Persist the wallet store to a JSON file.
+    /// Persist the wallet store to a JSON file using an atomic write pattern.
+    ///
+    /// Writes to a `.tmp` file first, sets permissions on Unix, then renames
+    /// into place so readers never see a partial write.
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
         let json =
             serde_json::to_string_pretty(self).context("failed to serialize wallet store")?;
-        std::fs::write(path, json).context("failed to write wallet store file")?;
+
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &json).context("failed to write wallet store temp file")?;
 
         // Restrict file permissions to owner-only on Unix (0o600 = rw-------).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
                 .context("failed to set wallet store file permissions")?;
         }
+
+        std::fs::rename(&tmp_path, path).context("failed to rename wallet store temp file")?;
 
         info!(path = %path.display(), count = self.wallets.len(), "wallet store saved");
         Ok(())
@@ -306,14 +317,12 @@ fn hex_encode(bytes: &[u8]) -> String {
 // Encryption helpers
 // ---------------------------------------------------------------------------
 
-/// Derive a 256-bit AES key from a password using Argon2id.
+/// Derive a 256-bit AES key from a password and salt using Argon2id.
 ///
-/// Uses a fixed salt for deterministic derivation (the same password always
-/// produces the same key). Parameters: m=19456 KiB (~19 MB), t=2, p=1.
-fn derive_key_from_password(password: &str) -> [u8; 32] {
+/// Parameters: m=19456 KiB (~19 MB), t=2 iterations, p=1 lane.
+fn derive_key_from_password(password: &str, salt: &[u8]) -> [u8; 32] {
     use argon2::{Algorithm, Argon2, Params, Version};
 
-    let salt = b"hive-wallet-key-v1";
     let params = Params::new(19_456, 2, 1, Some(32)).expect("valid argon2 params");
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = [0u8; 32];
@@ -325,10 +334,12 @@ fn derive_key_from_password(password: &str) -> [u8; 32] {
 
 /// Encrypt `plaintext` using AES-256-GCM with a key derived from `password`.
 ///
-/// The returned `Vec<u8>` contains `nonce || ciphertext` (12 bytes nonce followed
-/// by the encrypted data including the authentication tag).
+/// The returned `Vec<u8>` contains `salt(16) || nonce(12) || ciphertext`.
+/// A fresh random 16-byte salt is generated per encryption so identical
+/// passwords produce different derived keys.
 pub fn encrypt_key(plaintext: &[u8], password: &str) -> Result<Vec<u8>> {
-    let key_bytes = derive_key_from_password(password);
+    let salt: [u8; AES_SALT_LEN] = rand::random();
+    let key_bytes = derive_key_from_password(password, &salt);
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
 
@@ -339,22 +350,60 @@ pub fn encrypt_key(plaintext: &[u8], password: &str) -> Result<Vec<u8>> {
         .encrypt(nonce, plaintext)
         .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
 
-    let mut result = nonce_bytes.to_vec();
+    let mut result = Vec::with_capacity(AES_SALT_LEN + AES_NONCE_LEN + ciphertext.len());
+    result.extend_from_slice(&salt);
+    result.extend_from_slice(&nonce_bytes);
     result.extend_from_slice(&ciphertext);
     Ok(result)
 }
 
-/// Decrypt `ciphertext` (produced by [`encrypt_key`]) using AES-256-GCM with a
+/// Decrypt `data` (produced by [`encrypt_key`]) using AES-256-GCM with a
 /// key derived from `password`.
-pub fn decrypt_key(ciphertext: &[u8], password: &str) -> Result<Vec<u8>> {
-    if ciphertext.len() < AES_NONCE_LEN {
+///
+/// Supports two formats for backward compatibility:
+/// - **New format**: `salt(16) || nonce(12) || ciphertext` -- tried first.
+/// - **Legacy format**: `nonce(12) || ciphertext` with the fixed salt
+///   `b"hive-wallet-key-v1"` -- used as fallback when new-format decryption
+///   fails, so existing wallets remain readable.
+pub fn decrypt_key(data: &[u8], password: &str) -> Result<Vec<u8>> {
+    if data.len() < AES_NONCE_LEN {
         anyhow::bail!("ciphertext too short (expected at least {AES_NONCE_LEN} bytes for nonce)");
     }
 
-    let (nonce_bytes, encrypted) = ciphertext.split_at(AES_NONCE_LEN);
+    // Try the new format first: salt(16) || nonce(12) || ciphertext
+    if data.len() >= AES_SALT_LEN + AES_NONCE_LEN {
+        if let Ok(plaintext) = decrypt_with_salt(data, password) {
+            return Ok(plaintext);
+        }
+    }
+
+    // Fall back to legacy format: nonce(12) || ciphertext with fixed salt
+    decrypt_with_fixed_salt(data, password)
+}
+
+/// Decrypt using the new format: `salt(16) || nonce(12) || ciphertext`.
+fn decrypt_with_salt(data: &[u8], password: &str) -> Result<Vec<u8>> {
+    let (salt, rest) = data.split_at(AES_SALT_LEN);
+    let (nonce_bytes, encrypted) = rest.split_at(AES_NONCE_LEN);
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let key_bytes = derive_key_from_password(password);
+    let key_bytes = derive_key_from_password(password, salt);
+    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+
+    let plaintext = cipher
+        .decrypt(nonce, encrypted)
+        .map_err(|e| anyhow::anyhow!("decryption failed (new format): {e}"))?;
+
+    Ok(plaintext)
+}
+
+/// Decrypt using the legacy format: `nonce(12) || ciphertext` with fixed salt.
+fn decrypt_with_fixed_salt(data: &[u8], password: &str) -> Result<Vec<u8>> {
+    let (nonce_bytes, encrypted) = data.split_at(AES_NONCE_LEN);
+    let nonce = Nonce::from_slice(nonce_bytes);
+
+    let key_bytes = derive_key_from_password(password, LEGACY_SALT);
     let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
 
@@ -560,5 +609,66 @@ mod tests {
         assert_eq!(json, "\"base\"");
         let parsed: Chain = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, Chain::Base);
+    }
+
+    #[test]
+    fn encrypt_produces_salt_nonce_ciphertext() {
+        let encrypted = encrypt_key(b"data", "pass").unwrap();
+        // New format: salt(16) + nonce(12) + ciphertext (>= 16 for AES-GCM tag)
+        assert!(encrypted.len() >= AES_SALT_LEN + AES_NONCE_LEN + 16);
+    }
+
+    #[test]
+    fn encrypt_different_salts_per_call() {
+        let a = encrypt_key(b"same", "same-pass").unwrap();
+        let b = encrypt_key(b"same", "same-pass").unwrap();
+        // The first 16 bytes (salt) should differ between encryptions.
+        assert_ne!(&a[..AES_SALT_LEN], &b[..AES_SALT_LEN]);
+    }
+
+    #[test]
+    fn decrypt_legacy_format_backward_compat() {
+        // Simulate the old encrypt format: nonce(12) || ciphertext with fixed salt.
+        use aes_gcm::aead::{Aead, KeyInit};
+
+        let password = "legacy-password";
+        let plaintext = b"legacy-private-key-bytes";
+
+        // Derive key using the fixed legacy salt (old behavior).
+        let key_bytes = derive_key_from_password(password, LEGACY_SALT);
+        let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
+        let cipher = Aes256Gcm::new(key);
+
+        let nonce_bytes: [u8; AES_NONCE_LEN] = rand::random();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let ciphertext = cipher.encrypt(nonce, &plaintext[..]).unwrap();
+
+        // Build legacy blob: nonce || ciphertext (no salt prefix).
+        let mut legacy_blob = nonce_bytes.to_vec();
+        legacy_blob.extend_from_slice(&ciphertext);
+
+        // decrypt_key should fall back to legacy format and succeed.
+        let decrypted = decrypt_key(&legacy_blob, password).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn save_to_file_is_atomic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wallets.enc");
+
+        let mut store = WalletStore::new();
+        store.add_wallet("W".into(), Chain::Ethereum, "0x1".into(), vec![1, 2]);
+        store.save_to_file(&path).unwrap();
+
+        // The temp file should NOT exist after a successful save.
+        let tmp_path = path.with_extension("json.tmp");
+        assert!(!tmp_path.exists(), "temp file should be renamed away");
+        assert!(path.exists(), "final file should exist");
+
+        // Verify the content is valid JSON.
+        let loaded = WalletStore::load_from_file(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
     }
 }

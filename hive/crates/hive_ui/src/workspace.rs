@@ -649,6 +649,7 @@ impl HiveWorkspace {
         let wallet_secret_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_placeholder("Select a chain to configure wallet import", window, cx);
+            state = state.masked(true);
             state
         });
         let rpc_url_input = cx.new(|cx| {
@@ -3707,9 +3708,14 @@ impl HiveWorkspace {
     fn build_quick_start_prompt(&self, template_id: &str, detail: &str) -> String {
         let mission = quick_start_template_instruction(template_id);
         let user_focus = if detail.trim().is_empty() {
-            "Use your judgment from the current repository state and start with the highest-impact opportunity."
+            "Use your judgment from the current repository state and start with the highest-impact opportunity.".to_string()
         } else {
-            detail.trim()
+            let trimmed = detail.trim();
+            if trimmed.len() > 500 {
+                trimmed.chars().take(500).collect()
+            } else {
+                trimmed.to_string()
+            }
         };
 
         format!(
@@ -7370,10 +7376,70 @@ impl HiveWorkspace {
         }
     }
 
-    fn token_launch_wallet_password() -> &'static str {
-        // Password entry is still a future UX improvement. Use a stable
-        // passphrase so the wallet store remains readable across restarts.
-        "hive-wallet-default"
+    /// Retrieve (or generate) the wallet encryption password from secure storage.
+    ///
+    /// On first call a random 32-character alphanumeric password is generated,
+    /// encrypted via `SecureStorage`, and persisted to `~/.hive/wallet_password.enc`.
+    /// Subsequent calls decrypt and return the same password.
+    ///
+    /// Falls back to a hardcoded passphrase only when `SecureStorage` or the
+    /// filesystem are completely unavailable, so existing wallets remain readable.
+    fn token_launch_wallet_password() -> String {
+        use hive_core::SecureStorage;
+
+        const FALLBACK: &str = "hive-wallet-default";
+
+        let password_path = match HiveConfig::base_dir() {
+            Ok(dir) => dir.join("wallet_password.enc"),
+            Err(_) => return FALLBACK.to_string(),
+        };
+
+        let storage = match SecureStorage::new() {
+            Ok(s) => s,
+            Err(_) => return FALLBACK.to_string(),
+        };
+
+        // Try to read an existing encrypted password.
+        if let Ok(hex_ct) = std::fs::read_to_string(&password_path) {
+            let hex_ct = hex_ct.trim();
+            if !hex_ct.is_empty() {
+                if let Ok(password) = storage.decrypt(hex_ct) {
+                    return password;
+                }
+            }
+        }
+
+        // Generate a random 32-char alphanumeric password.
+        let password = Self::generate_random_password(32);
+
+        // Encrypt and persist.
+        if let Ok(encrypted) = storage.encrypt(&password) {
+            let _ = std::fs::write(&password_path, &encrypted);
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(
+                    &password_path,
+                    std::fs::Permissions::from_mode(0o600),
+                );
+            }
+        }
+
+        password
+    }
+
+    /// Generate a random alphanumeric password of the given length.
+    fn generate_random_password(len: usize) -> String {
+        use rand::Rng;
+        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let mut rng = rand::rng();
+        (0..len)
+            .map(|_| {
+                let idx = rng.random_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect()
     }
 
     fn token_launch_wallet_path() -> PathBuf {
@@ -7877,7 +7943,7 @@ impl HiveWorkspace {
 
         let encrypted_key = match hive_blockchain::encrypt_key(
             &private_key,
-            Self::token_launch_wallet_password(),
+            &Self::token_launch_wallet_password(),
         ) {
             Ok(encrypted) => encrypted,
             Err(e) => {
@@ -7986,7 +8052,7 @@ impl HiveWorkspace {
 
         let encrypted_key = match hive_blockchain::encrypt_key(
             &private_key,
-            Self::token_launch_wallet_password(),
+            &Self::token_launch_wallet_password(),
         ) {
             Ok(encrypted) => encrypted,
             Err(e) => {
@@ -8150,7 +8216,7 @@ impl HiveWorkspace {
             match cx
                 .global::<AppWallets>()
                 .0
-                .decrypt_wallet_key(&wallet_id, Self::token_launch_wallet_password())
+                .decrypt_wallet_key(&wallet_id, &Self::token_launch_wallet_password())
             {
                 Ok(key) => key,
                 Err(e) => {

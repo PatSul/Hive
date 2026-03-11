@@ -269,11 +269,16 @@ fn feature_card(icon: &str, title: &str, desc: &str, theme: &HiveTheme) -> AnyEl
 
 /// A text link rendered in accent color.
 fn link_label(label: &str, url: &str, theme: &HiveTheme) -> AnyElement {
+    let url_owned = url.to_string();
     div()
         .flex()
         .flex_row()
         .items_center()
         .gap(theme.space_2)
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
+            let _ = open::that(&url_owned);
+        })
         .child(
             div()
                 .text_size(theme.font_size_base)

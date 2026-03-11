@@ -54,6 +54,12 @@ impl A2aClientService {
     pub fn load_or_create(path: impl AsRef<Path>) -> Result<Self, A2aError> {
         let path = path.as_ref().to_path_buf();
         let config = A2aConfig::load_or_create(&path)?;
+        // Validate each agent URL at load time
+        for agent in &config.agents {
+            crate::auth::validate_outbound_url(&agent.url).map_err(|e| {
+                A2aError::Config(format!("Agent '{}' has invalid URL: {e}", agent.name))
+            })?;
+        }
         Ok(Self::with_config(path, config))
     }
 
@@ -75,6 +81,12 @@ impl A2aClientService {
     /// Reload `a2a.toml` from disk.
     pub fn reload(&self) -> Result<(), A2aError> {
         let config = A2aConfig::load_or_create(&self.config_path)?;
+        // Validate each agent URL on reload
+        for agent in &config.agents {
+            crate::auth::validate_outbound_url(&agent.url).map_err(|e| {
+                A2aError::Config(format!("Agent '{}' has invalid URL: {e}", agent.name))
+            })?;
+        }
         let mut guard = self
             .config
             .write()

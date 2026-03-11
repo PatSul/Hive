@@ -25,6 +25,13 @@ pub async fn run(key: Option<String>, value: Option<String>) -> Result<()> {
             }
         }
         (Some(k), Some(v)) => {
+            // Validate URL-type config keys before setting
+            if matches!(k, "cloud_api_url" | "cloud_relay_url") {
+                if !v.is_empty() && url::Url::parse(v).is_err() {
+                    bail!("Invalid URL for {k}: {v}");
+                }
+            }
+
             let mut json = serde_json::to_value(&config)?;
             if let Some(obj) = json.as_object_mut() {
                 if !obj.contains_key(k) {

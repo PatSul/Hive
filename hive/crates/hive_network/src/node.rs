@@ -477,11 +477,15 @@ impl HiveNode {
                 continue;
             }
 
-            // Add to registry as Discovered.
-            let addr: SocketAddr = ann
-                .listen_addr
-                .parse()
-                .unwrap_or(discovered.source_addr);
+            // Parse and validate the announced address before connecting.
+            let addr: SocketAddr = match ann.listen_addr.parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            if addr.ip().is_loopback() || addr.ip().is_unspecified() {
+                warn!("Ignoring discovery from loopback/unspecified address");
+                continue;
+            }
 
             let peer_info = PeerInfo {
                 id: ann.peer_id.clone(),

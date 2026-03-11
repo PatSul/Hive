@@ -184,7 +184,7 @@ impl Panel {
     }
 }
 
-/// Sidebar component with 22 navigation icon buttons.
+/// Sidebar component with 23 navigation icon buttons.
 pub struct Sidebar {
     pub active_panel: Panel,
 }

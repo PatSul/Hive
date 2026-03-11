@@ -433,6 +433,43 @@ fn input_row(label: &str, input_state: &Entity<InputState>, theme: &HiveTheme) -
         .into_any_element()
 }
 
+/// A masked input row for secret/private-key fields.
+///
+/// Renders like [`input_row`] but the text is obscured by default with
+/// a toggle button to reveal it.
+fn secret_input_row(
+    label: &str,
+    input_state: &Entity<InputState>,
+    theme: &HiveTheme,
+) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_1)
+        .child(
+            div()
+                .text_size(theme.font_size_sm)
+                .text_color(theme.text_secondary)
+                .font_weight(FontWeight::MEDIUM)
+                .child(label.to_string()),
+        )
+        .child(
+            div()
+                .w_full()
+                .rounded(theme.radius_sm)
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.bg_primary)
+                .child(
+                    Input::new(input_state)
+                        .appearance(true)
+                        .cleanable(false)
+                        .mask_toggle(),
+                ),
+        )
+        .into_any_element()
+}
+
 /// A key-value row for the summary display.
 fn summary_row(label: &str, value: &str, color: Hsla, theme: &HiveTheme) -> AnyElement {
     div()
@@ -906,7 +943,7 @@ fn render_wallet_step(
         ))
         .child(separator(theme))
         .child(input_row("Wallet Name", &inputs.wallet_name, theme))
-        .child(input_row(secret_label, &inputs.wallet_secret, theme))
+        .child(secret_input_row(secret_label, &inputs.wallet_secret, theme))
         .child(input_row("RPC Endpoint", &inputs.rpc_url, theme))
         .child(
             div()

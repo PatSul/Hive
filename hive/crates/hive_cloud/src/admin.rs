@@ -232,9 +232,10 @@ async fn get_teams(
 }
 
 fn authorize(headers: &HeaderMap, state: &AdminState) -> Result<(), StatusCode> {
-    let Some(secret) = state.jwt_secret.as_deref() else {
-        return Ok(());
-    };
+    let secret = state
+        .jwt_secret
+        .as_deref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?; // No secret = reject, not allow
 
     let token = headers
         .get(header::AUTHORIZATION)
@@ -605,6 +606,20 @@ mod tests {
             seed.gateway.total_requests
         );
         assert_eq!(dashboard.sync_storage_bytes, seed.sync.storage_used_bytes);
+    }
+
+    #[tokio::test]
+    async fn admin_routes_reject_when_no_secret_configured() {
+        let relay = Arc::new(RelayService::default());
+        let router = router(Arc::new(AdminState::new_for_test(relay, None)));
+        let base_url = spawn(router).await;
+
+        let response = reqwest::get(format!("{base_url}/dashboard")).await.unwrap();
+        assert_eq!(
+            response.status(),
+            ReqwestStatusCode::SERVICE_UNAVAILABLE,
+            "Requests must be rejected when no JWT secret is configured"
+        );
     }
 
     #[tokio::test]

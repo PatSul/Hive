@@ -29,6 +29,7 @@ serde_json.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tracing.workspace = true
+rand.workspace = true
 pulldown-cmark.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 

@@ -209,6 +209,7 @@ impl SettingsData {
             self.has_groq_key,
             self.has_xai_key,
             self.has_huggingface_key,
+            self.has_litellm_key,
         ]
         .iter()
         .filter(|&&v| v)
@@ -789,7 +790,18 @@ impl SettingsView {
         });
 
         cx.spawn(async move |this, app: &mut AsyncApp| {
+            let start = std::time::Instant::now();
             loop {
+                if start.elapsed() > std::time::Duration::from_secs(1800) {
+                    let _ = this.update(app, |this, cx| {
+                        this.ollama_busy = false;
+                        this.ollama_status =
+                            Some(format!("Timed out pulling '{model_name}' after 30 minutes"));
+                        cx.notify();
+                    });
+                    break;
+                }
+
                 let progress = progress_text
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())

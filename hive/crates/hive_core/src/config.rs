@@ -195,6 +195,7 @@ const KEY_XAI: &str = "api_key_xai";
 const KEY_MISTRAL: &str = "api_key_mistral";
 const KEY_VENICE: &str = "api_key_venice";
 const KEY_HUE: &str = "api_key_hue";
+const KEY_CLOUD_JWT: &str = "cloud_jwt";
 
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
@@ -375,7 +376,7 @@ pub struct HiveConfig {
     pub cloud_api_url: Option<String>,
     #[serde(default)]
     pub cloud_relay_url: Option<String>,
-    #[serde(default)]
+    #[serde(skip)]
     pub cloud_jwt: Option<String>,
     #[serde(default)]
     pub cloud_tier: Option<String>,
@@ -752,6 +753,7 @@ impl ConfigManager {
             config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
+            config.cloud_jwt = get_secure_key(ss, &key_map, KEY_CLOUD_JWT);
         }
     }
 
@@ -844,6 +846,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_CLOUD_JWT, &config.cloud_jwt)?;
         save_key_map(&self.keys_path, &key_map)
     }
 

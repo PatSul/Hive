@@ -8,6 +8,7 @@
 //!
 //! The server validates `X-Hive-Key` when an API key is configured.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, Mutex, Semaphore};
+use axum::http::HeaderName;
 use tower_http::cors::{Any, CorsLayer};
 
 use hive_agents::hivemind::AiExecutor;
@@ -55,6 +57,8 @@ pub trait TaskHandlerAdapter: Send + Sync {
         &self,
         task_id: &str,
     ) -> Result<broadcast::Receiver<TaskStatusUpdateEvent>, A2aError>;
+    /// Remove a task from the active tasks map (used for deferred purge).
+    fn remove_task_blocking(&self, task_id: &str);
 }
 
 impl<E: AiExecutor + 'static> TaskHandlerAdapter for HiveTaskHandler<E> {
@@ -72,9 +76,24 @@ impl<E: AiExecutor + 'static> TaskHandlerAdapter for HiveTaskHandler<E> {
     ) -> Result<broadcast::Receiver<TaskStatusUpdateEvent>, A2aError> {
         self.block_on(self.subscribe(task_id))
     }
+
+    fn remove_task_blocking(&self, task_id: &str) {
+        self.block_on(async {
+            self.remove_task(task_id).await;
+            Ok::<(), A2aError>(())
+        })
+        .ok();
+    }
 }
 
 impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
+    /// Run a non-`Send` future to completion on a fresh single-use runtime.
+    ///
+    /// Creating a current-thread runtime per call is intentional: the
+    /// `AiExecutor` future is not `Send`, so it cannot be driven by a shared
+    /// multi-thread runtime, and a current-thread runtime cannot be called from
+    /// multiple `spawn_blocking` threads concurrently. The construction cost
+    /// (~20 us) is negligible relative to AI round-trip latency.
     fn block_on<F, T>(&self, future: F) -> Result<T, A2aError>
     where
         F: Future<Output = Result<T, A2aError>>,
@@ -92,7 +111,7 @@ impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
 pub struct AppState {
     pub config: A2aConfig,
     pub task_handler: Option<Arc<dyn TaskHandlerAdapter>>,
-    rate_limit: Arc<Mutex<RateLimitState>>,
+    rate_limits: Arc<Mutex<HashMap<String, RateLimitState>>>,
     concurrent_tasks: Arc<Semaphore>,
 }
 
@@ -149,10 +168,7 @@ pub fn build_router_with_handler(
 ) -> Router {
     let state = AppState {
         concurrent_tasks: Arc::new(Semaphore::new(config.server.max_concurrent_tasks.max(1))),
-        rate_limit: Arc::new(Mutex::new(RateLimitState {
-            window_started: Instant::now(),
-            requests: 0,
-        })),
+        rate_limits: Arc::new(Mutex::new(HashMap::new())),
         task_handler,
         config,
     };
@@ -165,7 +181,10 @@ pub fn build_router_with_handler(
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
-                .allow_headers(Any)
+                .allow_headers([
+                    HeaderName::from_static("content-type"),
+                    HeaderName::from_static("x-hive-key"),
+                ])
                 .allow_methods([Method::GET, Method::POST]),
         )
         .with_state(state)
@@ -200,7 +219,7 @@ async fn send_message_handler(
         );
     }
 
-    if let Err(message) = enforce_rate_limit(&state).await {
+    if let Err(message) = enforce_rate_limit(&state, &headers).await {
         return rpc_error(
             StatusCode::TOO_MANY_REQUESTS,
             rpc_request.id,
@@ -251,6 +270,8 @@ async fn send_message_handler(
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             let message = params.message;
 
+            let purge_handler = task_handler.clone();
+            let purge_task_id = task_id.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
                 task_handler.handle_message_blocking(task_id, message)
@@ -258,7 +279,22 @@ async fn send_message_handler(
             .await;
 
             match result {
-                Ok(Ok(task)) => rpc_success(rpc_request.id, serde_json::to_value(task).unwrap()),
+                Ok(Ok(ref task)) if task_is_final(&task.status.state) => {
+                    // Schedule removal of completed/failed task after 5 minutes
+                    // to prevent unbounded memory growth in active_tasks.
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(300)).await;
+                        tokio::task::spawn_blocking(move || {
+                            purge_handler.remove_task_blocking(&purge_task_id);
+                        })
+                        .await
+                        .ok();
+                    });
+                    rpc_success(rpc_request.id, serde_json::to_value(task).unwrap_or_default())
+                }
+                Ok(Ok(task)) => {
+                    rpc_success(rpc_request.id, serde_json::to_value(task).unwrap_or_default())
+                }
                 Ok(Err(error)) => {
                     let (status, code) = match error {
                         A2aError::TaskNotFound(_) => (StatusCode::NOT_FOUND, -32004),
@@ -277,12 +313,15 @@ async fn send_message_handler(
                 ),
             }
         }
-        _ => rpc_error(
-            StatusCode::OK,
-            rpc_request.id,
-            -32601,
-            format!("Method not found: {}", rpc_request.method),
-        ),
+        _ => {
+            let method_preview: String = rpc_request.method.chars().take(64).collect();
+            rpc_error(
+                StatusCode::OK,
+                rpc_request.id,
+                -32601,
+                format!("Method not found: {}", method_preview),
+            )
+        }
     }
 }
 
@@ -304,7 +343,7 @@ async fn get_task_handler(
     };
 
     match tokio::task::spawn_blocking(move || task_handler.get_task_blocking(&task_id)).await {
-        Ok(Ok(task)) => (StatusCode::OK, Json(serde_json::to_value(task).unwrap())),
+        Ok(Ok(task)) => (StatusCode::OK, Json(serde_json::to_value(task).unwrap_or_default())),
         Ok(Err(A2aError::TaskNotFound(message))) => json_error(StatusCode::NOT_FOUND, message),
         Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         Err(e) => json_error(
@@ -357,7 +396,8 @@ async fn task_events_handler(
     };
 
     if task_is_final(&task.status.state) {
-        let snapshot = serde_json::to_string(&status_update_from_task(&task)).unwrap();
+        let snapshot =
+            serde_json::to_string(&status_update_from_task(&task)).unwrap_or_default();
         let stream = stream::once(async move {
             Ok::<Event, Infallible>(Event::default().event("status").data(snapshot))
         })
@@ -395,16 +435,16 @@ async fn task_events_handler(
             return None;
         }
 
-        match receiver.recv().await {
-            Ok(update) => {
-                let payload = serde_json::to_string(&update).unwrap();
+        match tokio::time::timeout(Duration::from_secs(300), receiver.recv()).await {
+            Ok(Ok(update)) => {
+                let payload = serde_json::to_string(&update).unwrap_or_default();
                 let next_done = update.final_;
                 Some((
                     Ok::<Event, Infallible>(Event::default().event("status").data(payload)),
                     (receiver, next_done),
                 ))
             }
-            Err(_) => None,
+            Ok(Err(_)) | Err(_) => None,
         }
     })
     .boxed();
@@ -456,8 +496,19 @@ fn validate_request_auth(state: &AppState, headers: &HeaderMap) -> Result<(), St
         .map_err(|_| "Authentication failed".into())
 }
 
-async fn enforce_rate_limit(state: &AppState) -> Result<(), String> {
-    let mut limiter = state.rate_limit.lock().await;
+async fn enforce_rate_limit(state: &AppState, headers: &HeaderMap) -> Result<(), String> {
+    let key = headers
+        .get("x-hive-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
+    let mut limits = state.rate_limits.lock().await;
+    let limiter = limits.entry(key).or_insert_with(|| RateLimitState {
+        window_started: Instant::now(),
+        requests: 0,
+    });
+
     if limiter.window_started.elapsed() >= Duration::from_secs(60) {
         limiter.window_started = Instant::now();
         limiter.requests = 0;
@@ -486,18 +537,17 @@ fn status_update_from_task(task: &Task) -> TaskStatusUpdateEvent {
 }
 
 fn task_is_final(state: &TaskState) -> bool {
-    matches!(state, TaskState::Completed | TaskState::Failed)
+    !matches!(state, TaskState::Working | TaskState::Submitted)
 }
 
 fn rpc_success(id: Value, result: Value) -> (StatusCode, Json<Value>) {
-    let response = JsonRpcResponse {
-        jsonrpc: "2.0".into(),
-        id,
-        result,
-    };
     (
         StatusCode::OK,
-        Json(serde_json::to_value(response).unwrap()),
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        })),
     )
 }
 
@@ -507,15 +557,17 @@ fn rpc_error(
     code: i32,
     message: impl Into<String>,
 ) -> (StatusCode, Json<Value>) {
-    let response = JsonRpcErrorResponse {
-        jsonrpc: "2.0".into(),
-        id,
-        error: JsonRpcError {
-            code,
-            message: message.into(),
-        },
-    };
-    (status, Json(serde_json::to_value(response).unwrap()))
+    (
+        status,
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": code,
+                "message": message.into(),
+            },
+        })),
+    )
 }
 
 fn json_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Value>) {

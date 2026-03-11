@@ -1,5 +1,4 @@
 //! Hive AI terminal client.
-#![allow(dead_code)]
 //!
 //! A Ratatui-based CLI for interacting with Hive Cloud services: login,
 //! chat with AI models, sync data, and manage configuration.
