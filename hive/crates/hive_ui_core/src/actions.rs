@@ -30,6 +30,7 @@ actions!(
         SwitchToAssistant,
         SwitchToSettings,
         SwitchToNetwork,
+        SwitchToTerminal,
         SwitchToHelp,
         OpenWorkspaceDirectory,
         // Files panel
@@ -37,6 +38,7 @@ actions!(
         FilesRefresh,
         FilesNewFile,
         FilesNewFolder,
+        FilesCloseViewer,
         // History panel
         HistoryRefresh,
         HistoryClearAll,
@@ -95,6 +97,14 @@ actions!(
         MonitorRefresh,
         // Network panel
         NetworkRefresh,
+        // Terminal panel
+        TerminalClear,
+        TerminalSubmitCommand,
+        TerminalKill,
+        TerminalRestart,
+        // Tool approval
+        ToolApprove,
+        ToolReject,
         // Agents panel
         AgentsRefreshRemoteAgents,
         AgentsReloadWorkflows,

@@ -19,6 +19,7 @@ use hive_core::theme_manager::ThemeManager;
 use hive_agents::plugin_manager::PluginManager;
 use hive_agents::plugin_types::{PluginPreview, PluginSource};
 use hive_assistant::ReminderTrigger;
+use hive_terminal::{InteractiveShell, ShellOutput};
 
 use crate::chat_input::{ChatInputView, SubmitMessage};
 use crate::chat_service::{ChatService, StreamCompleted};
@@ -41,10 +42,10 @@ pub use hive_ui_core::{
     SwitchToChat, SwitchToQuickStart, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
     SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
-    SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToHelp,
+    SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToTerminal, SwitchToHelp,
     OpenWorkspaceDirectory,
     FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
-    FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
+    FilesCloseViewer, FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
     HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
     HistoryClearAll, HistoryClearAllConfirm, HistoryClearAllCancel,
     KanbanAddTask, LogsClear, LogsToggleAutoScroll, LogsSetFilter,
@@ -68,7 +69,10 @@ pub use hive_ui_core::{
     TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSetStep,
     TokenLaunchSelectChain, TokenLaunchSelectWallet,
     SettingsSave, ExportConfig, ImportConfig,
-    MonitorRefresh, NetworkRefresh, AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents,
+    MonitorRefresh, NetworkRefresh,
+    TerminalClear, TerminalSubmitCommand, TerminalKill, TerminalRestart,
+    ToolApprove, ToolReject,
+    AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents,
     AgentsReloadWorkflows, AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent,
     AgentsSelectRemoteSkill,
     QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate,
@@ -103,6 +107,7 @@ use hive_ui_panels::panels::{
     shield::{ShieldConfigChanged, ShieldPanelData, ShieldView},
     skills::{SkillsData, SkillsPanel},
     specs::{SpecPanelData, SpecsPanel},
+    terminal::{TerminalData, TerminalPanel},
     token_launch::{TokenLaunchData, TokenLaunchInputs, TokenLaunchPanel},
     workflow_builder::{WorkflowBuilderView, WorkflowSaved, WorkflowRunRequested},
     channels::{ChannelsView, ChannelCreated, ChannelMessageSent},
@@ -205,6 +210,14 @@ enum AssistantFetchResult {
 
 /// Root workspace layout: titlebar + sidebar + content + statusbar + chat input.
 ///
+/// Commands sent from the UI thread to the background shell task.
+enum TerminalCmd {
+    /// Write a command string to shell stdin (newline appended automatically).
+    Write(String),
+    /// Kill the running shell process.
+    Kill,
+}
+
 /// Owns the `Entity<ChatService>` and orchestrates the flow between the chat
 /// input, AI service, and panel rendering.
 pub struct HiveWorkspace {
@@ -244,6 +257,12 @@ pub struct HiveWorkspace {
     learning_data: LearningPanelData,
     assistant_data: AssistantPanelData,
     network_peer_data: NetworkPeerData,
+    terminal_data: TerminalData,
+    terminal_input: Entity<InputState>,
+    /// Channel to send commands to the background shell task.
+    terminal_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalCmd>>,
+    /// Background task running the interactive shell read loop.
+    _terminal_task: Option<Task<()>>,
     /// In-flight stream spawn task (kept alive to prevent cancellation).
     _stream_task: Option<Task<()>>,
     /// Tracks whether session state needs to be persisted. Avoids writing
@@ -442,6 +461,27 @@ impl HiveWorkspace {
             );
             state
         });
+
+        let terminal_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Type a command and press Enter...", window, cx);
+            state
+        });
+
+        cx.subscribe_in(
+            &terminal_input,
+            window,
+            |this, _view, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.handle_terminal_submit(
+                        &TerminalSubmitCommand,
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
 
         // Create the interactive settings view entity.
         let settings_view = cx.new(|cx| SettingsView::new(window, cx));
@@ -752,6 +792,10 @@ impl HiveWorkspace {
             learning_data,
             assistant_data,
             network_peer_data: NetworkPeerData::default(),
+            terminal_data: TerminalData::empty(),
+            terminal_input,
+            terminal_cmd_tx: None,
+            _terminal_task: None,
             _stream_task: None,
             session_dirty: false,
             last_saved_conversation_id: session.active_conversation_id.clone(),
@@ -3002,6 +3046,38 @@ impl HiveWorkspace {
             Panel::Network => {
                 NetworkPanel::render(&self.network_peer_data, theme).into_any_element()
             }
+            Panel::Terminal => {
+                div()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .child(TerminalPanel::render(&self.terminal_data, theme))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .px(theme.space_4)
+                            .py(theme.space_2)
+                            .border_t_1()
+                            .border_color(theme.border)
+                            .bg(theme.bg_secondary)
+                            .gap(theme.space_2)
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(theme.accent_cyan)
+                                    .font_family("Consolas, Menlo, monospace")
+                                    .child("$"),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(self.terminal_input.clone()),
+                            ),
+                    )
+                    .into_any_element()
+            }
         }
     }
 
@@ -3019,14 +3095,164 @@ impl HiveWorkspace {
         let streaming_content = svc.streaming_content().to_string();
         let is_streaming = svc.is_streaming();
         let current_model = svc.current_model().to_string();
+        let pending_approval = svc.pending_approval.clone();
 
-        ChatPanel::render_cached(
+        let chat_element = ChatPanel::render_cached(
             &mut self.cached_chat_data,
             &streaming_content,
             is_streaming,
             &current_model,
             &self.theme,
-        )
+        );
+
+        // If there's a pending tool approval, overlay the approval card.
+        if let Some(approval) = pending_approval {
+            let theme = &self.theme;
+            div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .child(chat_element)
+                .child(Self::render_approval_card(&approval, theme))
+                .into_any_element()
+        } else {
+            chat_element
+        }
+    }
+
+    /// Render the tool approval card shown when write_file needs user consent.
+    fn render_approval_card(
+        approval: &crate::chat_service::PendingToolApproval,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
+        use hive_ui_panels::components::diff_viewer::render_diff;
+        use hive_ui_panels::components::code_block::render_code_block;
+
+        let is_new_file = approval.old_content.is_none();
+        let file_size = approval.new_content.len();
+
+        // Detect language from extension.
+        let lang = approval.file_path.rsplit('.').next()
+            .map(|ext| match ext {
+                "rs" => "Rust", "ts" | "tsx" => "TypeScript", "js" | "jsx" => "JavaScript",
+                "py" => "Python", "toml" => "TOML", "json" => "JSON", "md" => "Markdown",
+                "html" => "HTML", "css" => "CSS", "yaml" | "yml" => "YAML",
+                _ => "text",
+            })
+            .unwrap_or("text");
+
+        let diff_or_code: AnyElement = if is_new_file {
+            render_code_block(&approval.new_content, lang, theme).into_any_element()
+        } else {
+            render_diff(&approval.diff_lines, theme).into_any_element()
+        };
+
+        div()
+            .id("tool-approval-card")
+            .mx(theme.space_4)
+            .mb(theme.space_4)
+            .rounded(theme.radius_md)
+            .border_1()
+            .border_color(theme.accent_yellow)
+            .bg(theme.bg_secondary)
+            .overflow_hidden()
+            // Header
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .px(theme.space_4)
+                    .py(theme.space_2)
+                    .bg(theme.bg_tertiary)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme.accent_yellow)
+                                    .child(if is_new_file { "Create file" } else { "Modify file" }),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(theme.text_primary)
+                                    .child(approval.file_path.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .child(format!("{} bytes", file_size)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .child(lang),
+                    ),
+            )
+            // Diff/code content (scrollable, max height)
+            .child(
+                div()
+                    .max_h(px(300.0))
+                    .overflow_y_scrollbar()
+                    .child(diff_or_code),
+            )
+            // Action buttons
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_end()
+                    .gap(theme.space_2)
+                    .px(theme.space_4)
+                    .py(theme.space_2)
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .id("tool-reject")
+                            .cursor_pointer()
+                            .px(theme.space_4)
+                            .py(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .bg(theme.accent_red)
+                            .text_size(theme.font_size_sm)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(gpui::white())
+                            .hover(|s| s.opacity(0.8))
+                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                window.dispatch_action(Box::new(ToolReject), cx);
+                            })
+                            .child("Reject"),
+                    )
+                    .child(
+                        div()
+                            .id("tool-approve")
+                            .cursor_pointer()
+                            .px(theme.space_4)
+                            .py(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .bg(theme.accent_green)
+                            .text_size(theme.font_size_sm)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(gpui::white())
+                            .hover(|s| s.opacity(0.8))
+                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                window.dispatch_action(Box::new(ToolApprove), cx);
+                            })
+                            .child("Approve"),
+                    ),
+            )
     }
 
     // -- Keyboard action handlers --------------------------------------------
@@ -3372,6 +3598,229 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Network, cx);
+    }
+
+    fn handle_switch_to_terminal(
+        &mut self,
+        _action: &SwitchToTerminal,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::Terminal, cx);
+        self.ensure_terminal_shell(cx);
+    }
+
+    // -- Terminal panel handlers --------------------------------------------
+
+    /// Spawn the background shell if it isn't running yet.
+    fn ensure_terminal_shell(&mut self, cx: &mut Context<Self>) {
+        if self.terminal_cmd_tx.is_some() {
+            return; // already running
+        }
+
+        let cwd = PathBuf::from(&self.terminal_data.cwd);
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<TerminalCmd>();
+        self.terminal_cmd_tx = Some(cmd_tx);
+        self.terminal_data.is_running = true;
+        self.terminal_data.push_system("Shell starting...");
+
+        let task = cx.spawn(async move |this: WeakEntity<Self>, app: &mut AsyncApp| {
+            // Spawn the shell on the async executor.
+            let mut shell = match InteractiveShell::new(Some(&cwd)) {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = format!("Failed to start shell: {e}");
+                    let _ = this.update(app, |ws, cx| {
+                        ws.terminal_data.push_system(&msg);
+                        ws.terminal_data.is_running = false;
+                        ws.terminal_cmd_tx = None;
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+
+            let _ = this.update(app, |ws, cx| {
+                ws.terminal_data.push_system("Shell ready.");
+                cx.notify();
+            });
+
+            // Main loop: poll shell output and command channel concurrently.
+            loop {
+                tokio::select! {
+                    output = shell.read_async() => {
+                        match output {
+                            Some(ShellOutput::Stdout(line)) => {
+                                let _ = this.update(app, |ws, cx| {
+                                    ws.terminal_data.push_line(
+                                        hive_ui_panels::panels::terminal::TerminalLineKind::Stdout,
+                                        line,
+                                    );
+                                    cx.notify();
+                                });
+                            }
+                            Some(ShellOutput::Stderr(line)) => {
+                                let _ = this.update(app, |ws, cx| {
+                                    ws.terminal_data.push_line(
+                                        hive_ui_panels::panels::terminal::TerminalLineKind::Stderr,
+                                        line,
+                                    );
+                                    cx.notify();
+                                });
+                            }
+                            Some(ShellOutput::Exit(code)) => {
+                                let msg = format!("Shell exited with code {code}");
+                                let _ = this.update(app, |ws, cx| {
+                                    ws.terminal_data.push_system(&msg);
+                                    ws.terminal_data.is_running = false;
+                                    ws.terminal_cmd_tx = None;
+                                    cx.notify();
+                                });
+                                return;
+                            }
+                            None => {
+                                // Channel closed — shell is gone.
+                                let _ = this.update(app, |ws, cx| {
+                                    ws.terminal_data.push_system("Shell disconnected.");
+                                    ws.terminal_data.is_running = false;
+                                    ws.terminal_cmd_tx = None;
+                                    cx.notify();
+                                });
+                                return;
+                            }
+                        }
+                    }
+                    cmd = cmd_rx.recv() => {
+                        match cmd {
+                            Some(TerminalCmd::Write(text)) => {
+                                if let Err(e) = shell.write(&format!("{text}\n")).await {
+                                    let msg = format!("Write error: {e}");
+                                    let _ = this.update(app, |ws, cx| {
+                                        ws.terminal_data.push_system(&msg);
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                            Some(TerminalCmd::Kill) => {
+                                let _ = shell.kill().await;
+                                let _ = this.update(app, |ws, cx| {
+                                    ws.terminal_data.push_system("Shell killed.");
+                                    ws.terminal_data.is_running = false;
+                                    ws.terminal_cmd_tx = None;
+                                    cx.notify();
+                                });
+                                return;
+                            }
+                            None => {
+                                // Command channel dropped — clean up.
+                                let _ = shell.kill().await;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        self._terminal_task = Some(task);
+        cx.notify();
+    }
+
+    fn handle_terminal_clear(
+        &mut self,
+        _action: &TerminalClear,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_data.lines.clear();
+        cx.notify();
+    }
+
+    fn handle_terminal_submit(
+        &mut self,
+        _action: &TerminalSubmitCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cmd = self.terminal_input.read(cx).text().to_string();
+        let cmd = cmd.trim().to_string();
+        if cmd.is_empty() {
+            return;
+        }
+        // Clear input.
+        self.terminal_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+        });
+        // Echo the command as a Stdin line.
+        self.terminal_data.push_line(
+            hive_ui_panels::panels::terminal::TerminalLineKind::Stdin,
+            cmd.clone(),
+        );
+
+        // Send to background shell.
+        if let Some(tx) = &self.terminal_cmd_tx {
+            let _ = tx.send(TerminalCmd::Write(cmd));
+        } else {
+            self.terminal_data.push_system("No shell running. Restarting...");
+            self.ensure_terminal_shell(cx);
+        }
+        cx.notify();
+    }
+
+    fn handle_terminal_kill(
+        &mut self,
+        _action: &TerminalKill,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(tx) = self.terminal_cmd_tx.take() {
+            let _ = tx.send(TerminalCmd::Kill);
+        }
+        self._terminal_task = None;
+        self.terminal_data.is_running = false;
+        cx.notify();
+    }
+
+    fn handle_terminal_restart(
+        &mut self,
+        _action: &TerminalRestart,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Kill existing shell.
+        if let Some(tx) = self.terminal_cmd_tx.take() {
+            let _ = tx.send(TerminalCmd::Kill);
+        }
+        self._terminal_task = None;
+        self.terminal_data.is_running = false;
+        self.terminal_data.push_system("Restarting shell...");
+        // Spawn new one.
+        self.ensure_terminal_shell(cx);
+    }
+
+    // -- Tool Approval handlers ---------------------------------------------
+
+    fn handle_tool_approve(
+        &mut self,
+        _action: &ToolApprove,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat_service.update(cx, |svc, cx| {
+            svc.resolve_approval(true, cx);
+        });
+        cx.notify();
+    }
+
+    fn handle_tool_reject(
+        &mut self,
+        _action: &ToolReject,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat_service.update(cx, |svc, cx| {
+            svc.resolve_approval(false, cx);
+        });
+        cx.notify();
     }
 
     // -- Quick Start panel handlers -----------------------------------------
@@ -4626,8 +5075,32 @@ impl HiveWorkspace {
                 error!("Files: path traversal blocked: {}", file_path.display());
                 return;
             }
-            info!("Files: open file {}", file_path.display());
+            info!("Files: open file in viewer {}", file_path.display());
             self.files_data.selected_file = Some(action.name.clone());
+            // Open in the built-in file viewer pane.
+            self.files_data.open_file_viewer(&file_path);
+            cx.notify();
+        }
+    }
+
+    fn handle_files_close_viewer(
+        &mut self,
+        _action: &FilesCloseViewer,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.files_data.close_file_viewer();
+        cx.notify();
+    }
+
+    // Preserved for backwards compatibility — original system editor open logic
+    // was replaced by the built-in file viewer above.
+    #[allow(dead_code)]
+    fn _handle_files_open_external_legacy(
+        &mut self,
+        file_path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
             // Open in default system editor, validating the launch command.
             let command_string = if cfg!(target_os = "windows") {
                 format!("cmd /C start \"\" \"{}\"", file_path.to_string_lossy())
@@ -4659,7 +5132,7 @@ impl HiveWorkspace {
             let _ = std::process::Command::new("xdg-open")
                 .arg(&file_path)
                 .spawn();
-        }
+
         cx.notify();
     }
 
@@ -9788,6 +10261,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_settings))
             .on_action(cx.listener(Self::handle_switch_to_help))
             .on_action(cx.listener(Self::handle_switch_to_network))
+            .on_action(cx.listener(Self::handle_switch_to_terminal))
             .on_action(cx.listener(Self::handle_network_refresh))
             .on_action(cx.listener(Self::handle_open_workspace_directory))
             // -- Panel action handlers -----------------------------------
@@ -9799,6 +10273,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_files_refresh))
             .on_action(cx.listener(Self::handle_files_new_file))
             .on_action(cx.listener(Self::handle_files_new_folder))
+            .on_action(cx.listener(Self::handle_files_close_viewer))
             // History
             .on_action(cx.listener(Self::handle_history_load))
             .on_action(cx.listener(Self::handle_history_delete))
@@ -9812,6 +10287,14 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_logs_clear))
             .on_action(cx.listener(Self::handle_logs_set_filter))
             .on_action(cx.listener(Self::handle_logs_toggle_auto_scroll))
+            // Terminal
+            .on_action(cx.listener(Self::handle_terminal_clear))
+            .on_action(cx.listener(Self::handle_terminal_submit))
+            .on_action(cx.listener(Self::handle_terminal_kill))
+            .on_action(cx.listener(Self::handle_terminal_restart))
+            // Tool approval
+            .on_action(cx.listener(Self::handle_tool_approve))
+            .on_action(cx.listener(Self::handle_tool_reject))
             // Costs
             .on_action(cx.listener(Self::handle_costs_export_csv))
             .on_action(cx.listener(Self::handle_costs_reset_today))
@@ -10030,7 +10513,7 @@ impl HiveWorkspace {
                     ))
                     .child(render_sidebar_section(
                         "Observe",
-                        &[Panel::Monitor, Panel::Logs, Panel::Costs, Panel::Shield, Panel::Network],
+                        &[Panel::Monitor, Panel::Logs, Panel::Terminal, Panel::Costs, Panel::Shield, Panel::Network],
                         active,
                         theme,
                         cx,

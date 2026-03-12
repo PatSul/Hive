@@ -1,6 +1,6 @@
 use gpui_component::IconName;
 
-/// The 23 navigable panels in the application.
+/// The 24 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
@@ -24,12 +24,13 @@ pub enum Panel {
     Assistant,
     TokenLaunch,
     Network,
+    Terminal,
     Settings,
     Help,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 23] = [
+    pub const ALL: [Panel; 24] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
@@ -50,6 +51,7 @@ impl Panel {
         Panel::Assistant,
         Panel::TokenLaunch,
         Panel::Network,
+        Panel::Terminal,
         Panel::Settings,
         Panel::Help,
         Panel::QuickStart,
@@ -78,6 +80,7 @@ impl Panel {
             Self::Assistant => "Assistant",
             Self::TokenLaunch => "Launch",
             Self::Network => "Network",
+            Self::Terminal => "Terminal",
             Self::Settings => "Settings",
             Self::Help => "Help",
         }
@@ -116,6 +119,7 @@ impl Panel {
             Self::Assistant => IconName::Bell,
             Self::TokenLaunch => IconName::Globe,
             Self::Network => IconName::Globe,
+            Self::Terminal => IconName::Dash,
             Self::Settings => IconName::Settings,
             Self::Help => IconName::Info,
         }
@@ -148,6 +152,7 @@ impl Panel {
             "Assistant" => Self::Assistant,
             "TokenLaunch" => Self::TokenLaunch,
             "Network" => Self::Network,
+            "Terminal" => Self::Terminal,
             "Settings" => Self::Settings,
             "Help" => Self::Help,
             _ => Self::Chat,
@@ -178,13 +183,14 @@ impl Panel {
             Self::Assistant => "Assistant",
             Self::TokenLaunch => "TokenLaunch",
             Self::Network => "Network",
+            Self::Terminal => "Terminal",
             Self::Settings => "Settings",
             Self::Help => "Help",
         }
     }
 }
 
-/// Sidebar component with 23 navigation icon buttons.
+/// Sidebar component with 24 navigation icon buttons.
 pub struct Sidebar {
     pub active_panel: Panel,
 }

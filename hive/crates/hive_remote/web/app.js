@@ -444,7 +444,7 @@ function renderSidebar() {
             "</button>";
     }
     html += "</nav>";
-    html += '<div class="sidebar-footer">Hive Remote v0.1</div>';
+    html += '<div class="sidebar-footer">Hive Remote v0.2</div>';
     html += "</div>";
     return html;
 }
@@ -455,6 +455,10 @@ function renderPanel() {
             return renderChat();
         case "agents":
             return renderAgents();
+        case "terminal":
+            return renderTerminal();
+        case "files":
+            return renderFiles();
         default:
             return renderPlaceholder(state.activePanel);
     }
@@ -677,6 +681,55 @@ function renderAgentModal() {
 }
 
 // ---------------------------------------------------------------------------
+// Terminal Panel
+// ---------------------------------------------------------------------------
+
+if (!state.terminalLines) state.terminalLines = [];
+if (!state.terminalRunning) state.terminalRunning = false;
+
+function renderTerminal() {
+    var html = '<div class="terminal-panel">';
+    html += '<div class="terminal-header">';
+    html += '<span class="terminal-title">\u{1F5A5}\uFE0F Terminal</span>';
+    html += '<span class="terminal-status ' + (state.terminalRunning ? "running" : "") + '">' +
+        (state.terminalRunning ? "Running" : "Idle") + '</span>';
+    html += '</div>';
+    html += '<div class="terminal-output" id="terminal-output">';
+    for (var i = 0; i < state.terminalLines.length; i++) {
+        var line = state.terminalLines[i];
+        var cls = "term-line";
+        if (line.kind === "stderr") cls += " term-stderr";
+        else if (line.kind === "stdin") cls += " term-stdin";
+        else if (line.kind === "system") cls += " term-system";
+        var prefix = line.kind === "stdin" ? "$ " : line.kind === "system" ? "# " : "";
+        html += '<div class="' + cls + '">' + esc(prefix + line.content) + '</div>';
+    }
+    html += '</div>';
+    html += '<div class="terminal-input-bar">';
+    html += '<span class="term-prompt">$</span>';
+    html += '<input type="text" class="terminal-input" id="terminal-input" ' +
+        'placeholder="Type a command and press Enter..." />';
+    html += '</div>';
+    html += '</div>';
+    return html;
+}
+
+// ---------------------------------------------------------------------------
+// Files Panel
+// ---------------------------------------------------------------------------
+
+function renderFiles() {
+    var html = '<div class="files-panel">';
+    html += '<div class="status-panel">';
+    html += '<div class="status-icon">\u{1F4C1}</div>';
+    html += '<p>File browser is available in the desktop app.</p>';
+    html += '<p>The desktop app includes a built-in code viewer with syntax highlighting.</p>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+}
+
+// ---------------------------------------------------------------------------
 // Placeholder Panels
 // ---------------------------------------------------------------------------
 
@@ -785,6 +838,32 @@ function bindEvents() {
                 startAgentTask(goal, mode);
             }
         });
+    }
+
+    // Terminal input
+    var termInput = document.getElementById("terminal-input");
+    if (termInput) {
+        termInput.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                var cmd = this.value.trim();
+                if (cmd) {
+                    state.terminalLines.push({ kind: "stdin", content: cmd });
+                    this.value = "";
+                    // Send to daemon via WebSocket if connected
+                    if (conn && conn.ws && conn.ws.readyState === WebSocket.OPEN) {
+                        conn.send({ type: "TerminalInput", command: cmd });
+                    }
+                    render();
+                    // Auto-scroll terminal output
+                    var termOut = document.getElementById("terminal-output");
+                    if (termOut) termOut.scrollTop = termOut.scrollHeight;
+                }
+            }
+        });
+        if (state.activePanel === "terminal") {
+            termInput.focus();
+        }
     }
 
     // Scroll chat to bottom on fresh render

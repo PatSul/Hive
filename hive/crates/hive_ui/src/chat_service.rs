@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use gpui::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -21,6 +21,7 @@ use hive_ai::types::{
 use hive_core::conversations::{
     Conversation, ConversationStore, ConversationSummary, StoredMessage, generate_title,
 };
+use hive_ui_panels::components::diff_viewer::DiffLine;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,6 +155,91 @@ impl ChatMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Tool Approval
+// ---------------------------------------------------------------------------
+
+/// Describes a pending write_file tool call awaiting user approval.
+#[derive(Clone, Debug)]
+pub struct PendingToolApproval {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub file_path: String,
+    pub new_content: String,
+    /// `None` means the file does not exist yet (new file creation).
+    pub old_content: Option<String>,
+    pub diff_lines: Vec<DiffLine>,
+}
+
+/// Compute a simple line-by-line diff between old and new content.
+fn compute_diff_lines(old: &str, new: &str) -> Vec<DiffLine> {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    let mut result = Vec::new();
+
+    // Simple sequential comparison (not LCS, but good enough for file diffs
+    // where changes are typically localized).
+    let mut oi = 0;
+    let mut ni = 0;
+    while oi < old_lines.len() && ni < new_lines.len() {
+        if old_lines[oi] == new_lines[ni] {
+            result.push(DiffLine::Context(old_lines[oi].to_string()));
+            oi += 1;
+            ni += 1;
+        } else {
+            // Look ahead in new for a match of current old line.
+            let mut found_in_new = None;
+            for j in (ni + 1)..new_lines.len().min(ni + 5) {
+                if new_lines[j] == old_lines[oi] {
+                    found_in_new = Some(j);
+                    break;
+                }
+            }
+            if let Some(j) = found_in_new {
+                // Lines ni..j are additions.
+                for k in ni..j {
+                    result.push(DiffLine::Added(new_lines[k].to_string()));
+                }
+                ni = j;
+            } else {
+                // Look ahead in old for a match of current new line.
+                let mut found_in_old = None;
+                for j in (oi + 1)..old_lines.len().min(oi + 5) {
+                    if old_lines[j] == new_lines[ni] {
+                        found_in_old = Some(j);
+                        break;
+                    }
+                }
+                if let Some(j) = found_in_old {
+                    for k in oi..j {
+                        result.push(DiffLine::Removed(old_lines[k].to_string()));
+                    }
+                    oi = j;
+                } else {
+                    result.push(DiffLine::Removed(old_lines[oi].to_string()));
+                    result.push(DiffLine::Added(new_lines[ni].to_string()));
+                    oi += 1;
+                    ni += 1;
+                }
+            }
+        }
+    }
+
+    // Remaining old lines are removals.
+    while oi < old_lines.len() {
+        result.push(DiffLine::Removed(old_lines[oi].to_string()));
+        oi += 1;
+    }
+    // Remaining new lines are additions.
+    while ni < new_lines.len() {
+        result.push(DiffLine::Added(new_lines[ni].to_string()));
+        ni += 1;
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
 // ChatService
 // ---------------------------------------------------------------------------
 
@@ -180,6 +266,10 @@ pub struct ChatService {
     /// message list. Used by the UI to detect when cached display messages
     /// need to be rebuilt, avoiding per-frame string cloning.
     generation: u64,
+    /// Pending tool approval (write_file) awaiting user decision.
+    pub pending_approval: Option<PendingToolApproval>,
+    /// Sender to resume the tool loop after approval/rejection.
+    approval_tx: Option<oneshot::Sender<bool>>,
 }
 
 impl ChatService {
@@ -194,6 +284,8 @@ impl ChatService {
             conversation_id: None,
             last_stream_notify: std::time::Instant::now(),
             generation: 0,
+            pending_approval: None,
+            approval_tx: None,
         }
     }
 
@@ -242,7 +334,22 @@ impl ChatService {
         self.is_streaming = false;
         self.error = None;
         self._stream_task = None;
+        self.pending_approval = None;
+        self.approval_tx = None;
         self.generation += 1;
+    }
+
+    // -- Tool Approval ------------------------------------------------------
+
+    /// Resolve a pending tool approval. If `approved` is true the write_file
+    /// tool will execute; if false the tool is skipped and the AI is informed.
+    pub fn resolve_approval(&mut self, approved: bool, cx: &mut gpui::Context<Self>) {
+        self.pending_approval = None;
+        if let Some(tx) = self.approval_tx.take() {
+            let _ = tx.send(approved);
+        }
+        self.generation += 1;
+        cx.notify();
     }
 
     // -- Persistence --------------------------------------------------------
@@ -583,12 +690,155 @@ impl ChatService {
                         break;
                     }
 
-                    // --- Execute tools ---
+                    // --- Execute tools (with approval gate for write_file) ---
                     info!(
                         "Tool loop iteration {}: executing {} tool call(s)",
                         iteration + 1,
                         final_tool_calls.len()
                     );
+
+                    // Check if any tool call is write_file — if so, gate it.
+                    let write_file_call = final_tool_calls.iter().find(|tc| tc.name == "write_file");
+
+                    if let Some(wf) = write_file_call {
+                        // Extract file_path and content from tool call input.
+                        let file_path = wf.input.get("file_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let new_content = wf.input.get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        // Read existing file for diff.
+                        let old_content = std::fs::read_to_string(&file_path).ok();
+                        let diff_lines = if let Some(ref old) = old_content {
+                            compute_diff_lines(old, &new_content)
+                        } else {
+                            new_content.lines()
+                                .map(|l| DiffLine::Added(l.to_string()))
+                                .collect()
+                        };
+
+                        let approval = PendingToolApproval {
+                            tool_call_id: wf.id.clone(),
+                            tool_name: wf.name.clone(),
+                            file_path: file_path.clone(),
+                            new_content: new_content.clone(),
+                            old_content: old_content.clone(),
+                            diff_lines,
+                        };
+
+                        // Create oneshot channel and set pending approval.
+                        let (tx, rx) = oneshot::channel::<bool>();
+                        let _ = this.update(app, |svc: &mut ChatService, cx| {
+                            svc.pending_approval = Some(approval);
+                            svc.approval_tx = Some(tx);
+                            svc.generation += 1;
+                            cx.notify();
+                        });
+
+                        // Wait for user decision.
+                        let approved = rx.await.unwrap_or(false);
+
+                        if !approved {
+                            // User rejected — skip write_file, execute other tools,
+                            // and add a rejection result.
+                            let registry = hive_agents::tool_use::builtin_registry();
+                            let agent_calls: Vec<hive_agents::tool_use::ToolCall> = final_tool_calls
+                                .iter()
+                                .filter(|tc| tc.name != "write_file")
+                                .map(|tc| hive_agents::tool_use::ToolCall {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    input: tc.input.clone(),
+                                })
+                                .collect();
+                            let mut results = registry.execute_all(&agent_calls);
+                            // Add rejection result for write_file call.
+                            results.push(hive_agents::tool_use::ToolResult {
+                                tool_use_id: wf.id.clone(),
+                                content: format!("User rejected write to {file_path}. Do not retry without asking."),
+                                is_error: true,
+                            });
+
+                            // Continue with results below.
+                            let _ = this.update(app, |svc: &mut ChatService, cx| {
+                                svc.pending_approval = None;
+                                svc.approval_tx = None;
+                                cx.notify();
+                            });
+
+                            // Use these results for the rest of the loop.
+                            let registry_results = results;
+
+                            // --- Update conversation (rejected) ---
+                            let m = model_clone.clone();
+                            let tc_for_msg = final_tool_calls.clone();
+                            let update_result = this.update(app, |svc: &mut ChatService, cx| {
+                                if let Some(msg) = svc.messages.get_mut(current_assistant_idx) {
+                                    msg.content = accumulated.clone();
+                                    msg.model = Some(m.clone());
+                                    msg.tool_calls = Some(tc_for_msg);
+                                    if let Some(ref u) = final_usage {
+                                        let cost = hive_ai::cost::calculate_cost(
+                                            &m,
+                                            u.prompt_tokens as usize,
+                                            u.completion_tokens as usize,
+                                        );
+                                        msg.cost = Some(cost.total_cost);
+                                        msg.tokens = Some((u.prompt_tokens as usize, u.completion_tokens as usize));
+                                    }
+                                }
+                                for result in &registry_results {
+                                    let mut tool_msg = ChatMessage::new(MessageRole::Tool, &result.content);
+                                    tool_msg.tool_call_id = Some(result.tool_use_id.clone());
+                                    svc.messages.push(tool_msg);
+                                }
+                                svc.messages.push(ChatMessage::assistant_placeholder());
+                                svc.streaming_content.clear();
+                                svc.generation += 1;
+                                cx.notify();
+                                svc.messages.len() - 1
+                            });
+
+                            let Ok(new_idx) = update_result else { break; };
+                            current_assistant_idx = new_idx;
+
+                            // Rebuild request and continue loop.
+                            let msgs_result = this.update(app, |svc: &mut ChatService, _cx| svc.build_ai_messages());
+                            let Ok(ai_messages) = msgs_result else { break; };
+                            current_request = ChatRequest {
+                                messages: ai_messages,
+                                model: current_request.model.clone(),
+                                max_tokens: current_request.max_tokens,
+                                temperature: current_request.temperature,
+                                system_prompt: current_request.system_prompt.clone(),
+                                tools: current_request.tools.clone(),
+                                cache_system_prompt: false,
+                            };
+                            match provider.stream_chat(&current_request).await {
+                                Ok(rx) => { current_rx = rx; }
+                                Err(e) => {
+                                    error!("Tool re-send failed: {e}");
+                                    let _ = this.update(app, |svc: &mut ChatService, cx| {
+                                        svc.set_error(format!("Tool re-send failed: {e}"), cx);
+                                    });
+                                    break;
+                                }
+                            }
+                            iteration += 1;
+                            continue;
+                        }
+
+                        // User approved — clear approval state and proceed normally.
+                        let _ = this.update(app, |svc: &mut ChatService, cx| {
+                            svc.pending_approval = None;
+                            svc.approval_tx = None;
+                            cx.notify();
+                        });
+                    }
 
                     let registry = hive_agents::tool_use::builtin_registry();
                     let agent_calls: Vec<hive_agents::tool_use::ToolCall> = final_tool_calls

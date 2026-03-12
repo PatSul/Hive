@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.18-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.19-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -62,6 +62,9 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - Project management (Jira, Linear, Asana)
 - Knowledge base sync (Notion, Obsidian)
 - Git hosting (GitHub, GitLab, Bitbucket)
+- **Tool approval gate** with diff preview (approve/reject file writes)
+- **Built-in terminal** (interactive shell with streaming output)
+- **Built-in code viewer** (syntax-highlighted file browser)
 - MCP client + server (19 tools)
 - P2P federation across instances
 - **Remote control** (WebSocket relay, QR pairing, web UI)
@@ -398,6 +401,7 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 
 | Feature | Details |
 |---|---|
+| **Interactive Terminal** | Built-in terminal panel with a real interactive shell (cmd.exe / bash). Async streaming output, color-coded stdout/stderr, command history echo, kill/restart controls. Backed by `InteractiveShell` with `tokio::process::Command`. |
 | **Shell Execution** | Run commands with configurable timeout, async streaming output capture, working directory management, and exit code tracking. Real process spawning via `tokio::process::Command`. |
 | **Docker Sandbox** | Full container lifecycle: create, start, stop, exec, pause, unpause, remove. Real Docker CLI integration with simulation fallback for testing. Dual-mode: production and test. |
 | **Browser Automation** | Chrome DevTools Protocol over WebSocket: navigation, screenshots, JavaScript evaluation, DOM manipulation. |
@@ -612,7 +616,7 @@ hive_cli   (standalone binary) ── hive_core
 
 ---
 
-## UI — 21 Panels
+## UI — 24 Panels
 
 All panels are wired to live backend data. No mock data in the production path. **8 built-in themes** (HiveCode Dark/Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark) with community voting and custom theme support via `~/.hive/themes/`.
 
@@ -620,7 +624,7 @@ All panels are wired to live backend data. No mock data in the production path. 
 |---|---|---|
 | Chat | Main AI conversation with streaming responses | AI providers via `ChatService` |
 | History | Conversation history browser | `~/.hive/conversations/` |
-| Files | Project file browser with create/delete/navigate | Filesystem via `hive_fs` |
+| Files | Project file browser with built-in code viewer (split layout, syntax highlighting) | Filesystem via `hive_fs` |
 | Specs | Specification management | `AppSpecs` global |
 | Agents | Multi-agent swarm orchestration with task tree drill-down | `AppAgents` global |
 | Workflows | Visual workflow builder (drag-and-drop nodes) | `AppWorkflows` global |
@@ -638,6 +642,9 @@ All panels are wired to live backend data. No mock data in the production path. 
 | Assistant | Personal assistant: email, calendar, reminders | `AssistantService` |
 | Token Launch | Token deployment wizard with chain selection | `hive_blockchain` |
 | Settings | Application configuration with persist-on-save, cloud account fields | `HiveConfig` |
+| Terminal | Interactive shell with real PTY, command history, kill/restart | `InteractiveShell` via `hive_terminal` |
+| Network | P2P federation peer browser | `hive_network` |
+| Quick Start | Guided project onboarding with goal-driven AI | `AppConfig` + AI providers |
 | Help | Documentation and guides | Static content |
 
 ---
@@ -790,7 +797,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.18 |
+| Version | 0.3.19 |
 | Crates | 21 |
 | Rust source files | 394 |
 | Lines of Rust | 192,500+ |
@@ -822,6 +829,15 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.19
+
+**Dogfooding: Terminal, File Viewer, Tool Approval**
+
+- **Interactive Terminal Panel** — New sidebar panel wrapping `InteractiveShell` from `hive_terminal`. Spawns a real shell process (cmd.exe / bash) with async streaming output via tokio channels. Color-coded stdout/stderr/stdin, kill/restart/clear controls, and a real GPUI text input for command entry.
+- **Built-In File Viewer** — Files panel now has a split layout: file tree on the left, syntax-highlighted code viewer on the right. Supports language detection by extension, line numbers, and scrollable content via `render_code_block()`.
+- **Tool Approval Gate** — AI `write_file` tool calls are now intercepted before execution. A diff preview card shows the proposed changes (additions in green, removals in red, context lines) with Approve/Reject buttons. Uses a `oneshot` channel to pause the async tool loop until the user decides. Rejected writes return a rejection `ToolResult` to the AI so it can adapt.
+- **3 New Panels** — Terminal, Quick Start, and Channels panels added to sidebar (21 → 24 total).
 
 ### v0.3.18
 

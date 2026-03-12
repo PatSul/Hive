@@ -1,6 +1,6 @@
 # Hive — Comprehensive Feature Documentation
 
-> **Updated**: 2026-02-11
+> **Updated**: 2026-03-11
 > **Branch**: rust/main
 > **Codebase**: Reference snapshot document; current crate count and line totals may differ from `HEAD`
 > **Tests**: Use `docs/TEST_PLAN.md` for the current verification commands and known issues
@@ -13,7 +13,7 @@
 2. [hive_app — Application Shell](#2-hive_app--application-shell)
 3. [hive_core — Configuration & Security](#3-hive_core--configuration--security)
 4. [hive_ai — AI Provider Orchestration](#4-hive_ai--ai-provider-orchestration)
-5. [hive_ui — User Interface (18 Panels)](#5-hive_ui--user-interface-18-panels)
+5. [hive_ui — User Interface (24 Panels)](#5-hive_ui--user-interface-24-panels)
 6. [hive_agents — Multi-Agent Orchestration](#6-hive_agents--multi-agent-orchestration)
 7. [hive_terminal — Terminal & Execution](#7-hive_terminal--terminal--execution)
 8. [hive_fs — File System Operations](#8-hive_fs--file-system-operations)
@@ -36,8 +36,8 @@ Hive is a native desktop AI coding assistant built in Rust with GPUI (Zed's GPU-
 hive/crates/
   hive_app/           — Binary crate (entry point, window, tray)
   hive_core/          — Config, security gateway, database, shared types
-  hive_ui/            — GPUI workspace, 18 panels, theme system
-  hive_ai/            — 11 AI providers, routing, cost tracking, RAG, TTS
+  hive_ui/            — GPUI workspace, 24 panels, theme system
+  hive_ai/            — 15 AI providers, routing, cost tracking, RAG, TTS
   hive_agents/        — Multi-agent orchestration, personas, skills, MCP
   hive_terminal/      — Command execution, shell, browser, Docker
   hive_fs/            — File operations, git, search, watching
@@ -319,7 +319,7 @@ New module for text-to-speech integration (in development).
 
 ---
 
-## 5. hive_ui — User Interface (18 Panels)
+## 5. hive_ui — User Interface (24 Panels)
 
 ### Workspace Layout
 
@@ -338,28 +338,34 @@ New module for text-to-speech integration (in development).
 +----------------------------------------------+
 ```
 
-### 18 Navigable Panels
+### 24 Navigable Panels
 
 | # | Panel | Icon | Key Features |
 |---|-------|------|--------------|
-| 1 | **Chat** | Bot | Markdown rendering, code blocks with copy, streaming with cyan border, thinking sections (collapsible), model/cost badges per message |
+| 1 | **Chat** | Bot | Markdown rendering, code blocks with copy, streaming with cyan border, thinking sections (collapsible), model/cost badges per message, **tool approval gate** with diff preview for write_file calls |
 | 2 | **History** | Calendar | Search, conversation cards, relative timestamps, delete, refresh |
-| 3 | **Files** | Folder | Breadcrumb nav, file tree, search, new file/folder, open/delete |
+| 3 | **Files** | Folder | Breadcrumb nav, file tree, search, new file/folder, open/delete, **built-in code viewer** (split layout with syntax highlighting, line numbers) |
 | 4 | **Specs** | File | Specification management with List/Detail/Edit modes, spec count badges, new spec creation (~570 lines) |
 | 5 | **Agents** | Bot | Multi-agent management with 6 persona displays (Investigator, Implementer, Verifier, Critic, Debugger, Code Reviewer), orchestration run tracking with progress/cost/elapsed (~700 lines) |
-| 6 | **Kanban** | LayoutDashboard | Todo/InProgress/Done columns, task cards |
-| 7 | **Monitor** | Loader | Agent activity monitoring with 9 roles (Architect through TaskVerifier), system status tracking (Idle/Running/Paused/Error), run history, color-coded status dots (~881 lines) |
-| 8 | **Logs** | File | Filterable log viewer, auto-scroll, clear |
-| 9 | **Costs** | ChartPie | Today/monthly costs, budget progress bars, per-model breakdown, CSV export |
-| 10 | **Review** | Eye | Git diff viewer, stage/unstage, commit, file-level review with inline comments (~1,424 lines) |
-| 11 | **Skills** | Star | Skill marketplace with tabs (Installed/Directory/Create/AddSource), 8 categories, search filtering, integrity hash validation, ratings, skill authoring (~1,678 lines) |
-| 12 | **Routing** | Map | Model routing rule editor with provider status, tier configuration (~1,320 lines) |
-| 13 | **Learning** | TrendingUp | Self-improvement dashboard showing quality metrics/trends, learning log, user preferences with confidence scores, prompt suggestions per persona, routing insights, best/worst models (~617 lines) |
-| 14 | **Shield** | EyeOff | Security monitoring with event timeline (severity-colored), PII detection counts, secrets blocked, threats caught, provider access policies with trust levels (~676 lines) |
-| 15 | **Assistant** | Bell | Personal assistant dashboard with daily briefing (greeting, events, emails, reminders), upcoming events with conflict detection, email groups/previews, active reminders with overdue tracking, research progress, action history (~892 lines) |
-| 16 | **Token Launch** | Globe | Multi-step ERC-20/SPL token deployment wizard (~1,039 lines) |
-| 17 | **Settings** | Settings | API keys (masked input, status dots), local AI URLs, model routing, budget limits, general toggles, auto-save on blur (~1,145 lines) |
-| 18 | **Help** | Info | Keyboard shortcuts reference, getting started guide, troubleshooting |
+| 6 | **Workflows** | — | Visual workflow builder with drag-and-drop nodes, multi-step automation |
+| 7 | **Channels** | — | Agent messaging channels (Telegram/Slack-style) |
+| 8 | **Kanban** | LayoutDashboard | Todo/InProgress/Done columns, task cards |
+| 9 | **Monitor** | Loader | Agent activity monitoring with 9 roles (Architect through TaskVerifier), system status tracking (Idle/Running/Paused/Error), run history, color-coded status dots (~881 lines) |
+| 10 | **Logs** | File | Filterable log viewer, auto-scroll, clear |
+| 11 | **Costs** | ChartPie | Today/monthly costs, budget progress bars, per-model breakdown, CSV export |
+| 12 | **Review** | Eye | Git diff viewer, stage/unstage, commit, file-level review with inline comments (~1,424 lines) |
+| 13 | **Skills** | Star | Skill marketplace with tabs (Installed/Directory/Create/AddSource), 8 categories, search filtering, integrity hash validation, ratings, skill authoring (~1,678 lines) |
+| 14 | **Routing** | Map | Model routing rule editor with provider status, tier configuration (~1,320 lines) |
+| 15 | **Models** | — | Model registry browser with provider catalogs |
+| 16 | **Learning** | TrendingUp | Self-improvement dashboard showing quality metrics/trends, learning log, user preferences with confidence scores, prompt suggestions per persona, routing insights, best/worst models (~617 lines) |
+| 17 | **Shield** | EyeOff | Security monitoring with event timeline (severity-colored), PII detection counts, secrets blocked, threats caught, provider access policies with trust levels (~676 lines) |
+| 18 | **Assistant** | Bell | Personal assistant dashboard with daily briefing (greeting, events, emails, reminders), upcoming events with conflict detection, email groups/previews, active reminders with overdue tracking, research progress, action history (~892 lines) |
+| 19 | **Token Launch** | Globe | Multi-step ERC-20/SPL token deployment wizard (~1,039 lines) |
+| 20 | **Network** | — | P2P federation peer browser |
+| 21 | **Terminal** | Dash | **Interactive shell** with real PTY (cmd.exe/bash), streaming stdout/stderr, command echo, kill/restart/clear controls |
+| 22 | **Settings** | Settings | API keys (masked input, status dots), local AI URLs, model routing, budget limits, general toggles, auto-save on blur (~1,145 lines) |
+| 23 | **Help** | Info | Keyboard shortcuts reference, getting started guide, troubleshooting |
+| 24 | **Quick Start** | — | Guided project onboarding with goal-driven AI |
 
 ### Chat Panel Features
 

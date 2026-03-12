@@ -19,5 +19,6 @@ pub mod settings;
 pub mod shield;
 pub mod skills;
 pub mod specs;
+pub mod terminal;
 pub mod token_launch;
 pub mod workflow_builder;

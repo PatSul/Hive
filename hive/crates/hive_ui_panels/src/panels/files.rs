@@ -6,9 +6,11 @@ use std::time::SystemTime;
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
-    FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile, FilesNewFolder,
-    FilesOpenEntry, FilesRefresh,
+    FilesCloseViewer, FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile,
+    FilesNewFolder, FilesOpenEntry, FilesRefresh,
 };
+
+use crate::components::code_block::render_code_block;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -68,6 +70,11 @@ pub struct FilesData {
     pub search_query: String,
     pub selected_file: Option<String>,
     pub breadcrumbs: Vec<BreadcrumbSegment>,
+    /// When set, the file viewer pane is open showing this content.
+    pub viewed_file_content: Option<String>,
+    pub viewed_file_path: Option<String>,
+    pub viewed_file_language: String,
+    pub viewed_file_size: u64,
 }
 
 impl Default for FilesData {
@@ -82,6 +89,10 @@ impl Default for FilesData {
                 search_query: String::new(),
                 selected_file: None,
                 breadcrumbs: Vec::new(),
+                viewed_file_content: None,
+                viewed_file_path: None,
+                viewed_file_language: String::new(),
+                viewed_file_size: 0,
             },
         }
     }
@@ -111,6 +122,10 @@ impl FilesData {
             search_query: String::new(),
             selected_file: None,
             breadcrumbs,
+            viewed_file_content: None,
+            viewed_file_path: None,
+            viewed_file_language: String::new(),
+            viewed_file_size: 0,
         }
     }
 
@@ -145,6 +160,74 @@ impl FilesData {
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         filtered
+    }
+
+    /// Load a file's content for the viewer pane. Returns `true` if successful.
+    pub fn open_file_viewer(&mut self, file_path: &Path) {
+        match hive_fs::FileService::read_file(file_path) {
+            Ok(content) => {
+                let ext = file_path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let lang = extension_to_language(&ext).to_string();
+                let size = std::fs::metadata(file_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                self.viewed_file_content = Some(content);
+                self.viewed_file_path = Some(file_path.to_string_lossy().to_string());
+                self.viewed_file_language = lang;
+                self.viewed_file_size = size;
+            }
+            Err(e) => {
+                // Show error in viewer
+                self.viewed_file_content = Some(format!("Error reading file: {e}"));
+                self.viewed_file_path = Some(file_path.to_string_lossy().to_string());
+                self.viewed_file_language = String::new();
+                self.viewed_file_size = 0;
+            }
+        }
+    }
+
+    /// Close the file viewer pane.
+    pub fn close_file_viewer(&mut self) {
+        self.viewed_file_content = None;
+        self.viewed_file_path = None;
+        self.viewed_file_language = String::new();
+        self.viewed_file_size = 0;
+    }
+}
+
+/// Map file extension to language name for the code block header.
+pub fn extension_to_language(ext: &str) -> &str {
+    match ext {
+        "rs" => "Rust",
+        "toml" => "TOML",
+        "ts" | "tsx" => "TypeScript",
+        "js" | "jsx" => "JavaScript",
+        "py" => "Python",
+        "rb" => "Ruby",
+        "go" => "Go",
+        "java" => "Java",
+        "c" | "h" => "C",
+        "cpp" | "cc" | "cxx" | "hpp" => "C++",
+        "cs" => "C#",
+        "swift" => "Swift",
+        "kt" | "kts" => "Kotlin",
+        "html" | "htm" => "HTML",
+        "css" => "CSS",
+        "scss" | "sass" => "SCSS",
+        "json" => "JSON",
+        "yaml" | "yml" => "YAML",
+        "xml" => "XML",
+        "sql" => "SQL",
+        "sh" | "bash" | "zsh" => "Shell",
+        "ps1" => "PowerShell",
+        "md" => "Markdown",
+        "dockerfile" | "Dockerfile" => "Dockerfile",
+        "lock" => "Lock",
+        "txt" | "log" => "Text",
+        _ => ext,
     }
 }
 
@@ -294,34 +377,152 @@ impl FilesPanel {
         let file_count = entries.len() - dir_count;
         let now = Utc::now();
 
-        div()
-            .id("files-panel")
+        let file_browser = div()
             .flex()
             .flex_col()
-            .size_full()
-            .bg(theme.bg_primary)
-            .p(theme.space_4)
+            .flex_1()
+            .rounded(theme.radius_lg)
+            .bg(theme.bg_surface)
+            .border_1()
+            .border_color(theme.border)
+            .overflow_hidden()
+            // 1. Header (title + breadcrumb)
+            .child(Self::header(data, theme))
+            // 2. Search bar
+            .child(Self::search_bar(&data.search_query, theme))
+            // 3. File tree (scrollable)
+            .child(Self::file_tree(&entries, &data.selected_file, &now, theme))
+            // 4. Action bar
+            .child(Self::action_bar(dir_count, file_count, theme));
+
+        // When a file is open, show split view: browser (35%) | viewer (65%)
+        if let Some(ref content) = data.viewed_file_content {
+            let path_display = data
+                .viewed_file_path
+                .as_deref()
+                .unwrap_or("Unknown file");
+            let lang = &data.viewed_file_language;
+            let size = data.viewed_file_size;
+
+            div()
+                .id("files-panel")
+                .flex()
+                .flex_row()
+                .size_full()
+                .bg(theme.bg_primary)
+                .p(theme.space_4)
+                .gap(theme.space_2)
+                // Left: file browser (35%)
+                .child(div().w(relative(0.35)).flex().flex_col().child(file_browser))
+                // Right: file viewer (65%)
+                .child(
+                    div()
+                        .w(relative(0.65))
+                        .flex()
+                        .flex_col()
+                        .rounded(theme.radius_lg)
+                        .bg(theme.bg_surface)
+                        .border_1()
+                        .border_color(theme.border)
+                        .overflow_hidden()
+                        .child(Self::viewer_header(path_display, lang, size, theme))
+                        .child(Self::viewer_content(content, lang, theme)),
+                )
+        } else {
+            // Normal full-width file browser
+            div()
+                .id("files-panel")
+                .flex()
+                .flex_col()
+                .size_full()
+                .bg(theme.bg_primary)
+                .p(theme.space_4)
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(1260.0))
+                        .mx_auto()
+                        .child(file_browser),
+                )
+        }
+    }
+
+    /// Header for the file viewer pane (path, size, close button).
+    fn viewer_header(
+        path: &str,
+        lang: &str,
+        size: u64,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
+        let size_str = format_size(size);
+        let lang_label = if lang.is_empty() {
+            String::new()
+        } else {
+            format!(" \u{2022} {lang}")
+        };
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .px(theme.space_3)
+            .py(theme.space_2)
+            .gap(theme.space_2)
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.bg_secondary)
+            .child(
+                Icon::new(IconName::File)
+                    .size_3p5()
+                    .text_color(theme.accent_aqua),
+            )
             .child(
                 div()
-                    .w_full()
-                    .max_w(px(1260.0))
-                    .mx_auto()
-                    .flex()
-                    .flex_col()
                     .flex_1()
-                    .rounded(theme.radius_lg)
-                    .bg(theme.bg_surface)
-                    .border_1()
-                    .border_color(theme.border)
-                    // 1. Header (title + breadcrumb)
-                    .child(Self::header(data, theme))
-                    // 2. Search bar
-                    .child(Self::search_bar(&data.search_query, theme))
-                    // 3. File tree (scrollable)
-                    .child(Self::file_tree(&entries, &data.selected_file, &now, theme))
-                    // 4. Action bar
-                    .child(Self::action_bar(dir_count, file_count, theme)),
+                    .text_size(theme.font_size_sm)
+                    .text_color(theme.text_primary)
+                    .overflow_hidden()
+                    .child(path.to_string()),
             )
+            .child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(format!("{size_str}{lang_label}")),
+            )
+            // Close button
+            .child(
+                div()
+                    .id("files-viewer-close")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(24.0))
+                    .h(px(24.0))
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_tertiary)
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                        window.dispatch_action(Box::new(FilesCloseViewer), cx);
+                    })
+                    .child(
+                        Icon::new(IconName::Close)
+                            .size_3p5()
+                            .text_color(theme.text_secondary),
+                    ),
+            )
+    }
+
+    /// Scrollable file content using the code block component.
+    fn viewer_content(content: &str, lang: &str, theme: &HiveTheme) -> impl IntoElement {
+        div()
+            .id("files-viewer-content")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_y_scroll()
+            .p(theme.space_2)
+            .child(render_code_block(content, lang, theme))
     }
 
     // ------------------------------------------------------------------
