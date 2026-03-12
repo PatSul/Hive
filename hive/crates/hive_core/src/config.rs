@@ -390,6 +390,11 @@ pub struct HiveConfig {
     pub remote_web_port: u16,
     #[serde(default)]
     pub remote_auto_start: bool,
+
+    // Prompt encoding
+    /// Context encoding format: "markdown" (default) or "toon" (token-efficient).
+    #[serde(default)]
+    pub context_format: String,
 }
 
 fn default_remote_local_port() -> u16 {
@@ -462,6 +467,7 @@ impl Default for HiveConfig {
             remote_auto_start: false,
             obsidian_vault_path: None,
             notion_api_key: None,
+            context_format: String::new(),
         }
     }
 }

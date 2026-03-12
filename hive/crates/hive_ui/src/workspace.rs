@@ -2489,7 +2489,15 @@ impl HiveWorkspace {
             // key symbols, dependencies, and recent git activity -- available
             // even before the deeper RAG index has populated.
             if cx.has_global::<AppQuickIndex>() {
-                let quick_ctx = cx.global::<AppQuickIndex>().0.to_context_string();
+                let use_toon = cx.has_global::<AppConfig>()
+                    && hive_ai::ContextFormat::from_config_str(
+                        &cx.global::<AppConfig>().0.get().context_format,
+                    ) == hive_ai::ContextFormat::Toon;
+                let quick_ctx = if use_toon {
+                    cx.global::<AppQuickIndex>().0.to_context_string_toon()
+                } else {
+                    cx.global::<AppQuickIndex>().0.to_context_string()
+                };
                 if !quick_ctx.trim().is_empty() {
                     let qi_idx = augmented
                         .iter()

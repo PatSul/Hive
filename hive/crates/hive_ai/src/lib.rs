@@ -14,6 +14,7 @@ pub mod routing;
 pub mod semantic_search;
 pub mod service;
 pub mod speculative;
+pub mod toon;
 pub mod tts;
 pub mod types;
 
@@ -38,4 +39,5 @@ pub use tts::{TtsError, TtsProvider, TtsProviderType};
 pub use knowledge_files::{KnowledgeFileScanner, KnowledgeSource, KnowledgeSourceType};
 pub use local_search::{LocalSearchConfig, LocalSearchService, SearchCategory, WebSearchResult};
 pub use quick_index::QuickIndex;
+pub use toon::ContextFormat;
 pub use types::*;

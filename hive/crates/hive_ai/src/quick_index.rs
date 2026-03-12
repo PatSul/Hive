@@ -315,6 +315,57 @@ impl QuickIndex {
         out
     }
 
+    /// Generate a context string using TOON encoding for ~30-40% token savings.
+    ///
+    /// Structured sections (file types, dependencies, symbols, git history) are
+    /// encoded as TOON tables. Prose sections remain plain text.
+    pub fn to_context_string_toon(&self) -> String {
+        let mut out = String::with_capacity(4096);
+
+        // -- Project overview (prose — no TOON benefit) --
+        out.push_str("# Project Overview\n\n");
+        out.push_str(&self.file_tree.summary);
+        out.push('\n');
+
+        if !self.file_tree.key_dirs.is_empty() {
+            out.push_str("Key directories: ");
+            out.push_str(&self.file_tree.key_dirs.join(", "));
+            out.push('\n');
+        }
+
+        // File types — TOON table
+        if !self.file_tree.by_extension.is_empty() {
+            let encoded = crate::toon::encode_file_types(&self.file_tree.by_extension);
+            if !encoded.is_empty() {
+                out.push_str(&encoded);
+                out.push('\n');
+            }
+        }
+
+        // Dependencies — TOON table
+        if !self.dependencies.is_empty() {
+            out.push_str("\n## Dependencies\n\n");
+            out.push_str(&crate::toon::encode_dependencies(&self.dependencies));
+            out.push('\n');
+        }
+
+        // Key symbols — TOON table (biggest savings)
+        if !self.key_symbols.is_empty() {
+            out.push_str("\n## Key Symbols\n\n");
+            out.push_str(&crate::toon::encode_symbols(&self.key_symbols));
+            out.push('\n');
+        }
+
+        // Recent git history — TOON table
+        if !self.recent_git.is_empty() {
+            out.push_str("\n## Recent Git History\n\n");
+            out.push_str(&crate::toon::encode_git_history(&self.recent_git));
+            out.push('\n');
+        }
+
+        out
+    }
+
     // -----------------------------------------------------------------------
     // File tree scanning
     // -----------------------------------------------------------------------

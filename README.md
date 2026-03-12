@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.19-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.20-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -50,6 +50,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - Git worktree isolation per team
 - Full Git Ops (commits, PRs, branches, gitflow, LFS)
 - Context engine (TF-IDF scoring + RAG + vector search)
+- **TOON encoding** — token-efficient prompt compression (~30-40% savings)
 - Cost tracking & budget enforcement
 - Code review & testing automation
 - **Universal Skills** — one set of TOML-based skills shared across all AI models
@@ -565,7 +566,7 @@ hive/crates/
 ├── hive_core          Config, SecurityGateway, persistence (SQLite), Kanban, channels, scheduling
 │                      18 files · 9,800+ lines
 ├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine,
-│                      RAG, embeddings (OpenAI + Ollama), LanceDB memory, background indexer
+│                      RAG, embeddings (OpenAI + Ollama), LanceDB memory, background indexer, TOON encoding
 │                      50+ files · 22,000+ lines
 ├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (19 tools),
 │                      Universal Skills (SkillLoader + SkillExecutor, TOML persistence),
@@ -853,6 +854,7 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 - **SkillExecutor** — Capability-aware execution pipeline: gates on required capabilities, enhances prompts for preferred capabilities, injects required tools, validates model tier.
 - **SkillsRegistry Refactor** — Dual-mode registry: `new()` for in-memory tests, `with_loader()` for file-backed production. Backward-compatible `dispatch()` API preserved.
 - **15 Built-in TOML Skills** — help, web-search, code-review, git-commit, generate-docs, test-gen, slack, jira, notion, db, docker, k8s, deploy, browse, index-docs.
+- **TOON Encoding** (`toon.rs`) — Token-Oriented Object Notation for ~30-40% token savings when injecting context (file types, dependencies, symbols, git history) into LLM prompts. Graceful plain-text fallback.
 
 ### v0.3.19
 
