@@ -1,0 +1,20 @@
+[skill]
+name = "index-docs"
+description = "Index project documentation for search"
+version = "1.0.0"
+category = "documentation"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = []
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP search_docs tool to search indexed project documentation. Arguments: query (search text) and optionally max_results. To build the index first, use the docs indexer in Settings. Report the results with titles, URLs, and snippets."
+
+[tools]
+required = ["search_docs"]
+optional = []

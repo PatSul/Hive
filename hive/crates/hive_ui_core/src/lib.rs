@@ -1,3 +1,4 @@
+pub mod action_bridge;
 pub mod actions;
 pub mod globals;
 pub mod sidebar;

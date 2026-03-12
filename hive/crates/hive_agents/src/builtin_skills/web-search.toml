@@ -1,0 +1,22 @@
+[skill]
+name = "web-search"
+description = "Search the web"
+version = "1.0.0"
+category = "analysis"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["structured_output"]
+min_tier = "budget"
+
+[prompt]
+template = "Search the web for information relevant to the current conversation."
+tool_use_hint = "Use the browse_url tool to fetch and extract web content."
+structured_output_hint = "Return results as a structured list with title, URL, and summary."
+
+[tools]
+required = ["browse_url"]
+optional = []

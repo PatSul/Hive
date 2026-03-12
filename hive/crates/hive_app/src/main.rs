@@ -25,7 +25,7 @@ use hive_ui::globals::{
     AppHueClient, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager, AppPersonas,
     AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
     AppSecurity, AppSemanticSearch, AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService,
-    AppTts, AppUpdater, AppWallets,
+    AppTts, AppUiActionTx, AppUpdater, AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
@@ -34,6 +34,13 @@ use hive_ui::workspace::{
 };
 
 const VERSION: &str = env!("HIVE_VERSION");
+
+/// Temporary global to pass the UI action receiver from `init_services` to
+/// `open_main_window`.  Taken (consumed) once the window's polling loop starts.
+struct UiActionRx(
+    Option<mpsc::Receiver<hive_ui::core_types::action_bridge::UiActionRequest>>,
+);
+impl Global for UiActionRx {}
 
 // ---------------------------------------------------------------------------
 // Embedded assets (icons, images)
@@ -324,15 +331,17 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppCompetenceDetector(std::sync::Arc::new(std::sync::Mutex::new(competence))));
     info!("CompetenceDetector initialized");
 
-    // Skills registry — built-in /commands.
-    cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::new()));
-    info!("SkillsRegistry initialized (built-in commands)");
-
-    // File-based skill manager — user-created skills in ~/.hive/skills/
+    // Skills registry — file-backed, loads from ~/.hive/skills/*.toml.
+    // Ensures all 15 built-in skills exist on disk on first run.
     {
         let skills_dir = HiveConfig::base_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))
             .join("skills");
+        let loader = hive_agents::skill_format::SkillLoader::new(skills_dir.clone());
+        cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::with_loader(loader)));
+        info!("SkillsRegistry initialized (file-backed, ~/.hive/skills/)");
+
+        // Legacy file-based skill manager kept for backward compat.
         cx.set_global(AppSkillManager(hive_agents::skills::SkillManager::new(skills_dir)));
         info!("SkillManager initialized (user skills)");
     }
@@ -382,6 +391,60 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         workspace_root,
     )));
     info!("McpServer initialized (built-in + integration tools)");
+
+    // UI action bridge — expose every GPUI action as an MCP tool.
+    //
+    // An mpsc channel bridges MCP handler threads → main GPUI thread.
+    // MCP handlers send `UiActionRequest`s; the main-thread polling loop
+    // (in `open_main_window`) dispatches them as GPUI actions.
+    {
+        use hive_ui::core_types::action_bridge;
+
+        let (action_tx, action_rx) = mpsc::channel::<action_bridge::UiActionRequest>();
+        let action_tx = std::sync::Arc::new(action_tx);
+
+        // Store sender as a global so MCP handlers can clone it.
+        cx.set_global(AppUiActionTx(std::sync::Arc::clone(&action_tx)));
+
+        // Store receiver as a global so `open_main_window` can take it.
+        cx.set_global(UiActionRx(Some(action_rx)));
+
+        // Register every UI action as an MCP tool on the server.
+        let mcp = &mut cx.global_mut::<AppMcpServer>().0;
+        for tool in action_bridge::ui_action_tools() {
+            let tx = std::sync::Arc::clone(&action_tx);
+            let action_name = tool
+                .name
+                .strip_prefix("ui.")
+                .unwrap_or(&tool.name)
+                .to_string();
+
+            if !action_bridge::is_action_allowed(&action_name) {
+                continue;
+            }
+
+            mcp.register(
+                tool,
+                Box::new(move |args: serde_json::Value| {
+                    let (resp_tx, resp_rx) = mpsc::channel();
+                    tx.send(action_bridge::UiActionRequest {
+                        action_name: action_name.clone(),
+                        params: args,
+                        response_tx: resp_tx,
+                    })
+                    .map_err(|_| "UI action bridge channel closed".to_string())?;
+
+                    resp_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .map_err(|e| format!("UI action dispatch timeout: {e}"))?
+                }),
+            );
+        }
+        info!(
+            "UI action bridge: {} tools registered",
+            action_bridge::ui_action_tools().len()
+        );
+    }
 
     // Spec manager — project specifications.
     cx.set_global(AppSpecs(hive_agents::SpecManager::new()));
@@ -1136,6 +1199,51 @@ fn main() {
         .detach();
 
         open_main_window(cx).expect("Failed to open window");
+
+        // UI action bridge polling loop — receives UiActionRequests from MCP
+        // tool handlers and dispatches them as GPUI actions on the main window.
+        if let Some(action_rx) = cx.global_mut::<UiActionRx>().0.take() {
+            cx.spawn(async move |app: &mut AsyncApp| {
+                loop {
+                    loop {
+                        match action_rx.try_recv() {
+                            Ok(req) => {
+                                let result = app.update(|cx| {
+                                    let action = match hive_ui::core_types::action_bridge::make_action(
+                                        &req.action_name,
+                                        req.params,
+                                    ) {
+                                        Ok(a) => a,
+                                        Err(e) => return Err(e),
+                                    };
+
+                                    // Dispatch the action on the first open window.
+                                    let windows = cx.windows();
+                                    if let Some(handle) = windows.first() {
+                                        let _ = handle.update(cx, |_, window, cx| {
+                                            window.dispatch_action(action, cx);
+                                        });
+                                        Ok(serde_json::json!({"dispatched": req.action_name}))
+                                    } else {
+                                        Err("No open window to dispatch action".to_string())
+                                    }
+                                }).unwrap_or_else(|e| Err(format!("GPUI update failed: {e}")));
+
+                                let _ = req.response_tx.send(result);
+                            }
+                            Err(mpsc::TryRecvError::Empty) => break,
+                            Err(mpsc::TryRecvError::Disconnected) => return,
+                        }
+                    }
+
+                    app.background_executor()
+                        .timer(Duration::from_millis(50))
+                        .await;
+                }
+            })
+            .detach();
+            info!("UI action bridge polling loop started");
+        }
 
         // Bring the app to the foreground and ensure macOS shows its dock icon.
         // Without this, running the binary directly (e.g. `cargo run`) may not

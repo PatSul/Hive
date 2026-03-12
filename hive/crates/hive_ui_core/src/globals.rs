@@ -282,3 +282,11 @@ impl Global for AppKnowledgeFiles {}
 /// while the deeper RAG/vector index runs in the background.
 pub struct AppQuickIndex(pub Arc<QuickIndex>);
 impl Global for AppQuickIndex {}
+
+/// Global wrapper for the UI action bridge sender.
+///
+/// MCP tool handlers clone this sender to dispatch UI actions across the
+/// channel to the main GPUI thread.  Stored as `Arc` so clones are cheap
+/// and the sender can be captured by `Send + Sync` closures.
+pub struct AppUiActionTx(pub Arc<std::sync::mpsc::Sender<crate::action_bridge::UiActionRequest>>);
+impl Global for AppUiActionTx {}

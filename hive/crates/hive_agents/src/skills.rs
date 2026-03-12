@@ -96,8 +96,17 @@ pub fn verify_integrity(instructions: &str, expected_hash: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Registry of available skills.
+///
+/// Supports two modes:
+/// - **In-memory** (`new()`): loads hardcoded builtins, no disk persistence (tests).
+/// - **File-backed** (`with_loader()`): loads from `~/.hive/skills/` TOML files,
+///   writes changes to disk, and ensures built-in skills exist on first run.
 pub struct SkillsRegistry {
     skills: HashMap<String, Skill>,
+    /// When present, mutations are persisted to disk.
+    loader: Option<crate::skill_format::SkillLoader>,
+    /// Parallel store of the rich `SkillFile` data (for executor).
+    skill_files: HashMap<String, crate::skill_format::SkillFile>,
 }
 
 impl Default for SkillsRegistry {
@@ -107,113 +116,75 @@ impl Default for SkillsRegistry {
 }
 
 impl SkillsRegistry {
+    /// Create an in-memory registry with hardcoded builtins (for tests).
     pub fn new() -> Self {
         let mut registry = Self {
             skills: HashMap::new(),
+            loader: None,
+            skill_files: HashMap::new(),
         };
-        registry.register_builtins();
+        registry.register_builtins_from_toml();
         registry
     }
 
-    fn register_builtins(&mut self) {
-        let builtins = vec![
-            (
-                "help",
-                "Get help and documentation",
-                "Display available commands, keyboard shortcuts, and feature guides.",
-            ),
-            (
-                "web-search",
-                "Search the web",
-                "Search the web for information relevant to the current conversation.",
-            ),
-            (
-                "code-review",
-                "Review code",
-                "Analyze code for bugs, security issues, and improvements.",
-            ),
-            (
-                "git-commit",
-                "Commit changes",
-                "Stage and commit changes with an AI-generated message.",
-            ),
-            (
-                "generate-docs",
-                "Generate documentation",
-                "Generate documentation for code files or functions.",
-            ),
-            (
-                "test-gen",
-                "Generate tests",
-                "Generate unit tests for the specified code.",
-            ),
-            // ----- Integration-aware skills -----
-            (
-                "slack",
-                "Send a message to Slack (or other messaging platform)",
-                "Use the MCP send_message tool to send a message. Arguments: platform (slack, discord, or teams), channel (channel name or ID), message (the message text). If no channel is specified, ask the user which channel to post to. Confirm the message was sent successfully and display the channel and timestamp.",
-            ),
-            (
-                "jira",
-                "Create or list Jira/Linear/Asana issues",
-                "Use the MCP create_issue or list_issues tools to interact with the issue tracker. For creating: call create_issue with platform (jira, linear, or asana), project, title, and optionally description and priority. For listing: call list_issues with platform, project, and optionally status (open, in_progress, done, all). Format the response as a readable summary with issue keys, titles, and statuses.",
-            ),
-            (
-                "notion",
-                "Search or create Notion/Obsidian pages",
-                "Use the MCP search_knowledge tool to search the knowledge base. Arguments: query (search text), platform (notion, obsidian, or all). Display results with page titles, URLs, and brief content previews.",
-            ),
-            (
-                "db",
-                "Query a connected database (read-only)",
-                "Use the MCP query_database tool to run a read-only SQL query, or describe_schema to see available tables. For queries: pass connection (database name) and query (SELECT-only SQL). If given natural language, translate it to SQL first and show the generated query. Format results as a Markdown table.",
-            ),
-            (
-                "docker",
-                "List/manage Docker containers",
-                "Use the MCP docker_list tool to list containers (pass all=true to include stopped), or docker_logs to fetch container logs (pass container name/ID and optional tail line count). Format output as a readable table with container ID, image, status, and ports.",
-            ),
-            (
-                "k8s",
-                "List/manage Kubernetes resources",
-                "Use the MCP k8s_pods tool to list pods in a namespace (pass namespace, defaults to 'default'). Format output clearly with pod names, statuses, restarts, and ages.",
-            ),
-            (
-                "deploy",
-                "Trigger a deployment workflow",
-                "Use the MCP deploy_trigger tool to start a deployment workflow. Arguments: environment (staging, production, or development) and optionally branch (defaults to main). Confirm the deployment parameters before triggering. Display the deployment status.",
-            ),
-            (
-                "browse",
-                "Fetch and extract web content",
-                "Use the MCP browse_url tool to retrieve and extract content from a URL. Arguments: url (the page to fetch), and optionally selector (CSS selector to extract specific content). Return the page title, a clean text extraction of the main content, and any relevant links. Summarize long pages concisely.",
-            ),
-            (
-                "index-docs",
-                "Index project documentation for search",
-                "Use the MCP search_docs tool to search indexed project documentation. Arguments: query (search text) and optionally max_results. To build the index first, use the docs indexer in Settings. Report the results with titles, URLs, and snippets.",
-            ),
-        ];
+    /// Create a file-backed registry. Ensures built-in skills exist on disk,
+    /// then loads all `.toml` files from the directory.
+    pub fn with_loader(loader: crate::skill_format::SkillLoader) -> Self {
+        let builtins = crate::skill_format::builtin_skills();
+        if let Err(e) = loader.ensure_builtins(&builtins) {
+            tracing::warn!("Failed to write built-in skills: {e}");
+        }
 
-        for (name, desc, instructions) in builtins {
-            let hash = compute_integrity_hash(instructions);
-            self.skills.insert(
-                name.to_string(),
-                Skill {
-                    name: name.to_string(),
-                    description: desc.to_string(),
-                    instructions: instructions.to_string(),
-                    source: SkillSource::BuiltIn,
-                    enabled: true,
-                    integrity_hash: hash,
-                },
-            );
+        let mut registry = Self {
+            skills: HashMap::new(),
+            loader: Some(loader),
+            skill_files: HashMap::new(),
+        };
+        registry.refresh_from_disk();
+        registry
+    }
+
+    /// Re-scan the skills directory and reload all skills.
+    pub fn refresh(&mut self) {
+        self.refresh_from_disk();
+    }
+
+    fn refresh_from_disk(&mut self) {
+        if let Some(loader) = &self.loader {
+            match loader.load_all() {
+                Ok(files) => {
+                    self.skills.clear();
+                    self.skill_files.clear();
+                    for sf in files {
+                        let skill = skill_from_file(&sf);
+                        self.skills.insert(skill.name.clone(), skill);
+                        self.skill_files.insert(sf.skill.name.clone(), sf);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load skills from disk: {e}");
+                }
+            }
+        }
+    }
+
+    /// Load builtins from embedded TOML files (for in-memory mode).
+    fn register_builtins_from_toml(&mut self) {
+        for sf in crate::skill_format::builtin_skills() {
+            let skill = skill_from_file(&sf);
+            self.skills.insert(skill.name.clone(), skill);
+            self.skill_files.insert(sf.skill.name.clone(), sf);
         }
     }
 
     /// Get a skill by name (without the leading /).
     pub fn get(&self, name: &str) -> Option<&Skill> {
         self.skills.get(name)
+    }
+
+    /// Get the rich `SkillFile` for a skill (for the executor).
+    pub fn get_skill_file(&self, name: &str) -> Option<&crate::skill_format::SkillFile> {
+        self.skill_files.get(name)
     }
 
     /// List all skills.
@@ -246,22 +217,32 @@ impl SkillsRegistry {
         }
 
         let hash = compute_integrity_hash(&instructions);
-        self.skills.insert(
-            name.clone(),
-            Skill {
-                name,
-                description,
-                instructions,
-                source,
-                enabled: true,
-                integrity_hash: hash,
-            },
-        );
+        let skill = Skill {
+            name: name.clone(),
+            description: description.clone(),
+            instructions: instructions.clone(),
+            source,
+            enabled: true,
+            integrity_hash: hash,
+        };
+
+        // Persist to disk if file-backed
+        if let Some(loader) = &self.loader {
+            let sf = skill_file_from_parts(&name, &description, &instructions, source);
+            loader.save(&sf)?;
+            self.skill_files.insert(name.clone(), sf);
+        }
+
+        self.skills.insert(name, skill);
         Ok(())
     }
 
     /// Remove a skill.
     pub fn uninstall(&mut self, name: &str) -> bool {
+        if let Some(loader) = &self.loader {
+            let _ = loader.delete(name);
+        }
+        self.skill_files.remove(name);
         self.skills.remove(name).is_some()
     }
 
@@ -269,7 +250,17 @@ impl SkillsRegistry {
     pub fn toggle(&mut self, name: &str) -> Option<bool> {
         if let Some(skill) = self.skills.get_mut(name) {
             skill.enabled = !skill.enabled;
-            Some(skill.enabled)
+            let new_state = skill.enabled;
+
+            // Persist toggle to disk
+            if let Some(loader) = &self.loader {
+                let _ = loader.toggle(name);
+            }
+            if let Some(sf) = self.skill_files.get_mut(name) {
+                sf.skill.enabled = new_state;
+            }
+
+            Some(new_state)
         } else {
             None
         }
@@ -292,6 +283,62 @@ impl SkillsRegistry {
             None => bail!("Unknown skill '/{name}'. Use /help to see available commands."),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Conversion helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a `SkillFile` to the legacy `Skill` struct.
+fn skill_from_file(sf: &crate::skill_format::SkillFile) -> Skill {
+    let source = match sf.skill.source {
+        crate::skill_format::SkillFileSource::Builtin => SkillSource::BuiltIn,
+        crate::skill_format::SkillFileSource::Community => SkillSource::Community,
+        crate::skill_format::SkillFileSource::Custom => SkillSource::Custom,
+    };
+    Skill {
+        name: sf.skill.name.clone(),
+        description: sf.skill.description.clone(),
+        instructions: sf.prompt.template.clone(),
+        source,
+        enabled: sf.skill.enabled,
+        integrity_hash: sf.metadata.integrity_hash.clone(),
+    }
+}
+
+/// Create a `SkillFile` from flat parts (for `install()`).
+fn skill_file_from_parts(
+    name: &str,
+    description: &str,
+    instructions: &str,
+    source: SkillSource,
+) -> crate::skill_format::SkillFile {
+    use crate::skill_format::*;
+    let file_source = match source {
+        SkillSource::BuiltIn => SkillFileSource::Builtin,
+        SkillSource::Community => SkillFileSource::Community,
+        SkillSource::Custom => SkillFileSource::Custom,
+    };
+    SkillFile {
+        skill: SkillMeta {
+            name: name.into(),
+            description: description.into(),
+            version: "1.0.0".into(),
+            category: crate::skill_marketplace::SkillCategory::Custom,
+            author: "user".into(),
+            source: file_source,
+            enabled: true,
+        },
+        requirements: SkillRequirements::default(),
+        prompt: SkillPrompt {
+            template: instructions.into(),
+            tool_use_hint: None,
+            structured_output_hint: None,
+        },
+        tools: SkillTools::default(),
+        metadata: SkillMetadata::default(),
+    }
+    .with_computed_hash()
 }
 
 // ---------------------------------------------------------------------------

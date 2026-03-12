@@ -1,0 +1,21 @@
+[skill]
+name = "k8s"
+description = "List/manage Kubernetes resources"
+version = "1.0.0"
+category = "custom"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["structured_output"]
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP k8s_pods tool to list pods in a namespace (pass namespace, defaults to 'default'). Format output clearly with pod names, statuses, restarts, and ages."
+structured_output_hint = "Return pods as a JSON array with name, status, restarts, and age fields."
+
+[tools]
+required = ["k8s_pods"]
+optional = []

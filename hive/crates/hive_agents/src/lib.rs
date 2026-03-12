@@ -18,6 +18,8 @@ pub mod plugin_manager;
 pub mod plugin_types;
 pub mod queen;
 pub mod skill_authoring;
+pub mod skill_executor;
+pub mod skill_format;
 pub mod skill_marketplace;
 pub mod skills;
 pub mod specs;
@@ -54,6 +56,11 @@ pub use knowledge_acquisition::{
 pub use skill_authoring::{
     DraftSkill, SkillAuthoringConfig, SkillAuthoringPipeline, SkillAuthoringRequest,
     SkillAuthoringResult, SkillResultSource, SkillSearchResult,
+};
+pub use skill_executor::SkillExecutor;
+pub use skill_format::{
+    SkillFile, SkillFileSource, SkillLoader, SkillMeta, SkillMetadata, SkillPrompt,
+    SkillRequirements, SkillTools, builtin_skills,
 };
 pub use skill_marketplace::{
     AvailableSkill, InstalledSkill, SecurityIssue, SecurityIssueType, Severity, SkillCategory,

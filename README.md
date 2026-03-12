@@ -52,8 +52,8 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - Context engine (TF-IDF scoring + RAG + vector search)
 - Cost tracking & budget enforcement
 - Code review & testing automation
+- **Universal Skills** — one set of TOML-based skills shared across all AI models
 - Skills Marketplace (15 built-in + user-created skills)
-- **File-based SkillManager** with YAML frontmatter
 - Autonomous skill acquisition (self-teaching)
 - Automation workflows (cron, event, webhook triggers)
 - Docker & Kubernetes orchestration
@@ -289,21 +289,36 @@ When no existing skill is found, the **SkillAuthoringPipeline** creates one:
 
 All auto-generated skills are logged to CollectiveMemory for auditability. The pipeline fails gracefully at every step — a failed scan or test never installs a broken skill.
 
-### File-Based User Skills
+### Universal Skills (Cross-Model)
 
-Users can create custom skills stored as markdown files with YAML frontmatter in `~/.hive/skills/`:
+Skills are stored as TOML files in `~/.hive/skills/` with **capability tags** — a single skill definition works across all 27 AI providers. The runtime adapts execution per model:
 
-```markdown
----
-name: my-review-skill
-description: Reviews code for common bugs
-enabled: true
----
-You are a code review assistant. Check for null pointer
-dereferences, off-by-one errors, and resource leaks.
+```toml
+[skill]
+name = "code-review"
+description = "Review code for bugs, style, and security"
+category = "code_generation"
+author = "hivecode"
+source = "builtin"
+
+[requirements]
+capabilities = ["tool_use"]           # model MUST have these
+preferred = ["extended_thinking"]      # enhances prompt if available
+min_tier = "mid"
+
+[prompt]
+template = "Analyze code for bugs, security issues, and improvements."
+tool_use_hint = "Use read_file to examine the code."
+structured_output_hint = "Return findings as JSON with severity, file, line."
+
+[tools]
+required = ["read_file"]
+optional = ["search_files"]
 ```
 
-The **SkillManager** provides CRUD operations (create, update, delete, toggle) with injection scanning on every write. User skills are dispatched via `/command` alongside built-in skills.
+The **SkillExecutor** validates that the active model satisfies the skill's requirements, then enhances the prompt based on available capabilities (e.g., prepends thinking instructions for models with `ExtendedThinking`, requests JSON for models with `StructuredOutput`). Incompatible models get a clear error message suggesting alternatives.
+
+15 built-in skills ship as embedded TOML and are written to `~/.hive/skills/` on first run. Users can edit, disable, or create new skills — all changes persist to disk with SHA-256 integrity verification and injection scanning.
 
 ---
 
@@ -387,8 +402,8 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 | Feature | Details |
 |---|---|
 | **Automation Workflows** | Multi-step workflows with triggers (manual, cron schedule, event, webhook) and 6 action types (run command, send message, call API, create task, send notification, execute skill). YAML-based definitions in `~/.hive/workflows/`. Visual drag-and-drop workflow builder in the UI. |
+| **Universal Skills** | Cross-model skill system with TOML-based definitions in `~/.hive/skills/`. Capability tags declare requirements (`tool_use`, `extended_thinking`, etc.) and the `SkillExecutor` adapts prompts per model. One skill definition works across all 27 providers. |
 | **Skills Marketplace** | Browse, install, remove, and toggle skills from 5 sources (ClawdHub, Anthropic, OpenAI, Google, Community). Create custom skills. Add remote skill sources. 15 built-in skills including 9 integration skills (/slack, /jira, /notion, /db, /docker, /k8s, /deploy, /browse, /index-docs). Security scanning on install. |
-| **User Skills** | File-based custom skills in `~/.hive/skills/` with YAML frontmatter. Full CRUD via SkillManager with injection scanning. Dispatched via `/command` in chat. |
 | **Autonomous Skill Creation** | When Hive encounters an unfamiliar domain, it searches existing skill sources first, then researches documentation and authors a new skill if nothing sufficient exists. See [Autonomous Skill Acquisition](#autonomous-skill-acquisition). |
 | **Personas** | Named agent personalities with custom system prompts, prompt overrides per task type, and configurable model preferences. |
 | **Auto-Commit** | Watches for staged changes and generates AI-powered commit messages. |
@@ -529,8 +544,7 @@ All state persists between sessions. Nothing is lost on restart.
 | **Session journal** | JSONL | `~/.hive/session_journal.jsonl` (remote daemon events) |
 | **Knowledge cache** | HTML/text files | `~/.hive/knowledge/` |
 | **Workflows** | YAML definitions | `~/.hive/workflows/` |
-| **Installed skills** | Managed by Skills Marketplace | `~/.hive/skills/` |
-| **User skills** | Markdown + YAML frontmatter | `~/.hive/skills/{name}.md` |
+| **Skills** | TOML with capability tags | `~/.hive/skills/{name}.toml` (15 built-in + user-created) |
 
 On startup, Hive automatically backfills any JSON-only conversations into SQLite and builds FTS5 search indexes. Path traversal protection on all file operations. SQLite databases use WAL mode with `NORMAL` synchronous and foreign key enforcement.
 
@@ -553,9 +567,9 @@ hive/crates/
 ├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine,
 │                      RAG, embeddings (OpenAI + Ollama), LanceDB memory, background indexer
 │                      50+ files · 22,000+ lines
-├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (19 tools), skills,
-│                      SkillManager (file-based CRUD), personas, knowledge acquisition,
-│                      competence detection, skill authoring
+├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (19 tools),
+│                      Universal Skills (SkillLoader + SkillExecutor, TOML persistence),
+│                      personas, knowledge acquisition, competence detection, skill authoring
 │                      28+ files · 23,000+ lines
 ├── hive_shield        PII detection, secrets scanning, vulnerability assessment, access control
 │                      6 files · 2,005 lines
@@ -634,7 +648,7 @@ All panels are wired to live backend data. No mock data in the production path. 
 | Logs | Application logs viewer with level filtering | Tracing subscriber |
 | Costs | AI cost tracking and budget with CSV export | `CostTracker` |
 | Git Ops | Full git workflow: staging, commits, push, PRs, branches, gitflow, LFS | `git2` + CLI |
-| Skills | Skill marketplace: browse, install, remove, toggle, create (5 sources + user skills) | `SkillMarketplace` + `SkillManager` |
+| Skills | Universal skill marketplace: browse, install, remove, toggle, create — cross-model TOML skills | `SkillsRegistry` + `SkillExecutor` |
 | Routing | Model routing configuration | `ModelRouter` |
 | Models | Model registry browser | Provider catalogs |
 | Learning | Self-improvement dashboard with metrics, preferences, insights | `LearningService` |
@@ -829,6 +843,16 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.20
+
+**Universal Skills — Cross-Model Skill Sharing**
+
+- **Universal Skills System** — One set of TOML-based skills shared across all 27 AI providers. Each skill declares capability requirements (`tool_use`, `extended_thinking`, `structured_output`, etc.) and the `SkillExecutor` adapts prompts per model at runtime.
+- **SkillLoader** — File-backed skill persistence in `~/.hive/skills/*.toml`. Loads, saves, deletes, toggles skills with SHA-256 integrity verification. 15 built-in skills embedded and written on first run.
+- **SkillExecutor** — Capability-aware execution pipeline: gates on required capabilities, enhances prompts for preferred capabilities, injects required tools, validates model tier.
+- **SkillsRegistry Refactor** — Dual-mode registry: `new()` for in-memory tests, `with_loader()` for file-backed production. Backward-compatible `dispatch()` API preserved.
+- **15 Built-in TOML Skills** — help, web-search, code-review, git-commit, generate-docs, test-gen, slack, jira, notion, db, docker, k8s, deploy, browse, index-docs.
 
 ### v0.3.19
 

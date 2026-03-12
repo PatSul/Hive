@@ -19,4 +19,5 @@ hive_a2a = { path = "../hive_a2a" }
 
 gpui.workspace = true
 gpui-component.workspace = true
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

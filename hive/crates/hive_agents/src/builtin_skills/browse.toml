@@ -1,0 +1,20 @@
+[skill]
+name = "browse"
+description = "Fetch and extract web content"
+version = "1.0.0"
+category = "analysis"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["long_context"]
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP browse_url tool to retrieve and extract content from a URL. Arguments: url (the page to fetch), and optionally selector (CSS selector to extract specific content). Return the page title, a clean text extraction of the main content, and any relevant links. Summarize long pages concisely."
+
+[tools]
+required = ["browse_url"]
+optional = []

@@ -1,0 +1,21 @@
+[skill]
+name = "db"
+description = "Query a connected database (read-only)"
+version = "1.0.0"
+category = "analysis"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["structured_output"]
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP query_database tool to run a read-only SQL query, or describe_schema to see available tables. For queries: pass connection (database name) and query (SELECT-only SQL). If given natural language, translate it to SQL first and show the generated query. Format results as a Markdown table."
+structured_output_hint = "Return query results as a JSON array of row objects."
+
+[tools]
+required = ["query_database"]
+optional = ["describe_schema"]

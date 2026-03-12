@@ -143,9 +143,10 @@ pub struct ModelInfo {
     pub release_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelTier {
+    #[default]
     Free,
     Budget,
     Mid,

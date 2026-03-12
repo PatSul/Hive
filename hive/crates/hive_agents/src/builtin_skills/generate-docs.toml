@@ -1,0 +1,21 @@
+[skill]
+name = "generate-docs"
+description = "Generate documentation for code files or functions"
+version = "1.0.0"
+category = "documentation"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["long_context"]
+min_tier = "budget"
+
+[prompt]
+template = "Generate documentation for code files or functions."
+tool_use_hint = "Use read_file to examine the code before generating documentation."
+
+[tools]
+required = ["read_file"]
+optional = ["list_directory"]

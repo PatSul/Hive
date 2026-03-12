@@ -1,0 +1,21 @@
+[skill]
+name = "docker"
+description = "List/manage Docker containers"
+version = "1.0.0"
+category = "custom"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["structured_output"]
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP docker_list tool to list containers (pass all=true to include stopped), or docker_logs to fetch container logs (pass container name/ID and optional tail line count). Format output as a readable table with container ID, image, status, and ports."
+structured_output_hint = "Return containers as a JSON array with id, image, status, and ports fields."
+
+[tools]
+required = ["docker_list"]
+optional = ["docker_logs"]

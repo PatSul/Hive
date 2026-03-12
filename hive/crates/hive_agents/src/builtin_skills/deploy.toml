@@ -1,0 +1,20 @@
+[skill]
+name = "deploy"
+description = "Trigger a deployment workflow"
+version = "1.0.0"
+category = "custom"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = []
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP deploy_trigger tool to start a deployment workflow. Arguments: environment (staging, production, or development) and optionally branch (defaults to main). Confirm the deployment parameters before triggering. Display the deployment status."
+
+[tools]
+required = ["deploy_trigger"]
+optional = []

@@ -1,0 +1,20 @@
+[skill]
+name = "notion"
+description = "Search or create Notion/Obsidian pages"
+version = "1.0.0"
+category = "documentation"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = []
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP search_knowledge tool to search the knowledge base. Arguments: query (search text), platform (notion, obsidian, or all). Display results with page titles, URLs, and brief content previews."
+
+[tools]
+required = ["search_knowledge"]
+optional = []

@@ -1,0 +1,20 @@
+[skill]
+name = "help"
+description = "Get help and documentation"
+version = "1.0.0"
+category = "custom"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = []
+preferred = []
+min_tier = "free"
+
+[prompt]
+template = "Display available commands, keyboard shortcuts, and feature guides."
+
+[tools]
+required = []
+optional = []

@@ -1,0 +1,21 @@
+[skill]
+name = "jira"
+description = "Create or list Jira/Linear/Asana issues"
+version = "1.0.0"
+category = "communication"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = ["structured_output"]
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP create_issue or list_issues tools to interact with the issue tracker. For creating: call create_issue with platform (jira, linear, or asana), project, title, and optionally description and priority. For listing: call list_issues with platform, project, and optionally status (open, in_progress, done, all). Format the response as a readable summary with issue keys, titles, and statuses."
+structured_output_hint = "Return issues as a JSON array with key, title, status, and assignee fields."
+
+[tools]
+required = ["create_issue", "list_issues"]
+optional = []

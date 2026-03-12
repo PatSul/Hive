@@ -1,0 +1,20 @@
+[skill]
+name = "slack"
+description = "Send a message to Slack (or other messaging platform)"
+version = "1.0.0"
+category = "communication"
+author = "hivecode"
+source = "builtin"
+enabled = true
+
+[requirements]
+capabilities = ["tool_use"]
+preferred = []
+min_tier = "budget"
+
+[prompt]
+template = "Use the MCP send_message tool to send a message. Arguments: platform (slack, discord, or teams), channel (channel name or ID), message (the message text). If no channel is specified, ask the user which channel to post to. Confirm the message was sent successfully and display the channel and timestamp."
+
+[tools]
+required = ["send_message"]
+optional = []

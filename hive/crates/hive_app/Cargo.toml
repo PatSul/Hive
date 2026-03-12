@@ -25,6 +25,7 @@ hive_a2a = { path = "../hive_a2a" }
 hive_remote = { path = "../hive_remote" }
 
 gpui.workspace = true
+serde_json = { workspace = true }
 reqwest.workspace = true
 axum = { version = "0.8", default-features = false }
 tokio.workspace = true
