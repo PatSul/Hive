@@ -35,11 +35,13 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: hive
             archive: hive-linux-x64.tar.gz
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact: hive
-            archive: hive-linux-arm64.tar.gz
-            use_cross: true
+          # Linux ARM64 disabled — requires custom Docker image for cross-compile
+          # with GPUI dependencies. Tracked for future re-enablement.
+          # - os: ubuntu-latest
+          #   target: aarch64-unknown-linux-gnu
+          #   artifact: hive
+          #   archive: hive-linux-arm64.tar.gz
+          #   use_cross: true
 
     runs-on: ${{ matrix.os }}
 
@@ -76,62 +78,14 @@ jobs:
             libxdo-dev \
             libstdc++-12-dev
 
-      - name: Install ARM64 cross-compilation dependencies
-        if: matrix.use_cross == true
-        run: |
-          sudo dpkg --add-architecture arm64
-          # Restrict existing sources to amd64 only
-          # Handle DEB822 format (.sources files, Ubuntu 24.04+)
-          for f in /etc/apt/sources.list.d/*.sources; do
-            [ -f "$f" ] && sudo sed -i '/^Types:/a Architectures: amd64' "$f"
-          done
-          # Handle traditional format (.list files)
-          sudo sed -i 's/^deb \([^[]\)/deb [arch=amd64] \1/' /etc/apt/sources.list 2>/dev/null || true
-          for f in /etc/apt/sources.list.d/*.list; do
-            [ -f "$f" ] && sudo sed -i 's/^deb \([^[]\)/deb [arch=amd64] \1/' "$f"
-          done
-          # Add ports.ubuntu.com for arm64 (includes security + backports)
-          CODENAME=$(lsb_release -cs)
-          cat <<EOF | sudo tee /etc/apt/sources.list.d/arm64-ports.list
-          deb [arch=arm64] http://ports.ubuntu.com/ ${CODENAME} main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ ${CODENAME}-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ ${CODENAME}-security main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ ${CODENAME}-backports main restricted universe multiverse
-          EOF
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            pkg-config \
-            libssl-dev:arm64 \
-            libvulkan-dev:arm64 \
-            libwayland-dev:arm64 \
-            libxkbcommon-dev:arm64 \
-            libxkbcommon-x11-dev:arm64 \
-            libxcb-shape0-dev:arm64 \
-            libxcb-xfixes0-dev:arm64 \
-            libglib2.0-dev:arm64 \
-            libgtk-3-dev:arm64 \
-            libxdo-dev:arm64
+      # ARM64 cross-compilation steps removed — disabled in matrix above
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: hive
 
-      - name: Build release (ARM64 cross-compile)
-        if: matrix.use_cross == true
-        working-directory: hive
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
-          PKG_CONFIG_ALLOW_CROSS: 1
-        run: cargo build --release --target ${{ matrix.target }}
-
       - name: Build release
-        if: matrix.use_cross != true
         working-directory: hive
         run: cargo build --release --target ${{ matrix.target }}
 
@@ -268,7 +222,6 @@ jobs:
             hive-macos-arm64.dmg
             hive-macos-arm64.tar.gz
             hive-linux-x64.tar.gz
-            hive-linux-arm64.tar.gz
 
   update-homebrew:
     needs: release
