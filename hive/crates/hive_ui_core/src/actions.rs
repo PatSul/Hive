@@ -33,6 +33,7 @@ actions!(
         SwitchToTerminal,
         SwitchToHelp,
         OpenWorkspaceDirectory,
+        ToggleProjectDropdown,
         // Files panel
         FilesNavigateBack,
         FilesRefresh,
@@ -509,4 +510,29 @@ pub struct PluginToggleExpand {
 pub struct PluginToggleSkill {
     pub plugin_id: String,
     pub skill_name: String,
+}
+
+// ---------------------------------------------------------------------------
+// Project quick-switcher actions
+// ---------------------------------------------------------------------------
+
+/// Switch to a workspace by path.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct SwitchToWorkspace {
+    pub path: String,
+}
+
+/// Toggle pin/unpin state for a workspace.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct TogglePinWorkspace {
+    pub path: String,
+}
+
+/// Remove a workspace from the recent list.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct RemoveRecentWorkspace {
+    pub path: String,
 }

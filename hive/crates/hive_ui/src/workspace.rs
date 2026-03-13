@@ -44,6 +44,8 @@ pub use hive_ui_core::{
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
     SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToTerminal, SwitchToHelp,
     OpenWorkspaceDirectory,
+    ToggleProjectDropdown,
+    SwitchToWorkspace, TogglePinWorkspace, RemoveRecentWorkspace,
     FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
     FilesCloseViewer, FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
     HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
@@ -1260,6 +1262,25 @@ impl HiveWorkspace {
 
             self.monitor_data.providers = providers;
         }
+
+        // -- Background tasks from active agent runs ----------------------------
+        self.monitor_data.background_tasks = self
+            .agents_data
+            .active_runs
+            .iter()
+            .filter(|r| r.is_active() && r.has_task_detail())
+            .map(|r| {
+                use hive_ui_panels::components::task_tree::TaskTreeState;
+                TaskTreeState {
+                    title: r.spec_title.clone(),
+                    plan_id: r.id.clone(),
+                    tasks: r.tasks.clone(),
+                    collapsed: false,
+                    total_cost: r.cost,
+                    elapsed_ms: 0,
+                }
+            })
+            .collect();
 
         // -- Uptime (seconds since process start) -----------------------------
         if let Ok(output) = std::process::Command::new("ps")
@@ -3363,6 +3384,9 @@ impl HiveWorkspace {
             }
             Panel::Kanban => {
                 self.refresh_kanban_data();
+            }
+            Panel::Terminal => {
+                self.ensure_terminal_shell(cx);
             }
             _ => {}
         }
@@ -10452,6 +10476,11 @@ impl HiveWorkspace {
                             .flex_row()
                             .items_center()
                             .gap(theme.space_2)
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                cx.stop_propagation();
+                                window.dispatch_action(Box::new(OpenWorkspaceDirectory), cx);
+                            })
                             .child(
                                 div()
                                     .w(px(26.0))
