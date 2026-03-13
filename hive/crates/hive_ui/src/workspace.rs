@@ -286,6 +286,8 @@ pub struct HiveWorkspace {
     discovery_done_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
     /// Recently used workspace roots, persisted to session and shown in the titlebar.
     recent_workspace_roots: Vec<PathBuf>,
+    pinned_workspace_roots: Vec<PathBuf>,
+    show_project_dropdown: bool,
     /// Last observed window size (width, height) in logical pixels.
     /// Updated on each render frame so `save_session` can persist it without
     /// needing a `&Window` reference.
@@ -296,6 +298,7 @@ pub struct HiveWorkspace {
 }
 
 const MAX_RECENT_WORKSPACES: usize = 8;
+const MAX_PINNED_WORKSPACES: usize = 20;
 
 impl HiveWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -400,6 +403,7 @@ impl HiveWorkspace {
 
         let project_root = Self::resolve_project_root_from_session(&session);
         let recent_workspace_roots = Self::load_recent_workspace_roots(&session, &project_root);
+        let pinned_workspace_roots = Self::load_pinned_workspace_roots(&session);
         let project_name = Self::project_name_from_path(&project_root);
         let files_data = FilesData::from_path(&project_root);
         status_bar.active_project = format!(
@@ -764,6 +768,8 @@ impl HiveWorkspace {
             sidebar,
             status_bar,
             recent_workspace_roots,
+            pinned_workspace_roots,
+            show_project_dropdown: false,
             current_project_root: project_root,
             current_project_name: project_name,
             chat_input,
@@ -891,6 +897,18 @@ impl HiveWorkspace {
 
         recents.truncate(MAX_RECENT_WORKSPACES);
         recents
+    }
+
+    fn load_pinned_workspace_roots(session: &SessionState) -> Vec<PathBuf> {
+        session
+            .pinned_workspaces
+            .iter()
+            .filter_map(|p| {
+                let path = PathBuf::from(p);
+                if path.exists() { Some(path) } else { None }
+            })
+            .take(MAX_PINNED_WORKSPACES)
+            .collect()
     }
 
     fn record_recent_workspace(&mut self, workspace_root: &Path, cx: &mut Context<Self>) {
@@ -2287,6 +2305,11 @@ impl HiveWorkspace {
                 .iter()
                 .map(|path| path.to_string_lossy().to_string())
                 .collect(),
+            pinned_workspaces: self
+                .pinned_workspace_roots
+                .iter()
+                .map(|path| path.to_string_lossy().to_string())
+                .collect(),
             open_files: Vec::new(),
             chat_draft: None,
         };
@@ -3459,6 +3482,80 @@ impl HiveWorkspace {
             }
         })
         .detach();
+    }
+
+    fn handle_toggle_project_dropdown(
+        &mut self,
+        _action: &ToggleProjectDropdown,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_project_dropdown = !self.show_project_dropdown;
+        cx.notify();
+    }
+
+    fn handle_switch_to_workspace_action(
+        &mut self,
+        action: &SwitchToWorkspace,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_project_dropdown = false;
+        let path = PathBuf::from(&action.path);
+        if !path.exists() {
+            // Remove stale path from both lists
+            self.recent_workspace_roots.retain(|p| p != &path);
+            self.pinned_workspace_roots.retain(|p| p != &path);
+            self.session_dirty = true;
+            self.save_session(cx);
+            if cx.has_global::<AppNotifications>() {
+                cx.global_mut::<AppNotifications>().0.push(
+                    AppNotification::new(
+                        NotificationType::Warning,
+                        "Project folder not found",
+                    ),
+                );
+            }
+            cx.notify();
+            return;
+        }
+        self.switch_to_workspace(path, cx);
+    }
+
+    fn handle_toggle_pin_workspace(
+        &mut self,
+        action: &TogglePinWorkspace,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = PathBuf::from(&action.path);
+        if let Some(idx) = self.pinned_workspace_roots.iter().position(|p| p == &path) {
+            self.pinned_workspace_roots.remove(idx);
+        } else {
+            self.pinned_workspace_roots.push(path);
+            self.pinned_workspace_roots.truncate(MAX_PINNED_WORKSPACES);
+        }
+        self.session_dirty = true;
+        self.save_session(cx);
+        cx.notify();
+    }
+
+    fn handle_remove_recent_workspace(
+        &mut self,
+        action: &RemoveRecentWorkspace,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = PathBuf::from(&action.path);
+        // No-op for active workspace
+        if path == self.current_project_root {
+            return;
+        }
+        self.recent_workspace_roots.retain(|p| p != &path);
+        self.pinned_workspace_roots.retain(|p| p != &path);
+        self.session_dirty = true;
+        self.save_session(cx);
+        cx.notify();
     }
 
     fn handle_switch_to_kanban(
@@ -10296,6 +10393,10 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_terminal))
             .on_action(cx.listener(Self::handle_network_refresh))
             .on_action(cx.listener(Self::handle_open_workspace_directory))
+            .on_action(cx.listener(Self::handle_toggle_project_dropdown))
+            .on_action(cx.listener(Self::handle_switch_to_workspace_action))
+            .on_action(cx.listener(Self::handle_toggle_pin_workspace))
+            .on_action(cx.listener(Self::handle_remove_recent_workspace))
             // -- Panel action handlers -----------------------------------
             // Files
             .on_action(cx.listener(Self::handle_files_navigate_back))
