@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.20-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.23-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -844,6 +844,20 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.23
+
+**CI Hardening for LanceDB + Windows MSVC**
+
+- **Windows MSVC Linker Fixes** — Added `codegen-units=1` and removed thin LTO to resolve lance/arrow linker errors on Windows MSVC builds.
+- **Release Matrix Cleanup** — Disabled Linux ARM64 cross-compile (unstable), fixed DEB822 format for ARM64 sources, simplified CI matrix.
+
+### v0.3.21
+
+**TOON Encoding + ARM64 Build Fixes**
+
+- **TOON Encoding** — Token-Oriented Object Notation for ~30-40% token savings when injecting structured context (file types, dependencies, symbols, git history) into LLM prompts. Graceful plain-text fallback.
+- **ARM64 Release Build** — Fixed cross-compilation for ARM64 Linux targets.
 
 ### v0.3.20
 

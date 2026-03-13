@@ -54,4 +54,5 @@ AGENT_BOARD.md.lock
 .hive/
 hive/target_nolock/
 hive/target_check/
+hive/target-check/
 .worktrees/
