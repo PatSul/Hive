@@ -3,7 +3,7 @@ use gpui_component::{Icon, IconName, Sizable as _};
 use std::path::Path;
 
 use hive_ui_core::{
-    HiveTheme, OpenWorkspaceDirectory, SwitchToFiles,
+    HiveTheme, OpenWorkspaceDirectory, ToggleProjectDropdown,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -131,7 +131,8 @@ fn workspace_chip(theme: &HiveTheme, current_workspace_root: &Path) -> impl Into
             .gap(theme.space_1)
             .cursor_pointer()
             .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                window.dispatch_action(Box::new(SwitchToFiles), cx);
+                cx.stop_propagation();
+                window.dispatch_action(Box::new(ToggleProjectDropdown), cx);
             })
             .child(
                 div()
@@ -145,6 +146,9 @@ fn workspace_chip(theme: &HiveTheme, current_workspace_root: &Path) -> impl Into
                     .text_size(theme.font_size_xs)
                     .truncate()
                     .child(format!("Project Space: {current_label}")),
+            )
+            .child(
+                Icon::new(IconName::ChevronDown).custom_size(px(10.0))
             ),
     )
     .child(
