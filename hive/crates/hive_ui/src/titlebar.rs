@@ -148,7 +148,7 @@ fn workspace_chip(theme: &HiveTheme, current_workspace_root: &Path) -> impl Into
                     .child(format!("Project Space: {current_label}")),
             )
             .child(
-                Icon::new(IconName::ChevronDown).custom_size(px(10.0))
+                Icon::new(IconName::ChevronDown).with_size(px(10.0))
             ),
     )
     .child(

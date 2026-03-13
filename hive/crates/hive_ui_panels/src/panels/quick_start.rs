@@ -92,6 +92,7 @@ impl QuickStartPanel {
             .size_full()
             .overflow_y_scroll()
             .p(theme.space_4)
+            .pb(px(48.0))
             .gap(theme.space_4)
             .child(render_hero(data, theme))
             .child(render_setup_section(data, theme))
@@ -421,7 +422,7 @@ fn render_template_card(
         .gap(theme.space_2)
         .min_w(px(220.0))
         .max_w(px(320.0))
-        .flex_1()
+        .flex_grow()
         .p(theme.space_4)
         .rounded(theme.radius_md)
         .bg(if selected {
@@ -494,7 +495,7 @@ fn render_next_step_card(step: &QuickStartNextStepDisplay, theme: &HiveTheme) ->
     card(theme)
         .min_w(px(220.0))
         .max_w(px(320.0))
-        .flex_1()
+        .flex_grow()
         .child(
             div()
                 .text_size(theme.font_size_base)

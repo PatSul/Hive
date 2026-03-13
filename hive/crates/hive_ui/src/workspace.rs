@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::input::{InputEvent, InputState};
-use gpui_component::{Icon, IconName};
+use gpui_component::{Icon, IconName, Sizable as _};
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::theme::Theme as GpuiTheme;
 use std::collections::HashSet;
@@ -10364,6 +10364,12 @@ impl Render for HiveWorkspace {
             .flex_col()
             .bg(theme.bg_primary)
             .text_color(theme.text_primary)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.key == "escape" && this.show_project_dropdown {
+                    this.show_project_dropdown = false;
+                    cx.notify();
+                }
+            }))
             // -- Action handlers for keyboard shortcuts -----------------------
             .on_action(cx.listener(Self::handle_new_conversation))
             .on_action(cx.listener(Self::handle_clear_chat))
@@ -10526,6 +10532,25 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_trigger_app_update))
             // Titlebar
                 .child(Titlebar::render(theme, window, &self.current_project_root))
+            // Project dropdown backdrop (dismisses on click)
+            .when(self.show_project_dropdown, |el| {
+                el.child(
+                    div()
+                        .id("project-dropdown-backdrop")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                            cx.stop_propagation();
+                            window.dispatch_action(Box::new(ToggleProjectDropdown), cx);
+                        }),
+                )
+            })
+            // Project dropdown overlay
+            .when(self.show_project_dropdown, |el| {
+                el.child(self.render_project_dropdown(cx))
+            })
             // Main content area: sidebar + panel
             .child(
                 div()
@@ -10671,6 +10696,215 @@ impl HiveWorkspace {
                 cx,
             )),
     )
+    }
+
+    fn render_project_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = &self.theme;
+        let current_root = &self.current_project_root;
+        let pinned = &self.pinned_workspace_roots;
+
+        let mut children: Vec<AnyElement> = Vec::new();
+
+        // Pinned section
+        for path in pinned {
+            let is_active = path == current_root;
+            let path_str = path.to_string_lossy().to_string();
+            let name = Self::project_name_from_path(path);
+            children.push(
+                self.render_project_row(theme, &name, &path_str, is_active, true, cx)
+                    .into_any_element(),
+            );
+        }
+
+        // Separator if pinned exist
+        if !pinned.is_empty() {
+            children.push(
+                div()
+                    .h(px(1.0))
+                    .mx(theme.space_2)
+                    .my(theme.space_1)
+                    .bg(theme.border)
+                    .into_any_element(),
+            );
+        }
+
+        // Recent section (exclude pinned)
+        for path in &self.recent_workspace_roots {
+            if pinned.contains(path) {
+                continue;
+            }
+            let is_active = path == current_root;
+            let path_str = path.to_string_lossy().to_string();
+            let name = Self::project_name_from_path(path);
+            children.push(
+                self.render_project_row(theme, &name, &path_str, is_active, false, cx)
+                    .into_any_element(),
+            );
+        }
+
+        // Bottom separator
+        children.push(
+            div()
+                .h(px(1.0))
+                .mx(theme.space_2)
+                .my(theme.space_1)
+                .bg(theme.border)
+                .into_any_element(),
+        );
+
+        // "Open folder..." row
+        children.push(
+            div()
+                .id("open-folder-row")
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .px(theme.space_3)
+                .py(theme.space_2)
+                .rounded(theme.radius_md)
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.bg_tertiary))
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    cx.stop_propagation();
+                    window.dispatch_action(Box::new(OpenWorkspaceDirectory), cx);
+                })
+                .child(Icon::new(IconName::FolderOpen).small())
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_secondary)
+                        .child("Open folder..."),
+                )
+                .into_any_element(),
+        );
+
+        // Dropdown container
+        div()
+            .id("project-dropdown")
+            .occlude()
+            .absolute()
+            .top(px(42.0))
+            .left(px(120.0))
+            .w(px(320.0))
+            .max_h(px(400.0))
+            .overflow_y_scroll()
+            .bg(theme.bg_primary)
+            .border_1()
+            .border_color(theme.border)
+            .rounded(theme.radius_lg)
+            .shadow_lg()
+            .py(theme.space_1)
+            .children(children)
+    }
+
+    fn render_project_row(
+        &self,
+        theme: &HiveTheme,
+        name: &str,
+        path_str: &str,
+        is_active: bool,
+        is_pinned: bool,
+        _cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let switch_path = path_str.to_string();
+        let pin_path = path_str.to_string();
+
+        let text_color = if is_active {
+            theme.accent_cyan
+        } else {
+            theme.text_primary
+        };
+
+        let pin_icon_color = if is_pinned {
+            theme.accent_cyan
+        } else {
+            theme.text_muted
+        };
+
+        div()
+            .id(SharedString::from(format!("project-row-{}", path_str)))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(theme.space_2)
+            .px(theme.space_3)
+            .py(theme.space_2)
+            .rounded(theme.radius_md)
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.bg_tertiary))
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                cx.stop_propagation();
+                window.dispatch_action(
+                    Box::new(SwitchToWorkspace { path: switch_path.clone() }),
+                    cx,
+                );
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_1)
+                            .when(is_active, |el| {
+                                el.child(
+                                    div()
+                                        .w(px(6.0))
+                                        .h(px(6.0))
+                                        .rounded(theme.radius_full)
+                                        .bg(theme.accent_green),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(text_color)
+                                    .font_weight(if is_active {
+                                        FontWeight::BOLD
+                                    } else {
+                                        FontWeight::NORMAL
+                                    })
+                                    .truncate()
+                                    .child(name.to_string()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(theme.text_muted)
+                            .truncate()
+                            .child(path_str.to_string()),
+                    ),
+            )
+            // Pin toggle button
+            .child(
+                div()
+                    .id(SharedString::from(format!("pin-btn-{}", pin_path)))
+                    .flex_shrink_0()
+                    .cursor_pointer()
+                    .rounded(theme.radius_sm)
+                    .p(px(4.0))
+                    .hover(|s| s.bg(theme.bg_secondary))
+                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                        cx.stop_propagation();
+                        window.dispatch_action(
+                            Box::new(TogglePinWorkspace {
+                                path: pin_path.clone(),
+                            }),
+                            cx,
+                        );
+                    })
+                    .child(
+                        Icon::new(IconName::Star)
+                            .with_size(px(14.0))
+                            .text_color(pin_icon_color),
+                    ),
+            )
     }
 
 }
