@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.23-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.24-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -844,6 +844,14 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.24
+
+**Project Quick-Switcher**
+
+- **Titlebar Dropdown** — Click the project name in the titlebar to see pinned and recent projects. One-click switching instead of navigating the OS file picker every time.
+- **Pin/Unpin Projects** — Star icon toggles pin state; pinned projects persist across sessions and always appear at the top.
+- **Keyboard Dismiss** — Escape closes the dropdown; clicking outside the dropdown also dismisses it.
 
 ### v0.3.23
 
