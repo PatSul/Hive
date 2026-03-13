@@ -16,6 +16,7 @@ pub struct SessionState {
     pub window_size: Option<[u32; 2]>,
     pub working_directory: Option<String>,
     pub recent_workspaces: Vec<String>,
+    pub pinned_workspaces: Vec<String>,
     pub open_files: Vec<String>,
     pub chat_draft: Option<String>,
 }
@@ -119,6 +120,7 @@ mod tests {
             window_size: Some([1920, 1080]),
             working_directory: Some("/home/user/project".into()),
             recent_workspaces: vec!["/home/user/project".into(), "/tmp".into()],
+            pinned_workspaces: vec![],
             open_files: vec!["main.rs".into(), "lib.rs".into()],
             chat_draft: Some("half-typed message".into()),
         };
@@ -241,5 +243,39 @@ mod tests {
 
         let loaded = SessionState::load_from(&path).unwrap();
         assert_eq!(loaded.window_size, Some([1280, 800]));
+    }
+
+    #[test]
+    fn test_pinned_workspaces_round_trip() {
+        let tmp = TempDir::new().unwrap();
+        let path = session_path_in(&tmp);
+
+        let state = SessionState {
+            pinned_workspaces: vec![
+                "/home/user/pinned1".into(),
+                "/home/user/pinned2".into(),
+            ],
+            ..Default::default()
+        };
+
+        state.save_to(&path).unwrap();
+        let loaded = SessionState::load_from(&path).unwrap();
+
+        assert_eq!(
+            loaded.pinned_workspaces,
+            vec!["/home/user/pinned1", "/home/user/pinned2"]
+        );
+    }
+
+    #[test]
+    fn test_pinned_workspaces_default_empty() {
+        let tmp = TempDir::new().unwrap();
+        let path = session_path_in(&tmp);
+
+        // Old-format JSON without pinned_workspaces field
+        std::fs::write(&path, r#"{ "active_panel": "Chat" }"#).unwrap();
+
+        let loaded = SessionState::load_from(&path).unwrap();
+        assert!(loaded.pinned_workspaces.is_empty());
     }
 }
