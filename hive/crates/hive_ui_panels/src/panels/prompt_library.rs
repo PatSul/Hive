@@ -1,3 +1,4 @@
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 use hive_agents::prompt_template::{self, PromptTemplate};
