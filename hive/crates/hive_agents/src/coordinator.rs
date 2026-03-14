@@ -6,10 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::broadcast;
 
+use hive_ai::rag::RagService;
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
 use crate::hivemind::{AiExecutor, default_model_for_tier};
@@ -92,6 +93,9 @@ pub struct CoordinatorConfig {
     /// context curation, validation gates, and retry logic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline: Option<PipelineConfig>,
+    /// RAG service for pipeline context curation (not serialized).
+    #[serde(skip)]
+    pub rag: Option<Arc<Mutex<RagService>>>,
 }
 
 impl Default for CoordinatorConfig {
@@ -102,6 +106,7 @@ impl Default for CoordinatorConfig {
             time_limit_secs: 600,
             model_for_coordination: default_model_for_tier(ModelTier::Mid),
             pipeline: None,
+            rag: None,
         }
     }
 }
@@ -339,7 +344,7 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
 
         // Build pipeline if configured.
         let pipeline = self.config.pipeline.as_ref().map(|cfg| {
-            TaskPipeline::new(cfg.clone(), self.executor.clone(), None, None)
+            TaskPipeline::new(cfg.clone(), self.executor.clone(), self.config.rag.clone(), None)
         });
 
         // Emit PlanCreated with all task info.

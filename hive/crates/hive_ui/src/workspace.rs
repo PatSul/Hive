@@ -2508,6 +2508,10 @@ impl HiveWorkspace {
                 None
             };
 
+            // Optionally attach RAG service for pipeline context curation.
+            let rag_service = cx.has_global::<AppRagService>()
+                .then(|| cx.global::<AppRagService>().0.clone());
+
             let model_for_exec = model.clone();
             let chat_svc = self.chat_service.downgrade();
             cx.spawn(async move |_this, app: &mut AsyncApp| {
@@ -2534,6 +2538,9 @@ impl HiveWorkspace {
                     hive_agents::Queen::new(hive_agents::swarm::SwarmConfig::default(), executor);
                 if let Some(mem) = memory {
                     queen = queen.with_memory(mem);
+                }
+                if let Some(rag) = rag_service.clone() {
+                    queen = queen.with_rag(rag);
                 }
 
                 let result_text = match queen.execute(&goal).await {
@@ -2973,9 +2980,9 @@ impl HiveWorkspace {
             msgs
         };
 
-        // 3. Build tool definitions from the built-in tool registry.
+        // 3. Build tool definitions from built-in + MCP integration tools.
         let agent_defs = hive_agents::tool_use::builtin_tool_definitions();
-        let tool_defs: Vec<AiToolDefinition> = agent_defs
+        let mut tool_defs: Vec<AiToolDefinition> = agent_defs
             .into_iter()
             .map(|d| AiToolDefinition {
                 name: d.name,
@@ -2983,6 +2990,22 @@ impl HiveWorkspace {
                 input_schema: d.input_schema,
             })
             .collect();
+
+        // Include MCP integration tools (messaging, project mgmt, browser, etc.)
+        if cx.has_global::<AppMcpServer>() {
+            let mcp = &cx.global::<AppMcpServer>().0;
+            for tool in mcp.list_tools() {
+                // Skip builtins already included to avoid duplicates.
+                if tool_defs.iter().any(|t| t.name == tool.name) {
+                    continue;
+                }
+                tool_defs.push(AiToolDefinition {
+                    name: tool.name.clone(),
+                    description: tool.description.clone(),
+                    input_schema: tool.input_schema.clone(),
+                });
+            }
+        }
 
         // 4a. Build system prompt from learned preferences (if any).
         let mut system_prompt = if cx.has_global::<AppLearning>() {

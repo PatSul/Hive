@@ -10,7 +10,7 @@
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use hive_ai::rag::RagService;
 use hive_core::SecurityGateway;
@@ -279,7 +279,7 @@ fn curate_context(
 pub struct TaskPipeline<E: AiExecutor> {
     pub config: PipelineConfig,
     executor: Arc<E>,
-    rag: Option<Arc<RagService>>,
+    rag: Option<Arc<Mutex<RagService>>>,
     security: Option<Arc<SecurityGateway>>,
 }
 
@@ -288,7 +288,7 @@ impl<E: AiExecutor> TaskPipeline<E> {
     pub fn new(
         config: PipelineConfig,
         executor: Arc<E>,
-        rag: Option<Arc<RagService>>,
+        rag: Option<Arc<Mutex<RagService>>>,
         security: Option<Arc<SecurityGateway>>,
     ) -> Self {
         Self {
@@ -310,16 +310,18 @@ impl<E: AiExecutor> TaskPipeline<E> {
         prior_results: &[TaskResult],
     ) -> TaskResult {
         // --- Stage 1: Context Curation (deterministic) ---
+        let rag_guard = self.rag.as_ref().and_then(|r| r.lock().ok());
         let context = if self.config.enable_context_curation {
             curate_context(
                 task,
                 prior_results,
-                self.rag.as_deref(),
+                rag_guard.as_deref(),
                 self.config.context_token_budget,
             )
         } else {
             curate_context(task, prior_results, None, 0)
         };
+        drop(rag_guard);
 
         let enriched_description = if context.relevant_snippets.is_empty()
             && context.prior_outputs.is_empty()

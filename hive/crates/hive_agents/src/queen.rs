@@ -7,7 +7,7 @@
 //! a final output, and records learnings to collective memory.
 
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -53,6 +53,8 @@ pub struct Queen<E: AiExecutor> {
     executor: Arc<E>,
     memory: Option<Arc<CollectiveMemory>>,
     status_callback: Option<SwarmStatusCallback>,
+    /// RAG service for pipeline context curation.
+    rag: Option<Arc<Mutex<hive_ai::rag::RagService>>>,
     /// Accumulated cost stored as the bit-pattern of an f64 so we can use
     /// atomic operations without a mutex.
     accumulated_cost: AtomicU64,
@@ -66,6 +68,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
             executor,
             memory: None,
             status_callback: None,
+            rag: None,
             accumulated_cost: AtomicU64::new(0f64.to_bits()),
         }
     }
@@ -73,6 +76,12 @@ impl<E: AiExecutor + 'static> Queen<E> {
     /// Attach collective memory for learning across runs.
     pub fn with_memory(mut self, memory: Arc<CollectiveMemory>) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// Attach a RAG service for pipeline context curation.
+    pub fn with_rag(mut self, rag: Arc<Mutex<hive_ai::rag::RagService>>) -> Self {
+        self.rag = Some(rag);
         self
     }
 
@@ -575,6 +584,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 .clone()
                 .unwrap_or_else(|| default_model_for_tier(ModelTier::Mid)),
             pipeline: Some(crate::pipeline::PipelineConfig::default()),
+            rag: self.rag.clone(),
         };
 
         // Build a simple TaskPlan from the objective description.

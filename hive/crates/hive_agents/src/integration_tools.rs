@@ -461,17 +461,7 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         let svc = Arc::clone(&services.browser);
         tools.push((browse_url_tool(), Box::new(move |args: serde_json::Value| {
             let url = args["url"].as_str().unwrap_or("").to_string();
-            // SSRF validation: only allow http/https and block private/local hosts
-            let parsed = url::Url::parse(&url)
-                .map_err(|e| format!("Invalid URL: {e}"))?;
-            if parsed.scheme() != "https" && parsed.scheme() != "http" {
-                return Err("Only http/https URLs are allowed".into());
-            }
-            if let Some(host) = parsed.host_str() {
-                if is_private_or_local(host) {
-                    return Err("Access to private/internal hosts is blocked".into());
-                }
-            }
+            validate_url(&url)?;
             let svc = Arc::clone(&svc);
             block_on_async(async move {
                 match svc.get_page_content(&url).await {
@@ -599,6 +589,7 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
             let url = args["url"].as_str().unwrap_or("").to_string();
             validate_url(&url)?;
             let js_code = args["js_code"].as_str().unwrap_or("").to_string();
+            validate_js_code(&js_code)?;
             let svc = Arc::clone(&svc);
             block_on_async(async move {
                 match svc.evaluate_script(&url, &js_code).await {
@@ -1848,8 +1839,26 @@ fn is_private_or_local(host: &str) -> bool {
             }
             std::net::IpAddr::V6(v6) => {
                 v6.is_loopback()
+                    || v6.is_unspecified()
                     || (v6.segments()[0] & 0xfe00) == 0xfc00
                     || (v6.segments()[0] & 0xffc0) == 0xfe80
+                    // IPv4-mapped IPv6 (::ffff:10.x.x.x, etc.)
+                    || {
+                        let s = v6.segments();
+                        if s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0
+                            && s[4] == 0 && s[5] == 0xffff
+                        {
+                            let o = [(s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8];
+                            o[0] == 10
+                                || (o[0] == 172 && (16..=31).contains(&o[1]))
+                                || (o[0] == 192 && o[1] == 168)
+                                || (o[0] == 169 && o[1] == 254)
+                                || (o[0] == 127)
+                                || (o[0] == 0 && o[1] == 0 && o[2] == 0 && o[3] == 0)
+                        } else {
+                            false
+                        }
+                    }
             }
         };
     }
@@ -1865,10 +1874,39 @@ fn validate_url(url: &str) -> Result<(), String> {
     if parsed.scheme() != "https" && parsed.scheme() != "http" {
         return Err("Only http/https URLs are allowed".into());
     }
-    if let Some(host) = parsed.host_str() {
-        if is_private_or_local(host) {
-            return Err("Access to private/internal hosts is blocked".into());
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL has no host — cannot validate".to_string())?;
+    if is_private_or_local(host) {
+        return Err("Access to private/internal hosts is blocked".into());
+    }
+    Ok(())
+}
+
+/// Block JavaScript patterns that could exfiltrate sensitive data.
+///
+/// Defense-in-depth for `browser_evaluate_script` — prevents AI-supplied
+/// scripts from accessing cookies, storage, or making network requests.
+fn validate_js_code(code: &str) -> Result<(), String> {
+    let lower = code.to_lowercase();
+    let blocked: &[(&str, &str)] = &[
+        ("document.cookie", "Cookie access is blocked"),
+        ("localstorage", "localStorage access is blocked"),
+        ("sessionstorage", "sessionStorage access is blocked"),
+        ("indexeddb", "IndexedDB access is blocked"),
+        ("xmlhttprequest", "XMLHttpRequest is blocked"),
+        ("navigator.credentials", "Credential API access is blocked"),
+        ("new websocket", "WebSocket creation is blocked"),
+    ];
+    for &(pattern, reason) in blocked {
+        if lower.contains(pattern) {
+            return Err(format!("Blocked dangerous JS pattern: {reason}"));
         }
+    }
+    if lower.contains("fetch(") || lower.contains("fetch (") {
+        return Err(
+            "fetch() calls are blocked in evaluate_script — use browse_url tool instead".into(),
+        );
     }
     Ok(())
 }
@@ -2313,5 +2351,56 @@ mod tests {
         ));
         let err = call_tool(&missing, "hue_list_lights", json!({})).unwrap_err();
         assert!(err.contains("not configured"));
+    }
+
+    #[test]
+    fn test_validate_js_blocks_cookie_access() {
+        assert!(validate_js_code("document.cookie").is_err());
+        assert!(validate_js_code("Document.Cookie").is_err());
+        assert!(validate_js_code("var x = document.cookie;").is_err());
+    }
+
+    #[test]
+    fn test_validate_js_blocks_storage() {
+        assert!(validate_js_code("localStorage.getItem('key')").is_err());
+        assert!(validate_js_code("sessionStorage.setItem('k','v')").is_err());
+    }
+
+    #[test]
+    fn test_validate_js_blocks_fetch() {
+        assert!(validate_js_code("fetch('https://evil.com')").is_err());
+        assert!(validate_js_code("fetch ('https://evil.com')").is_err());
+    }
+
+    #[test]
+    fn test_validate_js_allows_safe_dom() {
+        assert!(validate_js_code("document.querySelector('.price').textContent").is_ok());
+        assert!(validate_js_code("document.title").is_ok());
+        assert!(validate_js_code("document.getElementById('main').innerHTML").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_rejects_no_host() {
+        // URL with no host should be rejected
+        assert!(validate_url("http:///path/to/resource").is_err());
+    }
+
+    #[test]
+    fn test_validate_url_accepts_valid() {
+        assert!(validate_url("https://example.com/page").is_ok());
+        assert!(validate_url("http://github.com").is_ok());
+    }
+
+    #[test]
+    fn test_is_private_blocks_ipv4_mapped_ipv6() {
+        // ::ffff:10.0.0.1 = IPv4-mapped IPv6 for 10.0.0.1
+        assert!(is_private_or_local("::ffff:10.0.0.1"));
+        assert!(is_private_or_local("::ffff:192.168.1.1"));
+        assert!(is_private_or_local("::ffff:127.0.0.1"));
+    }
+
+    #[test]
+    fn test_is_private_allows_public_ipv6() {
+        assert!(!is_private_or_local("2001:db8::1"));
     }
 }

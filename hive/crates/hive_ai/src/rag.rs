@@ -138,6 +138,7 @@ fn estimate_tokens(text: &str) -> usize {
 
 /// RAG service that indexes documents into chunks and retrieves relevant
 /// context for LLM queries using TF-IDF similarity.
+#[derive(Debug)]
 pub struct RagService {
     index: Vec<DocumentChunk>,
     chunk_size: usize,

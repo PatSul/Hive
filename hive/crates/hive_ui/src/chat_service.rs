@@ -272,6 +272,46 @@ pub struct ChatService {
     approval_tx: Option<oneshot::Sender<bool>>,
 }
 
+/// Route any "Unknown tool" results through the MCP integration server.
+///
+/// After the builtin tool registry runs, any tool it doesn't recognise gets
+/// a second chance via `AppMcpServer::call_tool_value`. This keeps integration
+/// tools (messaging, browser, deploy, etc.) reachable from both the normal
+/// and the rejected-write_file dispatch paths.
+fn route_unknown_to_mcp(
+    this: &WeakEntity<ChatService>,
+    app: &mut AsyncApp,
+    results: &mut [hive_agents::tool_use::ToolResult],
+    calls: &[hive_agents::tool_use::ToolCall],
+) {
+    for (result, call) in results.iter_mut().zip(calls.iter()) {
+        if result.is_error && result.content.contains("Unknown tool") {
+            let tool_name = call.name.clone();
+            let tool_input = call.input.clone();
+            if let Ok(mcp_result) = this.update(app, |_svc: &mut ChatService, cx| {
+                if cx.has_global::<hive_ui_core::AppMcpServer>() {
+                    cx.global::<hive_ui_core::AppMcpServer>()
+                        .0
+                        .call_tool_value(&tool_name, tool_input)
+                } else {
+                    Err(format!("Unknown tool: {tool_name}"))
+                }
+            }) {
+                match mcp_result {
+                    Ok(value) => {
+                        result.content =
+                            serde_json::to_string_pretty(&value).unwrap_or_default();
+                        result.is_error = false;
+                    }
+                    Err(e) => {
+                        result.content = format!("Error: {e}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl ChatService {
     pub fn new(default_model: String) -> Self {
         Self {
@@ -756,34 +796,7 @@ impl ChatService {
                                 })
                                 .collect();
                             let mut results = registry.execute_all(&agent_calls);
-
-                            // Fallback: route unknown tools to the MCP integration server.
-                            for (result, call) in results.iter_mut().zip(agent_calls.iter()) {
-                                if result.is_error && result.content.contains("Unknown tool") {
-                                    let tool_name = call.name.clone();
-                                    let tool_input = call.input.clone();
-                                    if let Ok(mcp_result) = this.update(app, |_svc: &mut ChatService, cx| {
-                                        if cx.has_global::<hive_ui_core::AppMcpServer>() {
-                                            cx.global::<hive_ui_core::AppMcpServer>()
-                                                .0
-                                                .call_tool_value(&tool_name, tool_input)
-                                        } else {
-                                            Err(format!("Unknown tool: {tool_name}"))
-                                        }
-                                    }) {
-                                        match mcp_result {
-                                            Ok(value) => {
-                                                result.content = serde_json::to_string_pretty(&value)
-                                                    .unwrap_or_default();
-                                                result.is_error = false;
-                                            }
-                                            Err(e) => {
-                                                result.content = format!("Error: {e}");
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            route_unknown_to_mcp(&this, app, &mut results, &agent_calls);
 
                             // Add rejection result for write_file call.
                             results.push(hive_agents::tool_use::ToolResult {
@@ -879,34 +892,7 @@ impl ChatService {
                         })
                         .collect();
                     let mut results = registry.execute_all(&agent_calls);
-
-                    // Fallback: route unknown tools to the MCP integration server.
-                    for (result, call) in results.iter_mut().zip(agent_calls.iter()) {
-                        if result.is_error && result.content.contains("Unknown tool") {
-                            let tool_name = call.name.clone();
-                            let tool_input = call.input.clone();
-                            if let Ok(mcp_result) = this.update(app, |_svc: &mut ChatService, cx| {
-                                if cx.has_global::<hive_ui_core::AppMcpServer>() {
-                                    cx.global::<hive_ui_core::AppMcpServer>()
-                                        .0
-                                        .call_tool_value(&tool_name, tool_input)
-                                } else {
-                                    Err(format!("Unknown tool: {tool_name}"))
-                                }
-                            }) {
-                                match mcp_result {
-                                    Ok(value) => {
-                                        result.content = serde_json::to_string_pretty(&value)
-                                            .unwrap_or_default();
-                                        result.is_error = false;
-                                    }
-                                    Err(e) => {
-                                        result.content = format!("Error: {e}");
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    route_unknown_to_mcp(&this, app, &mut results, &agent_calls);
 
                     // --- Update conversation ---
                     let m = model_clone.clone();
