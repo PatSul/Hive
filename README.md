@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.25-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.26-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -814,7 +814,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.25 |
+| Version | 0.3.26 |
 | Crates | 21 |
 | Rust source files | 400+ |
 | Lines of Rust | 200,000+ |
@@ -846,6 +846,17 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.26
+
+**Security Hardening, RAG Pipeline Wiring & MCP Tool Dispatch**
+
+- **Path Traversal Protection** — Template IDs in `PromptLibrary` now validated to `[A-Za-z0-9_-]` only; context file attachments block absolute paths and `..` traversal.
+- **JS Eval Approval Gate** — `browser_evaluate_script` validates JavaScript before execution, blocking cookie/storage/fetch access patterns.
+- **SSRF Hardening** — URL validation rejects missing hosts, IPv4-mapped IPv6 private addresses (`::ffff:127.0.0.1`), and `None`-host bypass.
+- **RAG Pipeline Wiring** — `RagService` (TF-IDF context curation) now flows through the full chain: workspace → Queen → Coordinator → Pipeline `curate_context()`.
+- **MCP Integration Tool Dispatch** — All MCP integration tools (messaging, project management, browser, deploy, etc.) are now included in AI requests via `list_tools()` and routed through `route_unknown_to_mcp()` on both normal and rejected-write_file dispatch paths.
+- **Real UUID Generation** — Replaced timestamp-based ID generation in prompt templates with `uuid::Uuid::new_v4()`.
 
 ### v0.3.25
 
