@@ -89,8 +89,9 @@ impl ChatInputView {
 
     /// Set the input field text.
     pub fn set_text(&self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = text.to_string();
         self.input_state.update(cx, |state, cx| {
-            state.replace(text, window, cx);
+            state.replace(&text, window, cx);
         });
     }
 

@@ -5806,7 +5806,6 @@ impl HiveWorkspace {
 
         // Create pending approval using existing tool approval pattern
         self.chat_service.update(cx, |svc, cx| {
-            use hive_ui_panels::components::DiffLine;
             svc.pending_approval = Some(crate::chat_service::PendingToolApproval {
                 tool_call_id: format!("apply-{}", action.file_path),
                 tool_name: "apply_code_block".to_string(),
