@@ -756,6 +756,35 @@ impl ChatService {
                                 })
                                 .collect();
                             let mut results = registry.execute_all(&agent_calls);
+
+                            // Fallback: route unknown tools to the MCP integration server.
+                            for (result, call) in results.iter_mut().zip(agent_calls.iter()) {
+                                if result.is_error && result.content.contains("Unknown tool") {
+                                    let tool_name = call.name.clone();
+                                    let tool_input = call.input.clone();
+                                    if let Ok(mcp_result) = this.update(app, |_svc: &mut ChatService, cx| {
+                                        if cx.has_global::<hive_ui_core::AppMcpServer>() {
+                                            cx.global::<hive_ui_core::AppMcpServer>()
+                                                .0
+                                                .call_tool_value(&tool_name, tool_input)
+                                        } else {
+                                            Err(format!("Unknown tool: {tool_name}"))
+                                        }
+                                    }) {
+                                        match mcp_result {
+                                            Ok(value) => {
+                                                result.content = serde_json::to_string_pretty(&value)
+                                                    .unwrap_or_default();
+                                                result.is_error = false;
+                                            }
+                                            Err(e) => {
+                                                result.content = format!("Error: {e}");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // Add rejection result for write_file call.
                             results.push(hive_agents::tool_use::ToolResult {
                                 tool_use_id: wf.id.clone(),
@@ -849,7 +878,35 @@ impl ChatService {
                             input: tc.input.clone(),
                         })
                         .collect();
-                    let results = registry.execute_all(&agent_calls);
+                    let mut results = registry.execute_all(&agent_calls);
+
+                    // Fallback: route unknown tools to the MCP integration server.
+                    for (result, call) in results.iter_mut().zip(agent_calls.iter()) {
+                        if result.is_error && result.content.contains("Unknown tool") {
+                            let tool_name = call.name.clone();
+                            let tool_input = call.input.clone();
+                            if let Ok(mcp_result) = this.update(app, |_svc: &mut ChatService, cx| {
+                                if cx.has_global::<hive_ui_core::AppMcpServer>() {
+                                    cx.global::<hive_ui_core::AppMcpServer>()
+                                        .0
+                                        .call_tool_value(&tool_name, tool_input)
+                                } else {
+                                    Err(format!("Unknown tool: {tool_name}"))
+                                }
+                            }) {
+                                match mcp_result {
+                                    Ok(value) => {
+                                        result.content = serde_json::to_string_pretty(&value)
+                                            .unwrap_or_default();
+                                        result.is_error = false;
+                                    }
+                                    Err(e) => {
+                                        result.content = format!("Error: {e}");
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // --- Update conversation ---
                     let m = model_clone.clone();
