@@ -814,10 +814,10 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.19 |
+| Version | 0.3.25 |
 | Crates | 21 |
-| Rust source files | 394 |
-| Lines of Rust | 192,500+ |
+| Rust source files | 400+ |
+| Lines of Rust | 200,000+ |
 | Tests | Targeted verification matrix |
 | Compiler warnings | Tracked per validated slice |
 | Clippy warnings | Checked per validated slice |
