@@ -14,8 +14,11 @@ pub mod mcp_server;
 pub mod message_queue;
 pub mod persistence;
 pub mod personas;
+pub mod pipeline;
 pub mod plugin_manager;
 pub mod plugin_types;
+pub mod prompt_template;
+pub mod response_parser;
 pub mod queen;
 pub mod skill_authoring;
 pub mod skill_executor;
@@ -47,7 +50,9 @@ pub use coordinator::{
 };
 pub use heartbeat::{AgentHeartbeat, HeartbeatService};
 pub use persistence::{AgentPersistenceService, AgentSnapshot, CompletedTask};
-pub use personas::{Persona, PersonaKind, PersonaRegistry, PromptOverride, execute_with_persona};
+pub use personas::{Persona, PersonaKind, PersonaRegistry, PromptOverride, execute_with_persona, execute_with_persona_model};
+pub use pipeline::{PipelineConfig, PipelineStage, TaskPipeline, ValidationGateKind};
+pub use hivemind::AiExecutor;
 pub use queen::Queen;
 pub use knowledge_acquisition::{
     AcquisitionResult, CodeBlock, KnowledgeAcquisitionAgent, KnowledgeConfig, KnowledgePage,
@@ -85,3 +90,5 @@ pub use message_queue::{
 };
 pub use tool_use::builtin_registry_with_sandbox;
 pub use worktree::{MergeBranchResult, TeamWorktree, WorktreeManager};
+pub use prompt_template::PromptTemplate;
+pub use response_parser::{ParsedEdit, parse_edits};

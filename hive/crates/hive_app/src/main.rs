@@ -25,7 +25,7 @@ use hive_ui::globals::{
     AppHueClient, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager, AppPersonas,
     AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
     AppSecurity, AppSemanticSearch, AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService,
-    AppTts, AppUiActionTx, AppUpdater, AppWallets,
+    AppReminderRx, AppTts, AppUiActionTx, AppUpdater, AppVoiceAssistant, AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
@@ -234,6 +234,16 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppTts(tts));
     info!("TTS service initialized");
 
+    // Voice assistant — text-to-intent classification with TTS.
+    {
+        let mut voice = hive_agents::VoiceAssistant::new();
+        if let Some(tts_arc) = cx.has_global::<AppTts>().then(|| cx.global::<AppTts>().0.clone()) {
+            voice.set_tts(tts_arc);
+        }
+        cx.set_global(AppVoiceAssistant(std::sync::Arc::new(std::sync::Mutex::new(voice))));
+        info!("VoiceAssistant initialized");
+    }
+
     // RAG Service — document indexing + TF-IDF retrieval for context injection.
     let rag_service = hive_ai::RagService::new(50, 10);
     cx.set_global(AppRagService(std::sync::Arc::new(std::sync::Mutex::new(rag_service))));
@@ -318,7 +328,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         .unwrap_or_else(|_| std::path::PathBuf::from("collective_memory.db"));
     let memory = hive_agents::collective_memory::CollectiveMemory::open(&collective_db_path.to_string_lossy())
         .unwrap_or_else(|_| hive_agents::collective_memory::CollectiveMemory::in_memory().unwrap());
-    cx.set_global(AppCollectiveMemory(std::sync::Arc::new(std::sync::Mutex::new(memory))));
+    cx.set_global(AppCollectiveMemory(std::sync::Arc::new(memory)));
     info!("CollectiveMemory initialized");
 
     // Standup Service
@@ -484,12 +494,18 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         cx.set_global(AppScheduler(std::sync::Arc::clone(&scheduler)));
         info!("Scheduler initialized");
 
+        let (reminder_tx, reminder_rx) = std::sync::mpsc::channel();
         let tick_config = hive_assistant::tick_driver::TickDriverConfig {
             interval: Duration::from_secs(60),
             assistant_db_path: assistant_db_str.clone(),
+            reminder_tx: Some(reminder_tx),
         };
         hive_assistant::tick_driver::start_tick_driver(scheduler, tick_config);
         info!("Tick driver started (scheduler + reminders, 60s interval)");
+
+        cx.set_global(AppReminderRx(std::sync::Arc::new(
+            std::sync::Mutex::new(reminder_rx),
+        )));
     }
 
     // Wallet store — load existing wallets or start empty.
@@ -625,6 +641,35 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     )));
     cx.set_global(AppOllamaManager(ollama_manager));
     info!("OllamaManager initialized");
+
+    // Local AI provider detection — probe well-known ports in background.
+    std::thread::Builder::new()
+        .name("local-ai-detect".into())
+        .spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            if let Ok(rt) = rt {
+                let detected = rt.block_on(async {
+                    let detector = hive_terminal::local_ai::LocalAiDetector::new();
+                    detector.detect_all().await
+                });
+                let available: Vec<_> = detected.iter().filter(|p| p.available).collect();
+                info!(
+                    "Local AI detection: found {} provider(s)",
+                    available.len()
+                );
+                for provider in &available {
+                    info!(
+                        "  - {} at {} ({} model(s))",
+                        provider.name,
+                        provider.base_url,
+                        provider.models.len()
+                    );
+                }
+            }
+        })
+        .ok();
 
     let hue_client = config
         .hue_bridge_ip

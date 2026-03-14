@@ -13,7 +13,8 @@ use tokio::sync::broadcast;
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
 use crate::hivemind::{AiExecutor, default_model_for_tier};
-use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona};
+use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona_model};
+use crate::pipeline::{PipelineConfig, TaskPipeline};
 use crate::specs::Spec;
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,8 @@ pub struct TaskEventInfo {
     pub description: String,
     pub persona: String,
     pub dependencies: Vec<String>,
+    /// The user-pinned model override for this task, if any.
+    pub model_override: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +88,10 @@ pub struct CoordinatorConfig {
     pub time_limit_secs: u64,
     /// Model ID to use for the coordination/planning step.
     pub model_for_coordination: String,
+    /// When set, tasks are executed through the hybrid pipeline with
+    /// context curation, validation gates, and retry logic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<PipelineConfig>,
 }
 
 impl Default for CoordinatorConfig {
@@ -94,6 +101,7 @@ impl Default for CoordinatorConfig {
             cost_limit: 10.0,
             time_limit_secs: 600,
             model_for_coordination: default_model_for_tier(ModelTier::Mid),
+            pipeline: None,
         }
     }
 }
@@ -110,6 +118,10 @@ pub struct PlannedTask {
     pub persona: PersonaKind,
     pub dependencies: Vec<String>,
     pub priority: u8,
+    /// Optional user-pinned model override. When set, the task uses this
+    /// specific model instead of the persona's default `model_tier`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
 }
 
 /// The complete task plan produced by the coordinator.
@@ -314,11 +326,21 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
 
     /// Execute a task plan, respecting dependency ordering and parallelism limits.
     /// Emits `TaskEvent`s for live progress tracking via `subscribe()`.
+    ///
+    /// When `config.pipeline` is set, tasks are executed through the hybrid
+    /// pipeline with context curation, validation gates, and retry logic.
+    /// Failed tasks block their dependents (dependents are skipped).
     pub async fn execute_plan(&self, plan: &TaskPlan) -> CoordinatorResult {
         let start = Instant::now();
         let mut results: Vec<TaskResult> = Vec::new();
         let mut completed: HashSet<String> = HashSet::new();
+        let mut failed: HashSet<String> = HashSet::new();
         let mut remaining: Vec<PlannedTask> = plan.tasks.clone();
+
+        // Build pipeline if configured.
+        let pipeline = self.config.pipeline.as_ref().map(|cfg| {
+            TaskPipeline::new(cfg.clone(), self.executor.clone(), None, None)
+        });
 
         // Emit PlanCreated with all task info.
         let plan_id = format!("plan-{}", start.elapsed().as_nanos());
@@ -332,6 +354,7 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                     description: t.description.clone(),
                     persona: t.persona.to_string(),
                     dependencies: t.dependencies.clone(),
+                    model_override: t.model_override.clone(),
                 })
                 .collect(),
         });
@@ -350,8 +373,31 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                 break;
             }
 
+            // Skip tasks whose dependencies include a failed task.
+            let (skipped, viable): (Vec<PlannedTask>, Vec<PlannedTask>) = remaining
+                .into_iter()
+                .partition(|t| t.dependencies.iter().any(|d| failed.contains(d)));
+
+            for task in &skipped {
+                let skip_result = TaskResult {
+                    task_id: task.id.clone(),
+                    persona: task.persona.clone(),
+                    output: String::new(),
+                    cost: 0.0,
+                    duration_ms: 0,
+                    success: false,
+                    error: Some("Skipped: dependency failed".into()),
+                };
+                self.emit(TaskEvent::TaskFailed {
+                    task_id: task.id.clone(),
+                    error: "Skipped: dependency failed".into(),
+                });
+                failed.insert(task.id.clone());
+                results.push(skip_result);
+            }
+
             // Find tasks that are ready to execute (all deps satisfied).
-            let (ready, not_ready): (Vec<PlannedTask>, Vec<PlannedTask>) = remaining
+            let (ready, not_ready): (Vec<PlannedTask>, Vec<PlannedTask>) = viable
                 .into_iter()
                 .partition(|t| t.dependencies.iter().all(|d| completed.contains(d)));
 
@@ -397,18 +443,28 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                         }
                     });
 
-                let output =
-                    execute_with_persona(&persona, &task.description, self.executor.as_ref(), None)
-                        .await;
+                // Execute via pipeline (with validation + retry) or directly.
+                let task_result = if let Some(ref pipe) = pipeline {
+                    pipe.execute(task, &persona, &results).await
+                } else {
+                    let output = execute_with_persona_model(
+                        &persona,
+                        &task.description,
+                        self.executor.as_ref(),
+                        None,
+                        task.model_override.as_deref(),
+                    )
+                    .await;
 
-                let task_result = TaskResult {
-                    task_id: task.id.clone(),
-                    persona: task.persona.clone(),
-                    output: output.content,
-                    cost: output.cost,
-                    duration_ms: output.duration_ms,
-                    success: output.success,
-                    error: output.error,
+                    TaskResult {
+                        task_id: task.id.clone(),
+                        persona: task.persona.clone(),
+                        output: output.content,
+                        cost: output.cost,
+                        duration_ms: output.duration_ms,
+                        success: output.success,
+                        error: output.error,
+                    }
                 };
 
                 // Emit TaskCompleted or TaskFailed based on result.
@@ -424,6 +480,7 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                         cost: task_result.cost,
                         output_preview: preview,
                     });
+                    completed.insert(task_result.task_id.clone());
                 } else {
                     self.emit(TaskEvent::TaskFailed {
                         task_id: task_result.task_id.clone(),
@@ -432,9 +489,9 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                             .clone()
                             .unwrap_or_else(|| "Unknown error".into()),
                     });
+                    failed.insert(task_result.task_id.clone());
                 }
 
-                completed.insert(task_result.task_id.clone());
                 results.push(task_result);
             }
         }
@@ -504,6 +561,7 @@ fn parse_task_plan(response: &str) -> Result<TaskPlan, String> {
             persona: parse_persona_kind(&raw.persona),
             dependencies: raw.dependencies,
             priority: raw.priority,
+            model_override: None,
         })
         .collect();
 
@@ -605,6 +663,7 @@ mod tests {
                     persona: PersonaKind::Investigate,
                     dependencies: vec![],
                     priority: 1,
+                    model_override: None,
                 },
                 PlannedTask {
                     id: "task-2".into(),
@@ -612,6 +671,7 @@ mod tests {
                     persona: PersonaKind::Implement,
                     dependencies: vec!["task-1".into()],
                     priority: 2,
+                    model_override: None,
                 },
                 PlannedTask {
                     id: "task-3".into(),
@@ -619,6 +679,7 @@ mod tests {
                     persona: PersonaKind::Verify,
                     dependencies: vec!["task-2".into()],
                     priority: 3,
+                    model_override: None,
                 },
             ],
         }
@@ -670,6 +731,7 @@ mod tests {
                 persona: PersonaKind::Implement,
                 dependencies: vec!["nonexistent".into()],
                 priority: 1,
+                model_override: None,
             }],
         };
         let result = plan.validate();
@@ -686,6 +748,7 @@ mod tests {
                 persona: PersonaKind::Implement,
                 dependencies: vec!["task-1".into()],
                 priority: 1,
+                model_override: None,
             }],
         };
         let result = plan.validate();
@@ -703,6 +766,7 @@ mod tests {
                     persona: PersonaKind::Investigate,
                     dependencies: vec!["b".into()],
                     priority: 1,
+                    model_override: None,
                 },
                 PlannedTask {
                     id: "b".into(),
@@ -710,6 +774,7 @@ mod tests {
                     persona: PersonaKind::Implement,
                     dependencies: vec!["a".into()],
                     priority: 1,
+                    model_override: None,
                 },
             ],
         };
@@ -796,6 +861,7 @@ mod tests {
                 persona: PersonaKind::Implement,
                 dependencies: vec![],
                 priority: 1,
+                model_override: None,
             }],
         };
 
@@ -820,6 +886,7 @@ mod tests {
                     persona: PersonaKind::Investigate,
                     dependencies: vec![],
                     priority: 1,
+                    model_override: None,
                 },
                 PlannedTask {
                     id: "b".into(),
@@ -827,6 +894,7 @@ mod tests {
                     persona: PersonaKind::Implement,
                     dependencies: vec![],
                     priority: 1,
+                    model_override: None,
                 },
             ],
         };
@@ -890,6 +958,7 @@ mod tests {
                 description: "Do something".into(),
                 persona: "Implement".into(),
                 dependencies: vec![],
+                model_override: None,
             }],
         };
         let json = serde_json::to_string(&event).unwrap();
@@ -935,6 +1004,7 @@ mod tests {
             description: "Investigate auth module".into(),
             persona: "Investigate".into(),
             dependencies: vec!["task-1".into(), "task-2".into()],
+            model_override: None,
         };
         assert_eq!(info.id, "task-42");
         assert_eq!(info.dependencies.len(), 2);
@@ -962,6 +1032,7 @@ mod tests {
                     persona: PersonaKind::Investigate,
                     dependencies: vec![],
                     priority: 1,
+                    model_override: None,
                 },
                 PlannedTask {
                     id: "t2".into(),
@@ -969,6 +1040,7 @@ mod tests {
                     persona: PersonaKind::Implement,
                     dependencies: vec!["t1".into()],
                     priority: 2,
+                    model_override: None,
                 },
             ],
         };
@@ -1006,6 +1078,7 @@ mod tests {
                 persona: PersonaKind::Implement,
                 dependencies: vec![],
                 priority: 1,
+                model_override: None,
             }],
         };
 

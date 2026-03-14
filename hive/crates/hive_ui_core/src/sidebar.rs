@@ -1,12 +1,14 @@
 use gpui_component::IconName;
 
-/// The 24 navigable panels in the application.
+/// The 26 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
     QuickStart,
     History,
     Files,
+    CodeMap,
+    PromptLibrary,
     Specs,
     Agents,
     Workflows,
@@ -30,10 +32,12 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 24] = [
+    pub const ALL: [Panel; 26] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
+        Panel::CodeMap,
+        Panel::PromptLibrary,
         Panel::Specs,
         Panel::Agents,
         Panel::Workflows,
@@ -63,6 +67,8 @@ impl Panel {
             Self::QuickStart => "Quick Start",
             Self::History => "History",
             Self::Files => "Files",
+            Self::CodeMap => "Code Map",
+            Self::PromptLibrary => "Prompts",
             Self::Specs => "Specs",
             Self::Agents => "Agents",
             Self::Workflows => "Workflows",
@@ -102,6 +108,8 @@ impl Panel {
             Self::QuickStart => IconName::Star,
             Self::History => IconName::Calendar,
             Self::Files => IconName::Folder,
+            Self::CodeMap => IconName::Inspector,
+            Self::PromptLibrary => IconName::BookOpen,
             Self::Specs => IconName::File,
             Self::Agents => IconName::Bot,
             Self::Workflows => IconName::Map,
@@ -135,6 +143,8 @@ impl Panel {
             "QuickStart" => Self::QuickStart,
             "History" => Self::History,
             "Files" => Self::Files,
+            "CodeMap" => Self::CodeMap,
+            "PromptLibrary" => Self::PromptLibrary,
             "Specs" => Self::Specs,
             "Agents" => Self::Agents,
             "Workflows" => Self::Workflows,
@@ -166,6 +176,8 @@ impl Panel {
             Self::QuickStart => "QuickStart",
             Self::History => "History",
             Self::Files => "Files",
+            Self::CodeMap => "CodeMap",
+            Self::PromptLibrary => "PromptLibrary",
             Self::Specs => "Specs",
             Self::Agents => "Agents",
             Self::Workflows => "Workflows",
@@ -190,7 +202,7 @@ impl Panel {
     }
 }
 
-/// Sidebar component with 24 navigation icon buttons.
+/// Sidebar component with 25 navigation icon buttons.
 pub struct Sidebar {
     pub active_panel: Panel,
 }

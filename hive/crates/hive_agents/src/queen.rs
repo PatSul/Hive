@@ -574,6 +574,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 .preferred_model
                 .clone()
                 .unwrap_or_else(|| default_model_for_tier(ModelTier::Mid)),
+            pipeline: Some(crate::pipeline::PipelineConfig::default()),
         };
 
         // Build a simple TaskPlan from the objective description.
@@ -965,6 +966,10 @@ fn build_coordinator_plan_from_objective(
     use crate::coordinator::PlannedTask;
     use crate::personas::PersonaKind;
 
+    // Pass through the user's preferred_model from the objective to all
+    // subtasks, enabling per-task model pinning.
+    let model_pin = objective.preferred_model.clone();
+
     crate::coordinator::TaskPlan {
         tasks: vec![
             PlannedTask {
@@ -973,6 +978,7 @@ fn build_coordinator_plan_from_objective(
                 persona: PersonaKind::Investigate,
                 dependencies: vec![],
                 priority: 1,
+                model_override: model_pin.clone(),
             },
             PlannedTask {
                 id: format!("{}-implement", objective.id),
@@ -980,6 +986,7 @@ fn build_coordinator_plan_from_objective(
                 persona: PersonaKind::Implement,
                 dependencies: vec![format!("{}-investigate", objective.id)],
                 priority: 2,
+                model_override: model_pin.clone(),
             },
             PlannedTask {
                 id: format!("{}-verify", objective.id),
@@ -987,6 +994,7 @@ fn build_coordinator_plan_from_objective(
                 persona: PersonaKind::Verify,
                 dependencies: vec![format!("{}-implement", objective.id)],
                 priority: 3,
+                model_override: model_pin,
             },
         ],
     }

@@ -19,6 +19,8 @@ pub enum ContextFormat {
     Markdown,
     /// TOON encoding for token-efficient prompts.
     Toon,
+    /// XML structured encoding for explicit context boundaries.
+    Xml,
 }
 
 impl ContextFormat {
@@ -26,6 +28,7 @@ impl ContextFormat {
     pub fn from_config_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "toon" => Self::Toon,
+            "xml" => Self::Xml,
             _ => Self::Markdown,
         }
     }

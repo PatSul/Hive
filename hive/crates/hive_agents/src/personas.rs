@@ -338,7 +338,22 @@ pub async fn execute_with_persona<E: AiExecutor>(
     executor: &E,
     prompt_addendum: Option<&str>,
 ) -> AgentOutput {
-    let model = default_model_for_tier(persona.model_tier);
+    execute_with_persona_model(persona, task, executor, prompt_addendum, None).await
+}
+
+/// Like [`execute_with_persona`] but accepts an optional model override.
+/// When `model_override` is `Some`, that model ID is used instead of the
+/// persona's default model tier — enabling user-pinned model selection.
+pub async fn execute_with_persona_model<E: AiExecutor>(
+    persona: &Persona,
+    task: &str,
+    executor: &E,
+    prompt_addendum: Option<&str>,
+    model_override: Option<&str>,
+) -> AgentOutput {
+    let model = model_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| default_model_for_tier(persona.model_tier));
 
     let system_prompt = match prompt_addendum {
         Some(addendum) if !addendum.is_empty() => {

@@ -5,6 +5,8 @@ use gpui_component::{Icon, IconName};
 use hive_ui_core::HiveTheme;
 use hive_ui_core::MonitorRefresh;
 
+use crate::components::task_tree::{TaskDisplay, TaskDisplayStatus, TaskTreeState};
+
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -267,12 +269,15 @@ pub struct MonitorData {
     pub current_run_id: Option<String>,
     pub run_history: Vec<RunHistoryEntry>,
 
-    // System resource monitoring (new)
+    // System resource monitoring
     pub resources: SystemResources,
     pub providers: Vec<ProviderStatus>,
     pub request_queue_length: usize,
     pub active_streams: usize,
     pub uptime_secs: u64,
+
+    // Background task tracking (Perplexity-style live task feed)
+    pub background_tasks: Vec<TaskTreeState>,
 }
 
 impl MonitorData {
@@ -290,6 +295,7 @@ impl MonitorData {
             request_queue_length: 0,
             active_streams: 0,
             uptime_secs: 0,
+            background_tasks: Vec::new(),
         }
     }
 
@@ -395,6 +401,52 @@ impl MonitorData {
                 ProviderStatus::new("Google Gemini", false, None),
                 ProviderStatus::new("LM Studio", false, None),
             ],
+            background_tasks: vec![
+                {
+                    TaskTreeState {
+                        title: "Implement auth module".into(),
+                        plan_id: "plan-001".into(),
+                        tasks: vec![
+                            TaskDisplay {
+                                id: "t1".into(),
+                                description: "Investigate existing auth patterns".into(),
+                                persona: "Investigate".into(),
+                                status: TaskDisplayStatus::Completed,
+                                duration_ms: Some(4200),
+                                cost: Some(0.12),
+                                output_preview: Some("Found JWT middleware in routes/auth.rs".into()),
+                                expanded: false,
+                                model_override: None,
+                            },
+                            TaskDisplay {
+                                id: "t2".into(),
+                                description: "Implement OAuth2 flow".into(),
+                                persona: "Implement".into(),
+                                status: TaskDisplayStatus::Running,
+                                duration_ms: None,
+                                cost: None,
+                                output_preview: None,
+                                expanded: false,
+                                model_override: Some("claude-opus-4".into()),
+                            },
+                            TaskDisplay {
+                                id: "t3".into(),
+                                description: "Write integration tests".into(),
+                                persona: "Verify".into(),
+                                status: TaskDisplayStatus::Pending,
+                                duration_ms: None,
+                                cost: None,
+                                output_preview: None,
+                                expanded: false,
+                                model_override: None,
+                            },
+                        ],
+                        collapsed: false,
+                        total_cost: 0.12,
+                        elapsed_ms: 6500,
+                    }
+                },
+            ],
             request_queue_length: 3,
             active_streams: 2,
             uptime_secs: 7834,
@@ -431,6 +483,7 @@ impl MonitorPanel {
             .child(Self::provider_status_section(data, theme))
             .child(Self::runtime_stats_section(data, theme))
             .child(Self::agent_roles_section(theme))
+            .child(Self::background_tasks_section(data, theme))
             .child(Self::active_agents_section(data, theme))
             .child(Self::run_history_section(data, theme))
     }
@@ -850,6 +903,170 @@ impl MonitorPanel {
                     .text_color(theme.text_secondary)
                     .child("Ready".to_string()),
             )
+    }
+
+    // ------------------------------------------------------------------
+    // Background Tasks (live task tree feed)
+    // ------------------------------------------------------------------
+
+    fn background_tasks_section(data: &MonitorData, theme: &HiveTheme) -> impl IntoElement {
+        let mut container = Self::section("Background Tasks", theme);
+
+        if data.background_tasks.is_empty() {
+            container = container.child(Self::empty_state(
+                "No background tasks running. Agent orchestrations will appear here.",
+                theme,
+            ));
+        } else {
+            for tree in &data.background_tasks {
+                container = container.child(Self::task_tree_card(tree, theme));
+            }
+        }
+        container
+    }
+
+    /// Render a single task tree as a card with progress bar and task list.
+    fn task_tree_card(tree: &TaskTreeState, theme: &HiveTheme) -> impl IntoElement {
+        let progress = tree.progress();
+        let done = tree.tasks_done();
+        let total = tree.tasks.len();
+
+        let progress_color = if progress >= 1.0 {
+            theme.accent_green
+        } else if done > 0 {
+            theme.accent_cyan
+        } else {
+            theme.text_muted
+        };
+
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .p(theme.space_3)
+            .bg(theme.bg_tertiary)
+            .rounded(theme.radius_md)
+            .gap(theme.space_2)
+            // Header row: title + progress
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .child(
+                                Icon::new(if progress >= 1.0 {
+                                    IconName::CircleCheck
+                                } else {
+                                    IconName::Loader
+                                })
+                                .size_4()
+                                .text_color(progress_color),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(theme.text_primary)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(tree.title.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .child(format!("{done}/{total} tasks")),
+                            )
+                            .children(if tree.total_cost > 0.0 {
+                                Some(
+                                    div()
+                                        .text_size(theme.font_size_xs)
+                                        .text_color(theme.accent_aqua)
+                                        .child(format!("${:.4}", tree.total_cost)),
+                                )
+                            } else {
+                                None
+                            }),
+                    ),
+            )
+            // Progress bar
+            .child(Self::progress_bar(
+                (progress * 100.0) as f64,
+                progress_color,
+                theme,
+            ));
+
+        // Task rows (only show if tree is not collapsed)
+        if !tree.collapsed {
+            for task in &tree.tasks {
+                card = card.child(Self::background_task_row(task, theme));
+            }
+        }
+
+        card
+    }
+
+    /// A single task row within a background task tree.
+    fn background_task_row(task: &TaskDisplay, theme: &HiveTheme) -> impl IntoElement {
+        let (icon, color) = match &task.status {
+            TaskDisplayStatus::Pending => (IconName::Info, theme.text_muted),
+            TaskDisplayStatus::Running => (IconName::Loader, theme.accent_cyan),
+            TaskDisplayStatus::Completed => (IconName::CircleCheck, theme.accent_green),
+            TaskDisplayStatus::Failed(_) => (IconName::CircleX, theme.accent_red),
+        };
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(theme.space_2)
+            .pl(theme.space_3)
+            .py(theme.space_1)
+            .child(Icon::new(icon).size_3().text_color(color))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_primary)
+                    .child(task.description.clone()),
+            )
+            .child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(format!("@{}", task.persona)),
+            )
+            .children(task.model_override.as_ref().map(|m| {
+                div()
+                    .px(theme.space_1)
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_secondary)
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.accent_powder)
+                    .child(m.clone())
+            }))
+            .children(task.duration_ms.map(|ms| {
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(format!("{}ms", ms))
+            }))
+            .children(task.cost.map(|c| {
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.accent_aqua)
+                    .child(format!("${:.4}", c))
+            }))
     }
 
     // ------------------------------------------------------------------

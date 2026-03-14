@@ -40,6 +40,9 @@ pub struct TaskDisplay {
     pub cost: Option<f64>,
     pub output_preview: Option<String>,
     pub expanded: bool,
+    /// User-pinned model override. `None` = use persona default.
+    #[serde(default)]
+    pub model_override: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +74,7 @@ impl TaskTreeState {
                 cost: None,
                 output_preview: None,
                 expanded: false,
+                model_override: None,
             })
             .collect();
 
@@ -150,6 +154,27 @@ impl TaskTreeState {
         if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
             task.expanded = !task.expanded;
         }
+    }
+
+    /// Pin a specific model to a task, overriding the persona default.
+    /// Pass `None` to revert to automatic model selection.
+    pub fn set_model_override(&mut self, task_id: &str, model: Option<String>) {
+        if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
+            task.model_override = model;
+        }
+    }
+
+    /// Collect all model overrides as (task_id, model_id) pairs.
+    /// Used to pass user selections back to the Coordinator before execution.
+    pub fn model_overrides(&self) -> Vec<(String, String)> {
+        self.tasks
+            .iter()
+            .filter_map(|t| {
+                t.model_override
+                    .as_ref()
+                    .map(|m| (t.id.clone(), m.clone()))
+            })
+            .collect()
     }
 }
 
@@ -252,6 +277,9 @@ impl Render for TaskTreeView {
                                 .text_size(theme.font_size_xs)
                                 .text_color(theme.text_muted)
                                 .child(format!("@{}", task.persona))
+                                .children(task.model_override.as_ref().map(|m| {
+                                    format!("[{}]", m)
+                                }))
                                 .children(task.duration_ms.map(|ms| format!("{}ms", ms)))
                                 .children(task.cost.map(|c| format!("${:.4}", c))),
                         ),

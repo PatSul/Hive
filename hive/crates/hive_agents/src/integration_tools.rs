@@ -97,6 +97,20 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
         (a2a_run_task_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to run remote tasks")),
         // --- Browser ---
         (browse_url_tool(), stub("Browser automation available — content extraction pending connection")),
+        (browser_navigate_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_screenshot_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_fill_form_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_click_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_evaluate_script_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_wait_for_selector_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_scrape_structured_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_pdf_export_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_run_test_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_crawl_site_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_monitor_changes_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_intercept_network_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_accessibility_audit_tool(), stub("Browser automation available — requires Playwright installation")),
+        (browser_performance_metrics_tool(), stub("Browser automation available — requires Playwright installation")),
         // --- Local AI / Ollama ---
         (ollama_list_models_tool(), stub("Point Settings > Local AI at a running Ollama instance to list models")),
         (ollama_pull_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to pull models")),
@@ -468,6 +482,388 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
                         "links": content.links
                     })),
                     Err(e) => Err(format!("Browse failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_navigate
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_navigate_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.navigate(&url).await {
+                    Ok(info) => Ok(json!({
+                        "url": info.url,
+                        "title": info.title,
+                        "status_code": info.status_code
+                    })),
+                    Err(e) => Err(format!("Navigate failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_screenshot
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_screenshot_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let full_page = args["full_page"].as_bool().unwrap_or(false);
+            let width = args["width"].as_u64().unwrap_or(1280) as u32;
+            let height = args["height"].as_u64().unwrap_or(720) as u32;
+            let selector = args["selector"].as_str().map(String::from);
+            let format = args["format"].as_str().unwrap_or("png").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let options = hive_integrations::browser::ScreenshotOptions {
+                    full_page,
+                    width,
+                    height,
+                    selector,
+                    format: format.clone(),
+                };
+                match svc.screenshot(&url, options).await {
+                    Ok(bytes) => {
+                        let b64 = encode_base64(&bytes);
+                        Ok(json!({
+                            "url": url,
+                            "format": format,
+                            "size_bytes": bytes.len(),
+                            "data_base64": b64
+                        }))
+                    }
+                    Err(e) => Err(format!("Screenshot failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_fill_form
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_fill_form_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let fields_val = args["fields"].as_array().cloned().unwrap_or_default();
+            let fields: Vec<hive_integrations::browser::FormField> = fields_val
+                .iter()
+                .map(|f| hive_integrations::browser::FormField {
+                    selector: f["selector"].as_str().unwrap_or("").to_string(),
+                    value: f["value"].as_str().unwrap_or("").to_string(),
+                })
+                .collect();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.fill_form(&url, fields).await {
+                    Ok(result) => Ok(json!({
+                        "success": result.success,
+                        "submitted_url": result.submitted_url,
+                        "response_status": result.response_status
+                    })),
+                    Err(e) => Err(format!("Fill form failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_click
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_click_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let selector = args["selector"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.click(&url, &selector).await {
+                    Ok(()) => Ok(json!({
+                        "url": url,
+                        "selector": selector,
+                        "status": "clicked"
+                    })),
+                    Err(e) => Err(format!("Click failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_evaluate_script
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_evaluate_script_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let js_code = args["js_code"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.evaluate_script(&url, &js_code).await {
+                    Ok(value) => Ok(json!({
+                        "url": url,
+                        "result": value
+                    })),
+                    Err(e) => Err(format!("Script evaluation failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_wait_for_selector
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_wait_for_selector_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let selector = args["selector"].as_str().unwrap_or("").to_string();
+            let timeout_ms = args["timeout_ms"].as_u64().unwrap_or(30_000);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.wait_for_selector(&url, &selector, timeout_ms).await {
+                    Ok(found) => Ok(json!({
+                        "url": url,
+                        "selector": selector,
+                        "found": found,
+                        "timeout_ms": timeout_ms
+                    })),
+                    Err(e) => Err(format!("Wait for selector failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_scrape_structured
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_scrape_structured_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let selectors_val = args["selectors"].as_array().cloned().unwrap_or_default();
+            let selectors: Vec<hive_integrations::browser::ScrapeSelector> = selectors_val
+                .iter()
+                .map(|s| hive_integrations::browser::ScrapeSelector {
+                    name: s["name"].as_str().unwrap_or("").to_string(),
+                    css_selector: s["css_selector"].as_str().unwrap_or("").to_string(),
+                    attribute: s["attribute"].as_str().map(String::from),
+                })
+                .collect();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.scrape_structured(&url, selectors).await {
+                    Ok(data) => {
+                        let result: serde_json::Value = serde_json::to_value(&data)
+                            .unwrap_or_else(|_| json!({}));
+                        Ok(json!({
+                            "url": url,
+                            "data": result
+                        }))
+                    }
+                    Err(e) => Err(format!("Structured scrape failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_pdf_export
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_pdf_export_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.pdf_export(&url).await {
+                    Ok(bytes) => {
+                        let b64 = encode_base64(&bytes);
+                        Ok(json!({
+                            "url": url,
+                            "size_bytes": bytes.len(),
+                            "data_base64": b64
+                        }))
+                    }
+                    Err(e) => Err(format!("PDF export failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_run_test
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_run_test_tool(), Box::new(move |args: serde_json::Value| {
+            let test_script = args["test_script"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.run_test(&test_script).await {
+                    Ok(result) => Ok(json!({
+                        "passed": result.passed,
+                        "failed": result.failed,
+                        "duration_ms": result.duration_ms,
+                        "output": result.output
+                    })),
+                    Err(e) => Err(format!("Test run failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_crawl_site
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_crawl_site_tool(), Box::new(move |args: serde_json::Value| {
+            let base_url = args["base_url"].as_str().unwrap_or("").to_string();
+            validate_url(&base_url)?;
+            let max_pages = args["max_pages"].as_u64().unwrap_or(10) as usize;
+            let extract_selector = args["extract_selector"].as_str().map(String::from);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.crawl_site(&base_url, max_pages, extract_selector.as_deref()).await {
+                    Ok(pages) => {
+                        let items: Vec<serde_json::Value> = pages.iter().map(|p| json!({
+                            "url": p.url,
+                            "title": p.title,
+                            "content": p.content,
+                            "links": p.links,
+                            "depth": p.depth
+                        })).collect();
+                        Ok(json!({
+                            "base_url": base_url,
+                            "pages_crawled": items.len(),
+                            "pages": items
+                        }))
+                    }
+                    Err(e) => Err(format!("Crawl failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_monitor_changes — collect up to 5 change events with a 30s total timeout
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_monitor_changes_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let selector = args["selector"].as_str().unwrap_or("").to_string();
+            let interval_secs = args["interval_secs"].as_u64().unwrap_or(5);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let mut rx = svc.monitor_changes(&url, &selector, interval_secs).await
+                    .map_err(|e| format!("Monitor setup failed: {e}"))?;
+                let mut events: Vec<serde_json::Value> = Vec::new();
+                let deadline = tokio::time::Instant::now()
+                    + tokio::time::Duration::from_secs(30);
+                let max_events = 5usize;
+                while events.len() < max_events {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    match tokio::time::timeout(remaining, rx.recv()).await {
+                        Ok(Some(event)) => {
+                            events.push(json!({
+                                "timestamp": event.timestamp.to_rfc3339(),
+                                "old_content": event.old_content,
+                                "new_content": event.new_content,
+                                "selector": event.selector
+                            }));
+                        }
+                        Ok(None) => break, // channel closed
+                        Err(_) => break,   // timeout
+                    }
+                }
+                Ok(json!({
+                    "url": url,
+                    "selector": selector,
+                    "changes_detected": events.len(),
+                    "events": events
+                }))
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_intercept_network
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_intercept_network_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let url_pattern = args["url_pattern"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.intercept_network(&url, &url_pattern).await {
+                    Ok(requests) => {
+                        let items: Vec<serde_json::Value> = requests.iter().map(|r| json!({
+                            "url": r.url,
+                            "method": r.method,
+                            "status": r.status,
+                            "content_type": r.content_type,
+                            "body_size": r.body_size
+                        })).collect();
+                        Ok(json!({
+                            "page_url": url,
+                            "pattern": url_pattern,
+                            "requests_captured": items.len(),
+                            "requests": items
+                        }))
+                    }
+                    Err(e) => Err(format!("Network intercept failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_accessibility_audit
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_accessibility_audit_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.accessibility_audit(&url).await {
+                    Ok(report) => {
+                        let violations: Vec<serde_json::Value> = report.violations.iter().map(|v| json!({
+                            "id": v.id,
+                            "description": v.description,
+                            "impact": v.impact,
+                            "nodes": v.nodes
+                        })).collect();
+                        Ok(json!({
+                            "url": url,
+                            "violations_count": violations.len(),
+                            "violations": violations,
+                            "passes": report.passes,
+                            "total": report.total
+                        }))
+                    }
+                    Err(e) => Err(format!("Accessibility audit failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // browser_performance_metrics
+    {
+        let svc = Arc::clone(&services.browser);
+        tools.push((browser_performance_metrics_tool(), Box::new(move |args: serde_json::Value| {
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            validate_url(&url)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.performance_metrics(&url).await {
+                    Ok(metrics) => Ok(json!({
+                        "url": url,
+                        "first_contentful_paint_ms": metrics.first_contentful_paint_ms,
+                        "largest_contentful_paint_ms": metrics.largest_contentful_paint_ms,
+                        "time_to_interactive_ms": metrics.time_to_interactive_ms,
+                        "total_blocking_time_ms": metrics.total_blocking_time_ms,
+                        "cumulative_layout_shift": metrics.cumulative_layout_shift
+                    })),
+                    Err(e) => Err(format!("Performance metrics failed: {e}")),
                 }
             })
         }) as ToolHandler));
@@ -970,6 +1366,241 @@ fn browse_url_tool() -> McpTool {
     }
 }
 
+fn browser_navigate_tool() -> McpTool {
+    McpTool {
+        name: "browser_navigate".into(),
+        description: "Navigate to a URL and return page info (url, title, status code)".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL to navigate to" }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
+fn browser_screenshot_tool() -> McpTool {
+    McpTool {
+        name: "browser_screenshot".into(),
+        description: "Take a screenshot of a URL. Returns base64-encoded image bytes.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL to screenshot" },
+                "full_page": { "type": "boolean", "description": "Capture the full scrollable page (default false)" },
+                "width": { "type": "integer", "description": "Viewport width in pixels (default 1280)" },
+                "height": { "type": "integer", "description": "Viewport height in pixels (default 720)" },
+                "selector": { "type": "string", "description": "Optional CSS selector to screenshot a specific element" },
+                "format": { "type": "string", "enum": ["png", "jpeg"], "description": "Image format (default png)" }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
+fn browser_fill_form_tool() -> McpTool {
+    McpTool {
+        name: "browser_fill_form".into(),
+        description: "Fill form fields on a page and submit. Each field needs a CSS selector and value.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page containing the form" },
+                "fields": {
+                    "type": "array",
+                    "description": "Form fields to fill",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "selector": { "type": "string", "description": "CSS selector for the field" },
+                            "value": { "type": "string", "description": "Value to fill" }
+                        },
+                        "required": ["selector", "value"]
+                    }
+                }
+            },
+            "required": ["url", "fields"]
+        }),
+    }
+}
+
+fn browser_click_tool() -> McpTool {
+    McpTool {
+        name: "browser_click".into(),
+        description: "Click an element on a page identified by a CSS selector".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page" },
+                "selector": { "type": "string", "description": "CSS selector of the element to click" }
+            },
+            "required": ["url", "selector"]
+        }),
+    }
+}
+
+fn browser_evaluate_script_tool() -> McpTool {
+    McpTool {
+        name: "browser_evaluate_script".into(),
+        description: "Evaluate JavaScript in the page context. WARNING: The script runs with full page access and can read/modify page data, cookies, and DOM.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to evaluate script on" },
+                "js_code": { "type": "string", "description": "JavaScript code to evaluate in the page context" }
+            },
+            "required": ["url", "js_code"]
+        }),
+    }
+}
+
+fn browser_wait_for_selector_tool() -> McpTool {
+    McpTool {
+        name: "browser_wait_for_selector".into(),
+        description: "Wait for a CSS selector to appear on a page within a timeout".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page" },
+                "selector": { "type": "string", "description": "CSS selector to wait for" },
+                "timeout_ms": { "type": "integer", "description": "Maximum time to wait in milliseconds (default 30000)" }
+            },
+            "required": ["url", "selector"]
+        }),
+    }
+}
+
+fn browser_scrape_structured_tool() -> McpTool {
+    McpTool {
+        name: "browser_scrape_structured".into(),
+        description: "Scrape structured data from a page using named CSS selectors with optional attribute extraction".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to scrape" },
+                "selectors": {
+                    "type": "array",
+                    "description": "Named selectors to extract data from",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string", "description": "Name for this data field" },
+                            "css_selector": { "type": "string", "description": "CSS selector to match elements" },
+                            "attribute": { "type": "string", "description": "Optional attribute to extract (e.g. 'href', 'src'). Omit to get text content." }
+                        },
+                        "required": ["name", "css_selector"]
+                    }
+                }
+            },
+            "required": ["url", "selectors"]
+        }),
+    }
+}
+
+fn browser_pdf_export_tool() -> McpTool {
+    McpTool {
+        name: "browser_pdf_export".into(),
+        description: "Export a page as PDF. Returns base64-encoded PDF bytes.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to export as PDF" }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
+fn browser_run_test_tool() -> McpTool {
+    McpTool {
+        name: "browser_run_test".into(),
+        description: "Run a Playwright test script and return results (passed, failed, duration, output)".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "test_script": { "type": "string", "description": "Playwright test script content to execute" }
+            },
+            "required": ["test_script"]
+        }),
+    }
+}
+
+fn browser_crawl_site_tool() -> McpTool {
+    McpTool {
+        name: "browser_crawl_site".into(),
+        description: "Crawl a website starting from a base URL, visiting up to max_pages pages and extracting content".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "base_url": { "type": "string", "description": "Starting URL for the crawl" },
+                "max_pages": { "type": "integer", "description": "Maximum number of pages to visit (default 10)" },
+                "extract_selector": { "type": "string", "description": "Optional CSS selector to extract specific content from each page" }
+            },
+            "required": ["base_url"]
+        }),
+    }
+}
+
+fn browser_monitor_changes_tool() -> McpTool {
+    McpTool {
+        name: "browser_monitor_changes".into(),
+        description: "Monitor a page element for content changes. Checks up to 5 times at the given interval and returns any detected changes.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to monitor" },
+                "selector": { "type": "string", "description": "CSS selector of the element to watch" },
+                "interval_secs": { "type": "integer", "description": "Seconds between checks (default 5)" }
+            },
+            "required": ["url", "selector"]
+        }),
+    }
+}
+
+fn browser_intercept_network_tool() -> McpTool {
+    McpTool {
+        name: "browser_intercept_network".into(),
+        description: "Intercept and capture network requests matching a URL pattern during page load".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to load" },
+                "url_pattern": { "type": "string", "description": "URL substring pattern to match requests against" }
+            },
+            "required": ["url", "url_pattern"]
+        }),
+    }
+}
+
+fn browser_accessibility_audit_tool() -> McpTool {
+    McpTool {
+        name: "browser_accessibility_audit".into(),
+        description: "Run an accessibility audit on a page and return violations, passes, and total checks".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to audit" }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
+fn browser_performance_metrics_tool() -> McpTool {
+    McpTool {
+        name: "browser_performance_metrics".into(),
+        description: "Collect Core Web Vitals and performance metrics for a page (FCP, LCP, TTI, TBT, CLS)".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": { "type": "string", "description": "URL of the page to measure" }
+            },
+            "required": ["url"]
+        }),
+    }
+}
+
 fn ollama_list_models_tool() -> McpTool {
     McpTool {
         name: "ollama_list_models".into(),
@@ -1224,6 +1855,50 @@ fn is_private_or_local(host: &str) -> bool {
     }
 
     false
+}
+
+/// Validate that a URL is safe for browser automation (SSRF protection).
+///
+/// Allows only `http` and `https` schemes and blocks private/local hosts.
+fn validate_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {e}"))?;
+    if parsed.scheme() != "https" && parsed.scheme() != "http" {
+        return Err("Only http/https URLs are allowed".into());
+    }
+    if let Some(host) = parsed.host_str() {
+        if is_private_or_local(host) {
+            return Err("Access to private/internal hosts is blocked".into());
+        }
+    }
+    Ok(())
+}
+
+/// Encode bytes as a standard base64 string (RFC 4648).
+fn encode_base64(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+
+        out.push(ALPHABET[((n >> 18) & 0x3F) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[((n >> 6) & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(n & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 fn parse_messaging_platform(s: &str) -> hive_integrations::messaging::Platform {

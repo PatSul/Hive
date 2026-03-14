@@ -14,6 +14,8 @@ actions!(
         SwitchToQuickStart,
         SwitchToHistory,
         SwitchToFiles,
+        SwitchToCodeMap,
+        SwitchToPromptLibrary,
         SwitchToKanban,
         SwitchToMonitor,
         SwitchToLogs,
@@ -40,6 +42,7 @@ actions!(
         FilesNewFile,
         FilesNewFolder,
         FilesCloseViewer,
+        FilesClearChecked,
         // History panel
         HistoryRefresh,
         HistoryClearAll,
@@ -118,6 +121,14 @@ actions!(
         WorkflowBuilderDeleteNode,
         // Auto-update
         TriggerAppUpdate,
+        // Prompt Library
+        PromptLibrarySaveCurrent,
+        PromptLibraryRefresh,
+        // Apply mode
+        ApplyAllEdits,
+        // Clipboard/export
+        ExportPrompt,
+        CopyFullPrompt,
     ]
 );
 
@@ -145,6 +156,28 @@ pub struct FilesOpenEntry {
 #[action(namespace = hive_workspace, no_json)]
 pub struct FilesDeleteEntry {
     pub name: String,
+}
+
+/// Toggle a file's checked state for context attachment.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct FilesToggleCheck {
+    pub path: String,
+}
+
+/// Apply a single code block edit to a file.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ApplyCodeBlock {
+    pub file_path: String,
+    pub content: String,
+}
+
+/// Copy content to clipboard.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct CopyToClipboard {
+    pub content: String,
 }
 
 /// Load a conversation by ID in the History panel.
@@ -406,6 +439,27 @@ pub struct ThemeChanged {
     pub theme_name: String,
 }
 
+/// Load a prompt template by ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PromptLibraryLoad {
+    pub prompt_id: String,
+}
+
+/// Delete a prompt template by ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct PromptLibraryDelete {
+    pub prompt_id: String,
+}
+
+/// User changed the context format (Markdown / TOON / XML).
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ContextFormatChanged {
+    pub format: String,
+}
+
 /// Create a new custom skill from the Create tab form.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = hive_workspace, no_json)]
@@ -535,4 +589,25 @@ pub struct TogglePinWorkspace {
 #[action(namespace = hive_workspace, no_json)]
 pub struct RemoveRecentWorkspace {
     pub path: String,
+}
+
+/// Pull (download) a model on the connected Ollama instance.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct OllamaPullModel {
+    pub model: String,
+}
+
+/// Delete a model from the connected Ollama instance.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct OllamaDeleteModel {
+    pub model: String,
+}
+
+/// Process text through voice assistant intent classification.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct VoiceProcessText {
+    pub text: String,
 }

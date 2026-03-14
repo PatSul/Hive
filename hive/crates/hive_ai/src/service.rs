@@ -313,6 +313,12 @@ impl AiService {
         self.providers.keys().copied().collect()
     }
 
+    /// Get a reference to the first available provider (useful for bridging
+    /// into `AiExecutor` implementations that don't need routing).
+    pub fn first_provider(&self) -> Option<Arc<dyn AiProvider>> {
+        self.providers.values().next().cloned()
+    }
+
     /// Resolve a model ID to its provider.
     fn resolve_provider(&self, model_id: &str) -> Option<(ProviderType, Arc<dyn AiProvider>)> {
         // Use the router to pick the provider

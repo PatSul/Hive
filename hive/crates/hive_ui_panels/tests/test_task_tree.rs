@@ -8,24 +8,28 @@ fn sample_event_infos() -> Vec<TaskEventInfo> {
             description: "Investigate auth module".into(),
             persona: "Investigate".into(),
             dependencies: vec![],
+            model_override: None,
         },
         TaskEventInfo {
             id: "task-2".into(),
             description: "Implement login flow".into(),
             persona: "Implement".into(),
             dependencies: vec!["task-1".into()],
+            model_override: None,
         },
         TaskEventInfo {
             id: "task-3".into(),
             description: "Verify login tests".into(),
             persona: "Verify".into(),
             dependencies: vec!["task-2".into()],
+            model_override: None,
         },
         TaskEventInfo {
             id: "task-4".into(),
             description: "Review code quality".into(),
             persona: "Code Review".into(),
             dependencies: vec!["task-2".into()],
+            model_override: None,
         },
     ]
 }
@@ -46,6 +50,7 @@ fn task_tree_new_creates_pending_tasks() {
         assert!(task.cost.is_none());
         assert!(task.output_preview.is_none());
         assert!(!task.expanded);
+        assert!(task.model_override.is_none());
     }
 }
 
@@ -120,12 +125,14 @@ fn task_tree_failed_counts_as_done() {
             description: "Task 1".into(),
             persona: "Implement".into(),
             dependencies: vec![],
+            model_override: None,
         },
         TaskEventInfo {
             id: "t2".into(),
             description: "Task 2".into(),
             persona: "Verify".into(),
             dependencies: vec![],
+            model_override: None,
         },
     ];
     let mut tree = TaskTreeState::new("Plan".into(), "p1".into(), infos);
@@ -212,4 +219,26 @@ fn task_tree_cost_accumulates_correctly() {
     tree.mark_completed("task-1", 100, 0.10, "a".into());
     tree.mark_completed("task-2", 200, 0.20, "b".into());
     assert!((tree.total_cost - 0.30).abs() < 1e-10);
+}
+
+#[test]
+fn task_tree_model_override() {
+    let mut tree = TaskTreeState::new("Plan".into(), "p1".into(), sample_event_infos());
+
+    // Initially no overrides
+    assert!(tree.model_overrides().is_empty());
+
+    // Pin a model to task-1
+    tree.set_model_override("task-1", Some("claude-opus-4".into()));
+    assert_eq!(tree.tasks[0].model_override, Some("claude-opus-4".into()));
+
+    // Overrides list returns (id, model) pair
+    let overrides = tree.model_overrides();
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0], ("task-1".into(), "claude-opus-4".into()));
+
+    // Clear override
+    tree.set_model_override("task-1", None);
+    assert!(tree.tasks[0].model_override.is_none());
+    assert!(tree.model_overrides().is_empty());
 }

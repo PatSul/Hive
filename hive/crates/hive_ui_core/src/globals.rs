@@ -128,6 +128,10 @@ impl Global for AppCli {}
 pub struct AppAssistant(pub AssistantService);
 impl Global for AppAssistant {}
 
+/// Global wrapper for the voice assistant service (text-to-intent classification).
+pub struct AppVoiceAssistant(pub std::sync::Arc<std::sync::Mutex<hive_agents::VoiceAssistant>>);
+impl Global for AppVoiceAssistant {}
+
 /// Global wrapper for the cron-based task scheduler.
 ///
 /// Wrapped in `Arc<Mutex<_>>` so the background tick driver thread can call
@@ -251,7 +255,10 @@ pub struct AppContextEngine(pub Arc<Mutex<ContextEngine>>);
 impl Global for AppContextEngine {}
 
 /// Global wrapper for collective memory.
-pub struct AppCollectiveMemory(pub Arc<Mutex<CollectiveMemory>>);
+///
+/// `CollectiveMemory` is internally synchronised (`Mutex<Connection>`) so no
+/// outer `Mutex` is needed — just share the `Arc` directly.
+pub struct AppCollectiveMemory(pub Arc<CollectiveMemory>);
 impl Global for AppCollectiveMemory {}
 
 /// Global wrapper for standup service.
@@ -283,6 +290,31 @@ impl Global for AppKnowledgeFiles {}
 pub struct AppQuickIndex(pub Arc<QuickIndex>);
 impl Global for AppQuickIndex {}
 
+/// State tracking user-selected files/symbols for AI context attachment.
+///
+/// Updated when files are checked/unchecked in the Files panel.
+/// Read by `ChatInputView` to show context chips and by the workspace
+/// to inject selected file contents into the AI request.
+pub struct ContextSelectionState {
+    /// Absolute paths of files selected for context.
+    pub selected_files: Vec<std::path::PathBuf>,
+    /// Estimated total tokens across all selected files.
+    pub total_tokens: usize,
+}
+
+impl Default for ContextSelectionState {
+    fn default() -> Self {
+        Self {
+            selected_files: Vec::new(),
+            total_tokens: 0,
+        }
+    }
+}
+
+/// Global wrapper for context selection state (files/symbols attached to chat).
+pub struct AppContextSelection(pub Arc<Mutex<ContextSelectionState>>);
+impl Global for AppContextSelection {}
+
 /// Global wrapper for the UI action bridge sender.
 ///
 /// MCP tool handlers clone this sender to dispatch UI actions across the
@@ -290,3 +322,13 @@ impl Global for AppQuickIndex {}
 /// and the sender can be captured by `Send + Sync` closures.
 pub struct AppUiActionTx(pub Arc<std::sync::mpsc::Sender<crate::action_bridge::UiActionRequest>>);
 impl Global for AppUiActionTx {}
+
+/// Global wrapper for the reminder notification receiver (fed by tick driver).
+///
+/// The tick driver sends `Vec<TriggeredReminder>` over this channel whenever
+/// reminders fire.  The workspace drains it in `sync_status_bar()` to push
+/// in-app notifications.
+pub struct AppReminderRx(
+    pub Arc<Mutex<std::sync::mpsc::Receiver<Vec<hive_assistant::reminders::TriggeredReminder>>>>,
+);
+impl Global for AppReminderRx {}

@@ -25,6 +25,8 @@ pub struct TickDriverConfig {
     pub interval: Duration,
     /// Path to the assistant database (for the ReminderService connection).
     pub assistant_db_path: String,
+    /// Optional sender to forward triggered reminders to the UI layer.
+    pub reminder_tx: Option<std::sync::mpsc::Sender<Vec<crate::reminders::TriggeredReminder>>>,
 }
 
 impl Default for TickDriverConfig {
@@ -32,6 +34,7 @@ impl Default for TickDriverConfig {
         Self {
             interval: Duration::from_secs(60),
             assistant_db_path: String::new(),
+            reminder_tx: None,
         }
     }
 }
@@ -71,6 +74,7 @@ pub fn start_tick_driver(
                     }
                 };
                 let reminder_service = ReminderService::new(storage);
+                let reminder_tx = config.reminder_tx;
 
                 info!(
                     "Tick driver started (interval={}s)",
@@ -125,6 +129,13 @@ pub fn start_tick_driver(
                             "Reminder",
                             &reminder.title,
                         );
+                    }
+
+                    // Forward triggered reminders to the UI layer if a channel is configured.
+                    if !triggered_reminders.is_empty() {
+                        if let Some(ref tx) = reminder_tx {
+                            let _ = tx.send(triggered_reminders);
+                        }
                     }
                 }
             });

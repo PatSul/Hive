@@ -4,7 +4,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{Icon, IconName};
 use std::path::PathBuf;
 
-use hive_ui_core::{AppTheme, HiveTheme};
+use hive_ui_core::{AppContextSelection, AppTheme, FilesToggleCheck, HiveTheme};
 
 // ---------------------------------------------------------------------------
 // Events
@@ -14,7 +14,11 @@ use hive_ui_core::{AppTheme, HiveTheme};
 /// button. The workspace subscribes to this and feeds the text into the AI
 /// streaming flow.
 #[derive(Debug, Clone)]
-pub struct SubmitMessage(pub String);
+pub struct SubmitMessage {
+    pub text: String,
+    /// Files explicitly selected for context attachment (absolute paths).
+    pub context_files: Vec<PathBuf>,
+}
 
 // ---------------------------------------------------------------------------
 // ChatInputView
@@ -80,6 +84,13 @@ impl ChatInputView {
     pub fn clear(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.input_state.update(cx, |state, cx| {
             state.replace("", window, cx);
+        });
+    }
+
+    /// Set the input field text.
+    pub fn set_text(&self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.input_state.update(cx, |state, cx| {
+            state.replace(text, window, cx);
         });
     }
 
@@ -150,7 +161,16 @@ impl ChatInputView {
 
         let raw = self.input_state.read(cx).value().to_string();
         let text = raw.trim().to_string();
-        if text.is_empty() && self.attachments.is_empty() {
+
+        // Gather context files from the global selection state.
+        let context_files = if cx.has_global::<AppContextSelection>() {
+            let sel = cx.global::<AppContextSelection>().0.lock().unwrap();
+            sel.selected_files.clone()
+        } else {
+            Vec::new()
+        };
+
+        if text.is_empty() && self.attachments.is_empty() && context_files.is_empty() {
             // Nothing to send -- clear the stray newline and bail.
             self.clear(window, cx);
             return;
@@ -158,7 +178,10 @@ impl ChatInputView {
 
         self.clear(window, cx);
         self.attachments.clear();
-        cx.emit(SubmitMessage(text));
+        cx.emit(SubmitMessage {
+            text,
+            context_files,
+        });
     }
 
     /// Open a native file picker and add selected files as attachments.
@@ -190,9 +213,19 @@ impl Render for ChatInputView {
             .map(|c| format!("~${:.4}", c))
             .unwrap_or_default();
 
+        // Read context selection state for chips
+        let (context_files_display, context_total_tokens) =
+            if cx.has_global::<AppContextSelection>() {
+                let sel = cx.global::<AppContextSelection>().0.lock().unwrap();
+                (sel.selected_files.clone(), sel.total_tokens)
+            } else {
+                (Vec::new(), 0)
+            };
+        let has_context_files = !context_files_display.is_empty();
+
         let has_text = !self.input_state.read(cx).value().is_empty();
         let has_attachments = !self.attachments.is_empty();
-        let send_enabled = (has_text || has_attachments) && !self.is_sending;
+        let send_enabled = (has_text || has_attachments || has_context_files) && !self.is_sending;
         let send_bg = if send_enabled {
             theme.accent_aqua
         } else {
@@ -265,6 +298,73 @@ impl Render for ChatInputView {
                     .border_color(theme.border)
                     .rounded(theme.radius_lg)
                     .overflow_hidden()
+                    // Context file chips (from Files panel checkboxes)
+                    .when(has_context_files, |el| {
+                        let token_label = format_token_count(context_total_tokens);
+                        let ctx_chips: Vec<_> = context_files_display
+                            .iter()
+                            .map(|path| {
+                                let name = path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "file".to_string());
+                                let toggle_path = path.to_string_lossy().to_string();
+                                div()
+                                    .id(ElementId::Name(
+                                        format!("ctx-{}", name).into(),
+                                    ))
+                                    .flex()
+                                    .items_center()
+                                    .gap(theme.space_1)
+                                    .px(theme.space_2)
+                                    .py(theme.space_1)
+                                    .bg(theme.bg_tertiary)
+                                    .rounded(theme.radius_sm)
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.accent_aqua)
+                                    .child(Icon::new(IconName::File).size_3p5())
+                                    .child(name)
+                                    .child(
+                                        div()
+                                            .id(ElementId::Name(
+                                                format!("rm-ctx-{}", toggle_path).into(),
+                                            ))
+                                            .cursor_pointer()
+                                            .text_color(theme.text_muted)
+                                            .hover(|el| el.text_color(theme.accent_red))
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                move |_event, window, cx| {
+                                                    window.dispatch_action(
+                                                        Box::new(FilesToggleCheck {
+                                                            path: toggle_path.clone(),
+                                                        }),
+                                                        cx,
+                                                    );
+                                                },
+                                            )
+                                            .child(Icon::new(IconName::Close).size_3p5()),
+                                    )
+                            })
+                            .collect();
+
+                        el.child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap(theme.space_1)
+                                .px(theme.space_3)
+                                .pt(theme.space_2)
+                                .children(ctx_chips)
+                                .child(
+                                    div()
+                                        .text_size(theme.font_size_xs)
+                                        .text_color(theme.text_muted)
+                                        .child(token_label),
+                                ),
+                        )
+                    })
                     // Attachment chips
                     .when(has_attachments, |el| {
                         el.child(
@@ -355,5 +455,14 @@ impl Render for ChatInputView {
                         )
                     }),
             )
+    }
+}
+
+/// Format a token count as a human-readable string (e.g., "~1.2k tokens").
+fn format_token_count(tokens: usize) -> String {
+    if tokens >= 1000 {
+        format!("~{:.1}k tokens", tokens as f64 / 1000.0)
+    } else {
+        format!("~{tokens} tokens")
     }
 }

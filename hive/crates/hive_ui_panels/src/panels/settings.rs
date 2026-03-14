@@ -12,7 +12,7 @@ use hive_terminal::local_ai::PullProgress;
 use crate::components::model_selector::{ModelSelected, ModelSelectorView};
 use hive_core::theme_manager::ThemeManager;
 use hive_ui_core::{AppConfig, AppHueClient, AppOllamaManager};
-use hive_ui_core::{AppTheme, HiveTheme, ThemeChanged};
+use hive_ui_core::{AppTheme, ContextFormatChanged, HiveTheme, ThemeChanged};
 use hive_ui_core::{AccountConnectPlatform, ExportConfig, ImportConfig};
 
 // ---------------------------------------------------------------------------
@@ -325,6 +325,9 @@ pub struct SettingsView {
     selected_theme: String,
     available_themes: Vec<String>,
 
+    // Context format picker
+    selected_context_format: String,
+
     // Focus handle — required so dispatch_action reaches our on_action handlers
     focus_handle: FocusHandle,
 }
@@ -597,6 +600,11 @@ impl SettingsView {
         }
 
         let selected_theme = cfg.theme.clone();
+        let selected_context_format = if cfg.context_format.is_empty() {
+            "markdown".to_string()
+        } else {
+            cfg.context_format.clone()
+        };
         let focus_handle = cx.focus_handle();
 
         let view = Self {
@@ -659,6 +667,7 @@ impl SettingsView {
             telegram_client_id_input,
             selected_theme,
             available_themes,
+            selected_context_format,
             focus_handle,
         };
 
@@ -683,6 +692,13 @@ impl SettingsView {
     /// ThemeChanged resolves). Keeps the picker highlight in sync.
     pub fn set_selected_theme(&mut self, name: String, cx: &mut Context<Self>) {
         self.selected_theme = name;
+        cx.notify();
+    }
+
+    /// Update the selected context format (called from the workspace after
+    /// ContextFormatChanged resolves).
+    pub fn set_selected_context_format(&mut self, format: String, cx: &mut Context<Self>) {
+        self.selected_context_format = format;
         cx.notify();
     }
 
@@ -2335,6 +2351,78 @@ impl SettingsView {
                             .gap(theme.space_2)
                             .children(theme_buttons),
                     ),
+            )
+            .child(separator(theme))
+            // Context format picker
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(theme.space_2)
+                    .child(
+                        div()
+                            .text_size(theme.font_size_sm)
+                            .text_color(theme.text_secondary)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Context Format"),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .child("How project context is encoded in AI prompts"),
+                    )
+                    .child({
+                        let sel = self.selected_context_format.to_lowercase();
+                        let options = vec![
+                            ("markdown", "Markdown"),
+                            ("toon", "TOON"),
+                            ("xml", "XML"),
+                        ];
+                        div()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap(theme.space_2)
+                            .children(options.into_iter().map(|(value, label)| {
+                                let is_active = sel == value;
+                                let action_value = value.to_string();
+                                div()
+                                    .id(SharedString::from(format!("ctx-fmt-{}", value)))
+                                    .cursor_pointer()
+                                    .px(theme.space_3)
+                                    .py(theme.space_2)
+                                    .rounded(theme.radius_sm)
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(if is_active {
+                                        theme.text_on_accent
+                                    } else {
+                                        theme.text_primary
+                                    })
+                                    .bg(if is_active {
+                                        theme.accent_aqua
+                                    } else {
+                                        theme.bg_tertiary
+                                    })
+                                    .hover(|s| {
+                                        s.bg(if is_active {
+                                            theme.accent_cyan
+                                        } else {
+                                            theme.bg_secondary
+                                        })
+                                    })
+                                    .on_mouse_down(MouseButton::Left, move |_ev, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(ContextFormatChanged {
+                                                format: action_value.clone(),
+                                            }),
+                                            cx,
+                                        );
+                                    })
+                                    .child(label)
+                                    .into_any_element()
+                            }))
+                    }),
             )
             .child(separator(theme))
             .child(switch_row(

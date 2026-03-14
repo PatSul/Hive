@@ -366,6 +366,119 @@ impl QuickIndex {
         out
     }
 
+    /// Generate a context string using XML structured encoding.
+    ///
+    /// Wraps project context in explicit XML tags for structured AI consumption.
+    pub fn to_context_string_xml(&self) -> String {
+        let mut out = String::with_capacity(4096);
+        out.push_str("<project_context>\n");
+
+        // Project overview
+        out.push_str("<overview>\n");
+        out.push_str(&self.file_tree.summary);
+        out.push('\n');
+        if !self.file_tree.key_dirs.is_empty() {
+            out.push_str(&format!(
+                "<key_dirs>{}</key_dirs>\n",
+                self.file_tree.key_dirs.join(", ")
+            ));
+        }
+
+        // File types
+        if !self.file_tree.by_extension.is_empty() {
+            let mut exts: Vec<_> = self.file_tree.by_extension.iter().collect();
+            exts.sort_by(|a, b| b.1.cmp(a.1));
+            out.push_str("<file_types>");
+            let top: Vec<String> = exts
+                .iter()
+                .take(8)
+                .map(|(ext, count)| format!(".{ext}({count})"))
+                .collect();
+            out.push_str(&top.join(", "));
+            out.push_str("</file_types>\n");
+        }
+        out.push_str("</overview>\n");
+
+        // Dependencies
+        if !self.dependencies.is_empty() {
+            out.push_str("<dependencies>\n");
+            let mut by_source: HashMap<&str, Vec<&Dependency>> = HashMap::new();
+            for dep in &self.dependencies {
+                by_source.entry(&dep.source).or_default().push(dep);
+            }
+            for (source, deps) in &by_source {
+                out.push_str(&format!("<source name=\"{source}\">"));
+                let names: Vec<String> = deps
+                    .iter()
+                    .take(30)
+                    .map(|d| {
+                        if d.version.is_empty() {
+                            d.name.clone()
+                        } else {
+                            format!("{}@{}", d.name, d.version)
+                        }
+                    })
+                    .collect();
+                out.push_str(&names.join(", "));
+                out.push_str("</source>\n");
+            }
+            out.push_str("</dependencies>\n");
+        }
+
+        // Key symbols
+        if !self.key_symbols.is_empty() {
+            out.push_str("<symbols>\n");
+            let mut by_file: HashMap<&str, Vec<&SymbolEntry>> = HashMap::new();
+            for sym in &self.key_symbols {
+                by_file.entry(&sym.file).or_default().push(sym);
+            }
+            let mut files: Vec<_> = by_file.into_iter().collect();
+            files.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+            let mut symbol_lines = 0;
+            for (file, syms) in &files {
+                if symbol_lines > 60 {
+                    break;
+                }
+                out.push_str(&format!("<file path=\"{file}\">"));
+                let names: Vec<String> = syms
+                    .iter()
+                    .take(10)
+                    .map(|s| format!("{} {}", s.kind, s.name))
+                    .collect();
+                out.push_str(&names.join(", "));
+                out.push_str("</file>\n");
+                symbol_lines += 1;
+            }
+            out.push_str("</symbols>\n");
+        }
+
+        // Recent git history
+        if !self.recent_git.is_empty() {
+            out.push_str("<git_history>\n");
+            for entry in self.recent_git.iter().take(10) {
+                let age = if entry.days_ago == 0 {
+                    "today".to_string()
+                } else if entry.days_ago == 1 {
+                    "yesterday".to_string()
+                } else {
+                    format!("{}d ago", entry.days_ago)
+                };
+                out.push_str(&format!(
+                    "<commit hash=\"{}\" age=\"{}\" author=\"{}\">{}</commit>\n",
+                    &entry.hash[..7.min(entry.hash.len())],
+                    age,
+                    entry.author,
+                    entry.message,
+                ));
+            }
+            out.push_str("</git_history>\n");
+        }
+
+        out.push_str("</project_context>");
+        out
+    }
+
     // -----------------------------------------------------------------------
     // File tree scanning
     // -----------------------------------------------------------------------

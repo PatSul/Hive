@@ -7,7 +7,7 @@ use gpui_component::theme::Theme as GpuiTheme;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use hive_ai::providers::AiProvider;
 use hive_ai::speculative::{self, SpeculativeConfig};
@@ -22,32 +22,35 @@ use hive_assistant::ReminderTrigger;
 use hive_terminal::{InteractiveShell, ShellOutput};
 
 use crate::chat_input::{ChatInputView, SubmitMessage};
-use crate::chat_service::{ChatService, StreamCompleted};
+use crate::chat_service::{ChatService, MessageRole, StreamCompleted};
 use chrono::Utc;
 use hive_ui_core::{
     // Globals
     AppA2aClient, AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBrowser,
-    AppChannels, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppGcp, AppHueClient,
-    AppIntegrationDb, AppKnowledge, AppKnowledgeFiles, AppHiveMemory, AppKubernetes,
+    AppChannels, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning,
+    AppGcp, AppHueClient, AppIntegrationDb, AppKnowledge, AppKnowledgeFiles, AppHiveMemory, AppKubernetes,
     AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications,
-    AppOllamaManager, AppPersonas, AppProjectManagement, AppQuickIndex, AppSkillManager,
-    AppRagService, AppContextEngine, AppRpcConfig, AppSecurity, AppSemanticSearch, AppShield,
-    AppSpecs, AppTheme, AppTts, AppUpdater, AppWallets,
+    AppOllamaManager, AppPersonas, AppProjectManagement, AppQuickIndex, AppReminderRx,
+    AppContextSelection, AppSkillManager, AppRagService, AppContextEngine, AppRpcConfig, AppSecurity,
+    ContextSelectionState,
+    AppSemanticSearch, AppShield, AppSpecs, AppTheme, AppTts, AppUpdater,
+    AppVoiceAssistant, AppWallets,
     // Types
     HiveTheme, Panel, Sidebar,
 };
 // Re-export actions so hive_app can import from hive_ui::workspace::*
 pub use hive_ui_core::{
     ClearChat, NewConversation,
-    SwitchToChat, SwitchToQuickStart, SwitchToHistory, SwitchToFiles, SwitchToKanban, SwitchToMonitor,
+    SwitchToChat, SwitchToQuickStart, SwitchToHistory, SwitchToFiles, SwitchToCodeMap,
+    SwitchToPromptLibrary, SwitchToKanban, SwitchToMonitor,
     SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
     SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToTerminal, SwitchToHelp,
     OpenWorkspaceDirectory,
     ToggleProjectDropdown,
     SwitchToWorkspace, TogglePinWorkspace, RemoveRecentWorkspace,
-    FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
-    FilesCloseViewer, FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry,
+    FilesClearChecked, FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
+    FilesCloseViewer, FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry, FilesToggleCheck,
     HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
     HistoryClearAll, HistoryClearAllConfirm, HistoryClearAllCancel,
     KanbanAddTask, LogsClear, LogsToggleAutoScroll, LogsSetFilter,
@@ -82,7 +85,11 @@ pub use hive_ui_core::{
     WorkflowBuilderSave, WorkflowBuilderRun, WorkflowBuilderDeleteNode,
     WorkflowBuilderLoadWorkflow, ChannelSelect,
     AccountConnectPlatform, AccountDisconnectPlatform,
-    TriggerAppUpdate, ThemeChanged,
+    TriggerAppUpdate, ThemeChanged, ContextFormatChanged,
+    ApplyCodeBlock, ApplyAllEdits, CopyToClipboard, CopyFullPrompt, ExportPrompt,
+    PromptLibrarySaveCurrent, PromptLibraryRefresh, PromptLibraryLoad, PromptLibraryDelete,
+    VoiceProcessText,
+    OllamaPullModel, OllamaDeleteModel,
 };
 use hive_ui_panels::panels::chat::{DisplayMessage, ToolCallDisplay};
 use hive_ui_panels::panels::{
@@ -243,6 +250,8 @@ pub struct HiveWorkspace {
     focus_handle: FocusHandle,
     history_data: HistoryData,
     files_data: FilesData,
+    code_map_data: hive_ui_panels::panels::code_map::CodeMapData,
+    prompt_library_data: hive_ui_panels::panels::prompt_library::PromptLibraryData,
     quick_start_data: QuickStartPanelData,
     kanban_data: KanbanData,
     monitor_data: MonitorData,
@@ -284,6 +293,8 @@ pub struct HiveWorkspace {
     discovery_scan_pending: bool,
     /// Set to `true` by the background scan thread when done.
     discovery_done_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Timestamp of the last network peer refresh (for 30s cadence).
+    last_network_refresh: Option<std::time::Instant>,
     /// Recently used workspace roots, persisted to session and shown in the titlebar.
     recent_workspace_roots: Vec<PathBuf>,
     pinned_workspace_roots: Vec<PathBuf>,
@@ -295,6 +306,11 @@ pub struct HiveWorkspace {
     /// Holds the backend `PluginPreview` + `PluginSource` while the user is
     /// reviewing the import preview screen. Consumed by confirm handler.
     pending_plugin_preview: Option<(PluginPreview, PluginSource)>,
+    /// File watcher for incremental RAG indexing. Dropped on project switch.
+    _file_watcher: Option<hive_fs::FileWatcher>,
+    /// Completed swarm task trees. Appended after `/swarm` execution and shown
+    /// in the monitor panel's background tasks section alongside active runs.
+    swarm_task_trees: Vec<hive_ui_panels::components::task_tree::TaskTreeState>,
 }
 
 const MAX_RECENT_WORKSPACES: usize = 8;
@@ -331,11 +347,11 @@ impl HiveWorkspace {
         .detach();
 
         // Subscribe to stream completion events for learning instrumentation.
-        cx.subscribe(&chat_service, |_this, _svc, event: &StreamCompleted, cx| {
+        cx.subscribe(&chat_service, |_this, svc, event: &StreamCompleted, cx| {
             if cx.has_global::<AppLearning>() {
                 let learning = &cx.global::<AppLearning>().0;
                 let record = hive_learn::OutcomeRecord {
-                    conversation_id: String::new(),
+                    conversation_id: svc.read(cx).conversation_id.clone().unwrap_or_default(),
                     message_id: uuid::Uuid::new_v4().to_string(),
                     model_id: event.model.clone(),
                     task_type: "chat".into(),
@@ -351,6 +367,24 @@ impl HiveWorkspace {
                 };
                 if let Err(e) = learning.on_outcome(&record) {
                     tracing::warn!("Learning: failed to record outcome: {e}");
+                }
+            }
+
+            // Fleet learning: record pattern and update instance metrics.
+            if cx.has_global::<AppFleetLearning>() {
+                if let Ok(mut fleet) = cx.global::<AppFleetLearning>().0.lock() {
+                    fleet.record_pattern(
+                        hive_ai::fleet_learning::PatternType::PromptPattern,
+                        &event.model,
+                        0.8,
+                    );
+                    let tokens_total = event.tokens.map(|(i, o)| (i + o) as u64).unwrap_or(0);
+                    fleet.update_instance_metrics(
+                        "local",
+                        1,
+                        event.cost.unwrap_or(0.0),
+                        tokens_total,
+                    );
                 }
             }
         })
@@ -406,6 +440,8 @@ impl HiveWorkspace {
         let pinned_workspace_roots = Self::load_pinned_workspace_roots(&session);
         let project_name = Self::project_name_from_path(&project_root);
         let files_data = FilesData::from_path(&project_root);
+        let code_map_data = hive_ui_panels::panels::code_map::build_code_map_data(cx);
+        let prompt_library_data = hive_ui_panels::panels::prompt_library::PromptLibraryData::load();
         status_bar.active_project = format!(
             "{} [{}]",
             project_name,
@@ -435,6 +471,11 @@ impl HiveWorkspace {
         );
         cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
 
+        // Initialize context selection state (files checked in Files panel).
+        cx.set_global(AppContextSelection(
+            std::sync::Arc::new(std::sync::Mutex::new(ContextSelectionState::default())),
+        ));
+
         // Create the interactive chat input entity.
         let chat_input = cx.new(|cx| ChatInputView::new(window, cx));
 
@@ -443,7 +484,7 @@ impl HiveWorkspace {
             &chat_input,
             window,
             |this, _view, event: &SubmitMessage, window, cx| {
-                this.handle_send_text(event.0.clone(), window, cx);
+                this.handle_send_text(event.text.clone(), event.context_files.clone(), window, cx);
             },
         )
         .detach();
@@ -784,6 +825,8 @@ impl HiveWorkspace {
             focus_handle,
             history_data,
             files_data,
+            code_map_data,
+            prompt_library_data,
             quick_start_data,
             kanban_data,
             monitor_data,
@@ -811,8 +854,11 @@ impl HiveWorkspace {
             last_discovery_scan: None,
             discovery_scan_pending: false,
             discovery_done_flag: None,
+            last_network_refresh: None,
             last_window_size: session.window_size,
             pending_plugin_preview: None,
+            _file_watcher: None,
+            swarm_task_trees: Vec::new(),
         }
     }
 
@@ -1079,6 +1125,53 @@ impl HiveWorkspace {
             );
             cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
             self.start_background_project_indexing(cx);
+
+            // Start incremental file watcher for RAG indexing.
+            let rag_for_watcher = cx.has_global::<AppRagService>()
+                .then(|| cx.global::<AppRagService>().0.clone());
+            if let Some(rag_svc) = rag_for_watcher {
+                let project_root = self.current_project_root.clone();
+                match hive_fs::FileWatcher::new(&self.current_project_root, move |event| {
+                    let path = match &event {
+                        hive_fs::WatchEvent::Created(p) | hive_fs::WatchEvent::Modified(p) => Some(p.clone()),
+                        hive_fs::WatchEvent::Renamed { to, .. } => Some(to.clone()),
+                        hive_fs::WatchEvent::Deleted(_) => None,
+                    };
+                    if let Some(path) = path {
+                        // Only index files with common code extensions.
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let indexable = matches!(
+                            ext,
+                            "rs" | "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "java"
+                            | "c" | "cpp" | "h" | "hpp" | "rb" | "swift" | "kt"
+                            | "md" | "txt" | "toml" | "yaml" | "yml" | "json"
+                        );
+                        if indexable {
+                            if let Ok(content) = std::fs::read_to_string(&path) {
+                                let rel = path
+                                    .strip_prefix(&project_root)
+                                    .unwrap_or(&path)
+                                    .to_string_lossy()
+                                    .to_string();
+                                if let Ok(mut rag) = rag_svc.lock() {
+                                    rag.index_file(&rel, &content);
+                                    tracing::debug!("RAG watcher: indexed {rel}");
+                                }
+                            }
+                        }
+                    }
+                }) {
+                    Ok(watcher) => {
+                        self._file_watcher = Some(watcher);
+                        info!("RAG file watcher started for {}", self.current_project_root.display());
+                    }
+                    Err(e) => {
+                        warn!("RAG file watcher failed to start: {e}");
+                        self._file_watcher = None;
+                    }
+                }
+            }
+
             self.refresh_quick_start_data(cx);
 
             cx.notify();
@@ -1281,7 +1374,7 @@ impl HiveWorkspace {
             self.monitor_data.providers = providers;
         }
 
-        // -- Background tasks from active agent runs ----------------------------
+        // -- Background tasks from active agent runs + completed swarms --------
         self.monitor_data.background_tasks = self
             .agents_data
             .active_runs
@@ -1298,7 +1391,12 @@ impl HiveWorkspace {
                     elapsed_ms: 0,
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        // Append completed swarm task trees so they remain visible in the
+        // monitor panel after execution finishes.
+        self.monitor_data
+            .background_tasks
+            .extend(self.swarm_task_trees.iter().cloned());
 
         // -- Uptime (seconds since process start) -----------------------------
         if let Ok(output) = std::process::Command::new("ps")
@@ -2333,7 +2431,7 @@ impl HiveWorkspace {
     /// 2. Extracts the provider + request from the `AppAiService` global.
     /// 3. Spawns an async task that calls `provider.stream_chat()` and feeds
     ///    the resulting receiver back into `ChatService::attach_stream`.
-    fn handle_send_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_send_text(&mut self, text: String, context_files: Vec<std::path::PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         if text.trim().is_empty() {
             return;
         }
@@ -2372,6 +2470,166 @@ impl HiveWorkspace {
         } else {
             text
         };
+
+        // --- /swarm command intercept ------------------------------------------
+        // `/swarm <goal>` dispatches the Queen meta-coordinator instead of the
+        // normal chat flow.
+        if send_text.trim().starts_with("/swarm ") {
+            let goal = send_text.trim().strip_prefix("/swarm ").unwrap_or("").trim().to_string();
+            if goal.is_empty() {
+                self.chat_service.update(cx, |svc, cx| {
+                    svc.set_error("Usage: /swarm <goal description>".to_string(), cx);
+                });
+                return;
+            }
+
+            // Record user message + create placeholder.
+            self.chat_service.update(cx, |svc, cx| {
+                svc.send_message(send_text, &model, cx);
+            });
+
+            // Resolve the AI provider to bridge into AiExecutor.
+            let provider: Option<Arc<dyn AiProvider>> = if cx.has_global::<AppAiService>() {
+                cx.global::<AppAiService>().0.first_provider()
+            } else {
+                None
+            };
+            let Some(provider) = provider else {
+                self.chat_service.update(cx, |svc, cx| {
+                    svc.set_error("No AI provider available for swarm execution", cx);
+                });
+                return;
+            };
+
+            // Optionally attach collective memory.
+            let memory = if cx.has_global::<hive_ui_core::AppCollectiveMemory>() {
+                Some(Arc::clone(&cx.global::<hive_ui_core::AppCollectiveMemory>().0))
+            } else {
+                None
+            };
+
+            let model_for_exec = model.clone();
+            let chat_svc = self.chat_service.downgrade();
+            cx.spawn(async move |_this, app: &mut AsyncApp| {
+                // Bridge: wrap the provider as an AiExecutor.
+                struct ProviderExecutor {
+                    provider: Arc<dyn AiProvider>,
+                    model: String,
+                }
+                impl hive_agents::AiExecutor for ProviderExecutor {
+                    async fn execute(
+                        &self,
+                        request: &hive_ai::types::ChatRequest,
+                    ) -> Result<hive_ai::types::ChatResponse, String> {
+                        self.provider.chat(request).await.map_err(|e| e.to_string())
+                    }
+                }
+
+                let executor = Arc::new(ProviderExecutor {
+                    provider,
+                    model: model_for_exec.clone(),
+                });
+
+                let mut queen =
+                    hive_agents::Queen::new(hive_agents::swarm::SwarmConfig::default(), executor);
+                if let Some(mem) = memory {
+                    queen = queen.with_memory(mem);
+                }
+
+                let result_text = match queen.execute(&goal).await {
+                    Ok(result) => {
+                        // Convert team results into a TaskTreeState for the
+                        // monitor panel's background tasks section.
+                        use hive_ui_panels::components::task_tree::{
+                            TaskDisplay, TaskDisplayStatus, TaskTreeState,
+                        };
+                        let tasks: Vec<TaskDisplay> = result
+                            .team_results
+                            .iter()
+                            .map(|tr| {
+                                let status = match tr.status {
+                                    hive_agents::swarm::TeamStatus::Completed => {
+                                        TaskDisplayStatus::Completed
+                                    }
+                                    hive_agents::swarm::TeamStatus::Failed => {
+                                        TaskDisplayStatus::Failed(
+                                            tr.error.clone().unwrap_or_default(),
+                                        )
+                                    }
+                                    hive_agents::swarm::TeamStatus::Running => {
+                                        TaskDisplayStatus::Running
+                                    }
+                                    _ => TaskDisplayStatus::Pending,
+                                };
+                                TaskDisplay {
+                                    id: tr.team_id.clone(),
+                                    description: tr.team_name.clone(),
+                                    persona: "Swarm".into(),
+                                    status,
+                                    duration_ms: Some(tr.duration_ms),
+                                    cost: Some(tr.cost),
+                                    output_preview: tr.inner.as_ref().map(|i| {
+                                        let s = match i {
+                                            hive_agents::swarm::InnerResult::Native {
+                                                content, ..
+                                            }
+                                            | hive_agents::swarm::InnerResult::SingleShot {
+                                                content, ..
+                                            } => content.clone(),
+                                            _ => String::new(),
+                                        };
+                                        s.chars().take(200).collect()
+                                    }),
+                                    expanded: false,
+                                    model_override: None,
+                                }
+                            })
+                            .collect();
+                        let tree = TaskTreeState {
+                            title: format!("Swarm: {}", &result.goal),
+                            plan_id: result.run_id.clone(),
+                            tasks,
+                            collapsed: false,
+                            total_cost: result.total_cost,
+                            elapsed_ms: result.total_duration_ms,
+                        };
+                        let _ = _this.update(app, |ws, _cx| {
+                            ws.swarm_task_trees.push(tree);
+                        });
+
+                        format!(
+                            "## Swarm Result\n\n\
+                             **Goal:** {}\n\
+                             **Status:** {:?}\n\
+                             **Teams:** {}\n\
+                             **Cost:** ${:.4}\n\
+                             **Duration:** {}ms\n\n\
+                             ---\n\n{}",
+                            result.goal,
+                            result.status,
+                            result.team_results.len(),
+                            result.total_cost,
+                            result.total_duration_ms,
+                            result.synthesized_output,
+                        )
+                    }
+                    Err(e) => format!("Swarm execution failed: {e}"),
+                };
+
+                // Finalize the placeholder assistant message.
+                let _ = app.update(|cx| {
+                    if let Some(svc) = chat_svc.upgrade() {
+                        svc.update(cx, |svc, _cx| {
+                            let idx = svc.messages.len().saturating_sub(1);
+                            svc.finalize_stream(idx, &result_text, &model_for_exec, None);
+                        });
+                    }
+                });
+            })
+            .detach();
+
+            return;
+        }
 
         // Save the user text for RAG query before it is consumed by send_message.
         let user_query_text = send_text.clone();
@@ -2528,19 +2786,28 @@ impl HiveWorkspace {
                 }
             }
 
+            // Determine context format for AI prompt encoding.
+            let ctx_format = if cx.has_global::<AppConfig>() {
+                hive_ai::ContextFormat::from_config_str(
+                    &cx.global::<AppConfig>().0.get().context_format,
+                )
+            } else {
+                hive_ai::ContextFormat::Markdown
+            };
+
             // Inject fast-path project index as lightweight project context.
             // This gives the AI immediate awareness of the project structure,
             // key symbols, dependencies, and recent git activity -- available
             // even before the deeper RAG index has populated.
             if cx.has_global::<AppQuickIndex>() {
-                let use_toon = cx.has_global::<AppConfig>()
-                    && hive_ai::ContextFormat::from_config_str(
-                        &cx.global::<AppConfig>().0.get().context_format,
-                    ) == hive_ai::ContextFormat::Toon;
-                let quick_ctx = if use_toon {
-                    cx.global::<AppQuickIndex>().0.to_context_string_toon()
-                } else {
-                    cx.global::<AppQuickIndex>().0.to_context_string()
+                let quick_ctx = match ctx_format {
+                    hive_ai::ContextFormat::Toon => {
+                        cx.global::<AppQuickIndex>().0.to_context_string_toon()
+                    }
+                    hive_ai::ContextFormat::Xml => {
+                        cx.global::<AppQuickIndex>().0.to_context_string_xml()
+                    }
+                    _ => cx.global::<AppQuickIndex>().0.to_context_string(),
                 };
                 if !quick_ctx.trim().is_empty() {
                     let qi_idx = augmented
@@ -2593,6 +2860,59 @@ impl HiveWorkspace {
                     hive_ai::types::ChatMessage {
                         role: hive_ai::types::MessageRole::System,
                         content: format!("# Retrieved Context\n\n{}", all_context),
+                        timestamp: chrono::Utc::now(),
+                        tool_call_id: None,
+                        tool_calls: None,
+                    },
+                );
+            }
+
+            // Inject user-selected context files (checked in Files panel).
+            if !context_files.is_empty() {
+                let use_xml = ctx_format == hive_ai::ContextFormat::Xml;
+                let mut ctx_block = if use_xml {
+                    String::from("<context_files>\n")
+                } else {
+                    String::from("# Selected Context Files\n\n")
+                };
+                for path in &context_files {
+                    let rel = path
+                        .strip_prefix(&self.current_project_root)
+                        .unwrap_or(path);
+                    let content = std::fs::read_to_string(path).unwrap_or_default();
+                    let ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("");
+                    let tokens = content.len().div_ceil(4);
+                    if use_xml {
+                        ctx_block.push_str(&format!(
+                            "<file path=\"{}\" tokens=\"{}\"><![CDATA[{}]]></file>\n",
+                            rel.display(),
+                            tokens,
+                            content
+                        ));
+                    } else {
+                        ctx_block.push_str(&format!(
+                            "## {}\n```{}\n{}\n```\n\n",
+                            rel.display(),
+                            ext,
+                            content
+                        ));
+                    }
+                }
+                if use_xml {
+                    ctx_block.push_str("</context_files>");
+                }
+                let cf_idx = augmented
+                    .iter()
+                    .position(|m| m.role != hive_ai::types::MessageRole::System)
+                    .unwrap_or(0);
+                augmented.insert(
+                    cf_idx,
+                    hive_ai::types::ChatMessage {
+                        role: hive_ai::types::MessageRole::System,
+                        content: ctx_block,
                         timestamp: chrono::Utc::now(),
                         tool_call_id: None,
                         tool_calls: None,
@@ -2665,7 +2985,7 @@ impl HiveWorkspace {
             .collect();
 
         // 4a. Build system prompt from learned preferences (if any).
-        let system_prompt = if cx.has_global::<AppLearning>() {
+        let mut system_prompt = if cx.has_global::<AppLearning>() {
             let learning = &cx.global::<AppLearning>().0;
             match learning.preference_model.prompt_addendum() {
                 Ok(addendum) if !addendum.is_empty() => {
@@ -2677,6 +2997,23 @@ impl HiveWorkspace {
         } else {
             None
         };
+
+        // When XML context format is active, instruct the AI to use <edit> tags.
+        let ctx_format_for_prompt = if cx.has_global::<AppConfig>() {
+            hive_ai::ContextFormat::from_config_str(
+                &cx.global::<AppConfig>().0.get().context_format,
+            )
+        } else {
+            hive_ai::ContextFormat::Markdown
+        };
+        if ctx_format_for_prompt == hive_ai::ContextFormat::Xml {
+            let xml_instruction = "\n\nWhen suggesting code changes, wrap each file edit in an XML tag: <edit path=\"relative/path\" lang=\"language\">new file content</edit>";
+            system_prompt = Some(
+                system_prompt
+                    .map(|s| s + xml_instruction)
+                    .unwrap_or_else(|| xml_instruction.to_string()),
+            );
+        }
 
         // 4b. Check if speculative decoding is enabled.
         let spec_config = if cx.has_global::<AppConfig>() {
@@ -2958,6 +3295,41 @@ impl HiveWorkspace {
         // -- Discovery: periodic scan + connectivity update --
         self.maybe_trigger_discovery_scan(cx);
         self.sync_connectivity(cx);
+
+        // -- Drain triggered reminders from the tick driver --
+        if cx.has_global::<AppReminderRx>() {
+            let rx_arc = Arc::clone(&cx.global::<AppReminderRx>().0);
+            let mut pending = Vec::new();
+            if let Ok(rx) = rx_arc.lock() {
+                while let Ok(reminders) = rx.try_recv() {
+                    pending.extend(reminders);
+                }
+            }
+            for reminder in &pending {
+                info!("UI received reminder: {}", reminder.title);
+                if cx.has_global::<AppNotifications>() {
+                    cx.global_mut::<AppNotifications>().0.push(
+                        AppNotification::new(
+                            NotificationType::Info,
+                            format!("Reminder: {}", reminder.title),
+                        )
+                        .with_title("Reminder"),
+                    );
+                }
+            }
+        }
+
+        // -- Auto-refresh network peer data every 30 seconds when panel is active --
+        if self.sidebar.active_panel == Panel::Network {
+            let should_refresh = match self.last_network_refresh {
+                None => true,
+                Some(t) => t.elapsed() >= std::time::Duration::from_secs(30),
+            };
+            if should_refresh {
+                self.last_network_refresh = Some(std::time::Instant::now());
+                self.refresh_network_peer_data(cx);
+            }
+        }
     }
 
     /// Trigger a discovery scan every 30 seconds (non-blocking).
@@ -3065,6 +3437,17 @@ impl HiveWorkspace {
             .into_any_element(),
             Panel::History => HistoryPanel::render(&self.history_data, theme).into_any_element(),
             Panel::Files => FilesPanel::render(&self.files_data, theme).into_any_element(),
+            Panel::CodeMap => {
+                hive_ui_panels::panels::code_map::render_code_map(&self.code_map_data, theme)
+                    .into_any_element()
+            }
+            Panel::PromptLibrary => {
+                hive_ui_panels::panels::prompt_library::render_prompt_library(
+                    &self.prompt_library_data,
+                    theme,
+                )
+                .into_any_element()
+            }
             Panel::Kanban => KanbanPanel::render(&self.kanban_data, theme).into_any_element(),
             Panel::Monitor => MonitorPanel::render(&self.monitor_data, theme).into_any_element(),
             Panel::Logs => LogsPanel::render(&self.logs_data, theme).into_any_element(),
@@ -3456,6 +3839,124 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Files, cx);
+    }
+
+    fn handle_switch_to_code_map(
+        &mut self,
+        _action: &SwitchToCodeMap,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Refresh code map data from QuickIndex before showing
+        self.code_map_data = hive_ui_panels::panels::code_map::build_code_map_data(cx);
+        self.switch_to_panel(Panel::CodeMap, cx);
+    }
+
+    fn handle_switch_to_prompt_library(
+        &mut self,
+        _action: &SwitchToPromptLibrary,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_library_data.refresh();
+        self.switch_to_panel(Panel::PromptLibrary, cx);
+    }
+
+    fn handle_prompt_library_save_current(
+        &mut self,
+        _action: &PromptLibrarySaveCurrent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_agents::prompt_template;
+
+        // Get current chat input text
+        let instruction = self.chat_input.read(cx).current_text(cx);
+        if instruction.trim().is_empty() {
+            return;
+        }
+
+        // Collect checked context files
+        let context_files: Vec<String> = self
+            .files_data
+            .checked_files
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        let mut template = prompt_template::PromptTemplate::new(
+            format!("Prompt {}", chrono::Utc::now().format("%Y-%m-%d %H:%M")),
+            String::new(),
+            instruction,
+        );
+        template.context_files = context_files;
+
+        if let Err(e) = prompt_template::save_template(&template) {
+            error!("Failed to save prompt template: {e}");
+        } else {
+            info!("Saved prompt template: {}", template.name);
+            self.prompt_library_data.refresh();
+            cx.notify();
+        }
+    }
+
+    fn handle_prompt_library_refresh(
+        &mut self,
+        _action: &PromptLibraryRefresh,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_library_data.refresh();
+        cx.notify();
+    }
+
+    fn handle_prompt_library_load(
+        &mut self,
+        action: &PromptLibraryLoad,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_agents::prompt_template;
+
+        match prompt_template::load_template(&action.prompt_id) {
+            Ok(template) => {
+                // Pre-fill instruction in chat input
+                self.chat_input.update(cx, |input, cx| {
+                    input.set_text(&template.instruction, window, cx);
+                });
+
+                // Auto-check context files
+                for file in &template.context_files {
+                    let path = std::path::PathBuf::from(file);
+                    if !self.files_data.checked_files.contains(&path) {
+                        self.files_data.checked_files.insert(path);
+                    }
+                }
+
+                // Switch to chat panel
+                self.switch_to_panel(Panel::Chat, cx);
+                info!("Loaded prompt template: {}", template.name);
+            }
+            Err(e) => {
+                error!("Failed to load prompt template: {e}");
+            }
+        }
+    }
+
+    fn handle_prompt_library_delete(
+        &mut self,
+        action: &PromptLibraryDelete,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use hive_agents::prompt_template;
+
+        if let Err(e) = prompt_template::delete_template(&action.prompt_id) {
+            error!("Failed to delete prompt template: {e}");
+        } else {
+            self.prompt_library_data.refresh();
+            cx.notify();
+        }
     }
 
     fn handle_open_workspace_directory(
@@ -4280,7 +4781,7 @@ impl HiveWorkspace {
         self.cached_chat_data.markdown_cache.clear();
         self.refresh_history();
         self.switch_to_panel(Panel::Chat, cx);
-        self.handle_send_text(prompt, window, cx);
+        self.handle_send_text(prompt, Vec::new(), window, cx);
     }
 
     fn build_quick_start_prompt(&self, template_id: &str, detail: &str) -> String {
@@ -5220,6 +5721,208 @@ impl HiveWorkspace {
     ) {
         self.files_data.close_file_viewer();
         cx.notify();
+    }
+
+    fn handle_files_toggle_check(
+        &mut self,
+        action: &FilesToggleCheck,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = std::path::PathBuf::from(&action.path);
+        self.files_data.toggle_check(&path);
+
+        // Update the global context selection state.
+        if cx.has_global::<AppContextSelection>() {
+            let paths = self.files_data.checked_paths();
+            let total_tokens: usize = paths
+                .iter()
+                .map(|p| {
+                    std::fs::metadata(p)
+                        .map(|m| m.len() as usize)
+                        .unwrap_or(0)
+                        / 4
+                })
+                .sum();
+            let sel = cx.global::<AppContextSelection>().0.clone();
+            if let Ok(mut guard) = sel.lock() {
+                guard.selected_files = paths;
+                guard.total_tokens = total_tokens;
+            }
+        }
+        cx.notify();
+    }
+
+    fn handle_files_clear_checked(
+        &mut self,
+        _action: &FilesClearChecked,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.files_data.clear_checked();
+
+        if cx.has_global::<AppContextSelection>() {
+            let sel = cx.global::<AppContextSelection>().0.clone();
+            if let Ok(mut guard) = sel.lock() {
+                guard.selected_files.clear();
+                guard.total_tokens = 0;
+            }
+        }
+        cx.notify();
+    }
+
+    fn handle_apply_code_block(
+        &mut self,
+        action: &ApplyCodeBlock,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let file_path = self.current_project_root.join(&action.file_path);
+
+        // Security: validate file path
+        if cx.has_global::<AppSecurity>() {
+            if let Err(e) = cx.global::<AppSecurity>().0.check_path(&file_path) {
+                error!("Apply: blocked path: {e}");
+                self.chat_service.update(cx, |svc, cx| {
+                    svc.set_error(format!("Apply blocked: {e}"), cx);
+                });
+                return;
+            }
+        }
+
+        // Read old content for diff display
+        let old_content = std::fs::read_to_string(&file_path).ok();
+        let new_content = action.content.clone();
+
+        // Compute diff
+        let diff_lines = if let Some(ref old) = old_content {
+            hive_ui_panels::components::diff_viewer::compute_diff_lines_public(old, &new_content)
+        } else {
+            new_content
+                .lines()
+                .map(|l| hive_ui_panels::components::DiffLine::Added(l.to_string()))
+                .collect()
+        };
+
+        // Create pending approval using existing tool approval pattern
+        self.chat_service.update(cx, |svc, cx| {
+            use hive_ui_panels::components::DiffLine;
+            svc.pending_approval = Some(crate::chat_service::PendingToolApproval {
+                tool_call_id: format!("apply-{}", action.file_path),
+                tool_name: "apply_code_block".to_string(),
+                file_path: file_path.to_string_lossy().to_string(),
+                new_content: new_content.clone(),
+                old_content,
+                diff_lines,
+            });
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    fn handle_apply_all_edits(
+        &mut self,
+        _action: &ApplyAllEdits,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Parse the latest assistant message for edits
+        let last_assistant_content = self.chat_service.read(cx).messages.iter().rev()
+            .find(|m| m.role == MessageRole::Assistant)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+
+        let edits = hive_agents::parse_edits(&last_assistant_content);
+        if edits.is_empty() {
+            self.chat_service.update(cx, |svc, cx| {
+                svc.set_error("No file edits found in the last response", cx);
+            });
+            return;
+        }
+
+        // Apply each edit sequentially
+        for edit in &edits {
+            let file_path = self.current_project_root.join(&edit.file_path);
+            if let Err(e) = std::fs::write(&file_path, &edit.new_content) {
+                error!("Apply all: failed to write {}: {e}", edit.file_path);
+            } else {
+                info!("Applied edit to {}", edit.file_path);
+            }
+        }
+
+        info!("Applied {} file edit(s) from response", edits.len());
+        cx.notify();
+    }
+
+    fn handle_copy_to_clipboard(
+        &mut self,
+        action: &CopyToClipboard,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(action.content.clone()));
+    }
+
+    fn handle_copy_full_prompt(
+        &mut self,
+        _action: &CopyFullPrompt,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut prompt = String::new();
+
+        // Include selected context files
+        if cx.has_global::<AppContextSelection>() {
+            let sel = cx.global::<AppContextSelection>().0.clone();
+            if let Ok(guard) = sel.lock() {
+                for path in &guard.selected_files {
+                    let rel = path
+                        .strip_prefix(&self.current_project_root)
+                        .unwrap_or(path);
+                    let content = std::fs::read_to_string(path).unwrap_or_default();
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    prompt.push_str(&format!("## {}\n```{}\n{}\n```\n\n", rel.display(), ext, content));
+                }
+            }
+        }
+
+        // Include chat input text
+        let text = self.chat_input.read(cx).current_text(cx);
+        if !text.is_empty() {
+            prompt.push_str(&format!("## Instruction\n{}\n", text));
+        }
+
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(prompt));
+    }
+
+    fn handle_export_prompt(
+        &mut self,
+        _action: &ExportPrompt,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut prompt = String::new();
+
+        if cx.has_global::<AppContextSelection>() {
+            let sel = cx.global::<AppContextSelection>().0.clone();
+            if let Ok(guard) = sel.lock() {
+                for path in &guard.selected_files {
+                    let rel = path
+                        .strip_prefix(&self.current_project_root)
+                        .unwrap_or(path);
+                    let content = std::fs::read_to_string(path).unwrap_or_default();
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    prompt.push_str(&format!("## {}\n```{}\n{}\n```\n\n", rel.display(), ext, content));
+                }
+            }
+        }
+
+        let export_path = self.current_project_root.join("hive-prompt-export.md");
+        if let Err(e) = std::fs::write(&export_path, &prompt) {
+            error!("Export prompt failed: {e}");
+        } else {
+            info!("Exported prompt to {}", export_path.display());
+        }
     }
 
     // Preserved for backwards compatibility — original system editor open logic
@@ -8958,6 +9661,29 @@ impl HiveWorkspace {
         cx.notify();
     }
 
+    /// Handle context format change: persist to config and update settings UI.
+    fn handle_context_format_changed(
+        &mut self,
+        action: &ContextFormatChanged,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if cx.has_global::<AppConfig>() {
+            let fmt = action.format.clone();
+            if let Err(e) = cx.global::<AppConfig>().0.update(|cfg| {
+                cfg.context_format = fmt;
+            }) {
+                error!("Failed to persist context_format: {e}");
+            }
+        }
+        let fmt = action.format.clone();
+        self.settings_view.update(cx, |view, cx| {
+            view.set_selected_context_format(fmt, cx);
+        });
+        info!("Context format changed to: {}", action.format);
+        cx.notify();
+    }
+
     fn handle_export_config(
         &mut self,
         _action: &ExportConfig,
@@ -10024,6 +10750,25 @@ impl HiveWorkspace {
                                     .add_connected_account(account);
                             }
 
+                            // Inject the token into the assistant service so
+                            // email/calendar providers can use it immediately.
+                            if cx.has_global::<AppAssistant>() {
+                                let access = token.access_token.clone();
+                                let assistant = &mut cx.global_mut::<AppAssistant>().0;
+                                match platform_for_ui {
+                                    hive_core::config::AccountPlatform::Google => {
+                                        assistant.set_gmail_token(access.clone());
+                                        assistant.set_google_calendar_token(access);
+                                    }
+                                    hive_core::config::AccountPlatform::Microsoft => {
+                                        assistant.set_outlook_token(access.clone());
+                                        assistant.set_outlook_calendar_token(access);
+                                    }
+                                    _ => {}
+                                }
+                                info!("OAuth: injected token into assistant service for {platform_label_ui}");
+                            }
+
                             if cx.has_global::<AppNotifications>() {
                                 cx.global_mut::<AppNotifications>().0.push(
                                     AppNotification::new(
@@ -10179,6 +10924,71 @@ impl HiveWorkspace {
         }
     }
 
+    // -- Voice intent handler ------------------------------------------------
+
+    /// Handle voice text processing — classify intent and dispatch appropriate action.
+    fn handle_voice_process_text(
+        &mut self,
+        action: &VoiceProcessText,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppVoiceAssistant>() {
+            return;
+        }
+        let command = {
+            let va = cx.global::<AppVoiceAssistant>();
+            match va.0.lock() {
+                Ok(mut voice) => voice.process_text(&action.text),
+                Err(_) => return,
+            }
+        };
+
+        info!(
+            "Voice command: intent={:?}, confidence={:.2}",
+            command.intent, command.confidence
+        );
+
+        // Map voice intents to existing panel-switch actions.
+        use hive_agents::VoiceIntent;
+        match command.intent {
+            VoiceIntent::OpenPanel => {
+                // Try to detect which panel from the text.
+                let text_lower = action.text.to_lowercase();
+                if text_lower.contains("file") {
+                    window.dispatch_action(Box::new(SwitchToFiles), cx);
+                } else if text_lower.contains("terminal") || text_lower.contains("shell") {
+                    window.dispatch_action(Box::new(SwitchToTerminal), cx);
+                } else if text_lower.contains("setting") {
+                    window.dispatch_action(Box::new(SwitchToSettings), cx);
+                } else if text_lower.contains("model") {
+                    window.dispatch_action(Box::new(SwitchToModels), cx);
+                } else if text_lower.contains("chat") {
+                    window.dispatch_action(Box::new(SwitchToChat), cx);
+                } else if text_lower.contains("history") {
+                    window.dispatch_action(Box::new(SwitchToHistory), cx);
+                } else if text_lower.contains("network") {
+                    window.dispatch_action(Box::new(SwitchToNetwork), cx);
+                } else if text_lower.contains("agent") {
+                    window.dispatch_action(Box::new(SwitchToAgents), cx);
+                }
+            }
+            VoiceIntent::SearchFiles => {
+                window.dispatch_action(Box::new(SwitchToFiles), cx);
+            }
+            VoiceIntent::RunCommand => {
+                window.dispatch_action(Box::new(SwitchToTerminal), cx);
+            }
+            VoiceIntent::SendMessage | VoiceIntent::CreateTask => {
+                window.dispatch_action(Box::new(SwitchToChat), cx);
+            }
+            _ => {
+                // Unknown or unhandled intent — fall through silently.
+                debug!("Voice: unhandled intent {:?}, ignoring", command.intent);
+            }
+        }
+    }
+
     // -- Auto-update handler -------------------------------------------------
 
     fn handle_trigger_app_update(
@@ -10262,6 +11072,80 @@ impl HiveWorkspace {
             }
         })
         .detach();
+    }
+
+    // -- Ollama model management handlers ------------------------------------
+
+    /// Handle Ollama model pull request — download a model asynchronously.
+    fn handle_ollama_pull_model(
+        &mut self,
+        action: &OllamaPullModel,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppOllamaManager>() {
+            return;
+        }
+        let ollama = cx.global::<AppOllamaManager>().0.clone();
+        let model = action.model.clone();
+        info!("Ollama: pulling model '{model}'");
+
+        std::thread::Builder::new()
+            .name("ollama-pull".into())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                let Ok(rt) = rt else { return };
+                rt.block_on(async {
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+                    let model_clone = model.clone();
+                    let pull_task = tokio::spawn(async move {
+                        ollama.pull_model(&model_clone, tx).await
+                    });
+                    // Log progress updates.
+                    while let Some(update) = rx.recv().await {
+                        tracing::debug!("Ollama pull progress: {update:?}");
+                    }
+                    match pull_task.await {
+                        Ok(Ok(())) => info!("Ollama: model '{model}' pulled successfully"),
+                        Ok(Err(e)) => warn!("Ollama: pull failed for '{model}': {e}"),
+                        Err(e) => warn!("Ollama: pull task panicked for '{model}': {e}"),
+                    }
+                });
+            })
+            .ok();
+    }
+
+    /// Handle Ollama model delete request.
+    fn handle_ollama_delete_model(
+        &mut self,
+        action: &OllamaDeleteModel,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !cx.has_global::<AppOllamaManager>() {
+            return;
+        }
+        let ollama = cx.global::<AppOllamaManager>().0.clone();
+        let model = action.model.clone();
+        info!("Ollama: deleting model '{model}'");
+
+        std::thread::Builder::new()
+            .name("ollama-delete".into())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                let Ok(rt) = rt else { return };
+                rt.block_on(async {
+                    match ollama.delete_model(&model).await {
+                        Ok(()) => info!("Ollama: model '{model}' deleted successfully"),
+                        Err(e) => warn!("Ollama: delete failed for '{model}': {e}"),
+                    }
+                });
+            })
+            .ok();
     }
 }
 
@@ -10397,6 +11281,12 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_help))
             .on_action(cx.listener(Self::handle_switch_to_network))
             .on_action(cx.listener(Self::handle_switch_to_terminal))
+            .on_action(cx.listener(Self::handle_switch_to_code_map))
+            .on_action(cx.listener(Self::handle_switch_to_prompt_library))
+            .on_action(cx.listener(Self::handle_prompt_library_save_current))
+            .on_action(cx.listener(Self::handle_prompt_library_refresh))
+            .on_action(cx.listener(Self::handle_prompt_library_load))
+            .on_action(cx.listener(Self::handle_prompt_library_delete))
             .on_action(cx.listener(Self::handle_network_refresh))
             .on_action(cx.listener(Self::handle_open_workspace_directory))
             .on_action(cx.listener(Self::handle_toggle_project_dropdown))
@@ -10413,6 +11303,14 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_files_new_file))
             .on_action(cx.listener(Self::handle_files_new_folder))
             .on_action(cx.listener(Self::handle_files_close_viewer))
+            .on_action(cx.listener(Self::handle_files_toggle_check))
+            .on_action(cx.listener(Self::handle_files_clear_checked))
+            // Apply mode + clipboard
+            .on_action(cx.listener(Self::handle_apply_code_block))
+            .on_action(cx.listener(Self::handle_apply_all_edits))
+            .on_action(cx.listener(Self::handle_copy_to_clipboard))
+            .on_action(cx.listener(Self::handle_copy_full_prompt))
+            .on_action(cx.listener(Self::handle_export_prompt))
             // History
             .on_action(cx.listener(Self::handle_history_load))
             .on_action(cx.listener(Self::handle_history_delete))
@@ -10514,8 +11412,9 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_quick_start_select_template))
             .on_action(cx.listener(Self::handle_quick_start_open_panel))
             .on_action(cx.listener(Self::handle_quick_start_run_project))
-            // Theme
+            // Theme + context format
             .on_action(cx.listener(Self::handle_theme_changed))
+            .on_action(cx.listener(Self::handle_context_format_changed))
             // Monitor
             .on_action(cx.listener(Self::handle_monitor_refresh))
             // Agents
@@ -10528,8 +11427,13 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_agents_run_workflow))
             // Connected Accounts
             .on_action(cx.listener(Self::handle_account_connect_platform))
+            // Voice
+            .on_action(cx.listener(Self::handle_voice_process_text))
             // Auto-update
             .on_action(cx.listener(Self::handle_trigger_app_update))
+            // Ollama model management
+            .on_action(cx.listener(Self::handle_ollama_pull_model))
+            .on_action(cx.listener(Self::handle_ollama_delete_model))
             // Titlebar
                 .child(Titlebar::render(theme, window, &self.current_project_root))
             // Project dropdown backdrop (dismisses on click)

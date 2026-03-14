@@ -1,16 +1,19 @@
 use chrono::{DateTime, Utc};
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{Icon, IconName};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
-    FilesCloseViewer, FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile,
-    FilesNewFolder, FilesOpenEntry, FilesRefresh,
+    FilesClearChecked, FilesCloseViewer, FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo,
+    FilesNewFile, FilesNewFolder, FilesOpenEntry, FilesRefresh, FilesToggleCheck,
 };
 
 use crate::components::code_block::render_code_block;
+use crate::components::markdown::render_markdown;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -75,6 +78,8 @@ pub struct FilesData {
     pub viewed_file_path: Option<String>,
     pub viewed_file_language: String,
     pub viewed_file_size: u64,
+    /// Files checked for AI context attachment (absolute paths).
+    pub checked_files: HashSet<PathBuf>,
 }
 
 impl Default for FilesData {
@@ -93,6 +98,7 @@ impl Default for FilesData {
                 viewed_file_path: None,
                 viewed_file_language: String::new(),
                 viewed_file_size: 0,
+                checked_files: HashSet::new(),
             },
         }
     }
@@ -126,6 +132,7 @@ impl FilesData {
             viewed_file_path: None,
             viewed_file_language: String::new(),
             viewed_file_size: 0,
+            checked_files: HashSet::new(),
         }
     }
 
@@ -195,6 +202,30 @@ impl FilesData {
         self.viewed_file_path = None;
         self.viewed_file_language = String::new();
         self.viewed_file_size = 0;
+    }
+
+    /// Toggle a file's checked state for context attachment.
+    pub fn toggle_check(&mut self, path: &PathBuf) {
+        if !self.checked_files.remove(path) {
+            self.checked_files.insert(path.clone());
+        }
+    }
+
+    /// Number of files currently checked.
+    pub fn check_count(&self) -> usize {
+        self.checked_files.len()
+    }
+
+    /// Sorted list of checked file paths.
+    pub fn checked_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = self.checked_files.iter().cloned().collect();
+        paths.sort();
+        paths
+    }
+
+    /// Clear all checked files.
+    pub fn clear_checked(&mut self) {
+        self.checked_files.clear();
     }
 }
 
@@ -391,9 +422,21 @@ impl FilesPanel {
             // 2. Search bar
             .child(Self::search_bar(&data.search_query, theme))
             // 3. File tree (scrollable)
-            .child(Self::file_tree(&entries, &data.selected_file, &now, theme))
+            .child(Self::file_tree(
+                &entries,
+                &data.selected_file,
+                &data.checked_files,
+                &data.current_path,
+                &now,
+                theme,
+            ))
             // 4. Action bar
-            .child(Self::action_bar(dir_count, file_count, theme));
+            .child(Self::action_bar(
+                dir_count,
+                file_count,
+                data.checked_files.len(),
+                theme,
+            ));
 
         // When a file is open, show split view: browser (35%) | viewer (65%)
         if let Some(ref content) = data.viewed_file_content {
@@ -513,8 +556,14 @@ impl FilesPanel {
             )
     }
 
-    /// Scrollable file content using the code block component.
+    /// Scrollable file content — renders markdown for `.md` files, code block for everything else.
     fn viewer_content(content: &str, lang: &str, theme: &HiveTheme) -> impl IntoElement {
+        let inner: AnyElement = if lang == "Markdown" {
+            render_markdown(content, theme)
+        } else {
+            render_code_block(content, lang, theme).into_any_element()
+        };
+
         div()
             .id("files-viewer-content")
             .flex()
@@ -522,7 +571,7 @@ impl FilesPanel {
             .flex_1()
             .overflow_y_scroll()
             .p(theme.space_2)
-            .child(render_code_block(content, lang, theme))
+            .child(inner)
     }
 
     // ------------------------------------------------------------------
@@ -716,6 +765,8 @@ impl FilesPanel {
     fn file_tree(
         entries: &[&FileEntry],
         selected_file: &Option<String>,
+        checked_files: &HashSet<PathBuf>,
+        current_path: &Path,
         now: &DateTime<Utc>,
         theme: &HiveTheme,
     ) -> impl IntoElement {
@@ -732,7 +783,16 @@ impl FilesPanel {
         } else {
             for entry in entries {
                 let is_selected = selected_file.as_ref().is_some_and(|s| s == &entry.name);
-                list = list.child(Self::entry_row(entry, is_selected, now, theme));
+                let full_path = current_path.join(&entry.name);
+                let is_checked = checked_files.contains(&full_path);
+                list = list.child(Self::entry_row(
+                    entry,
+                    is_selected,
+                    is_checked,
+                    &full_path,
+                    now,
+                    theme,
+                ));
             }
         }
 
@@ -742,6 +802,8 @@ impl FilesPanel {
     fn entry_row(
         entry: &FileEntry,
         is_selected: bool,
+        is_checked: bool,
+        full_path: &Path,
         now: &DateTime<Utc>,
         theme: &HiveTheme,
     ) -> impl IntoElement {
@@ -771,6 +833,57 @@ impl FilesPanel {
 
         let relative_time = format_relative_time(&entry.modified, now);
 
+        // Checkbox for context attachment (files only)
+        let check_path = full_path.to_string_lossy().to_string();
+        let checkbox = if !entry.is_directory {
+            let check_bg = if is_checked {
+                theme.accent_aqua
+            } else {
+                Hsla::transparent_black()
+            };
+            let check_border = if is_checked {
+                theme.accent_aqua
+            } else {
+                theme.text_muted
+            };
+            let check_icon_color = theme.text_on_accent;
+
+            Some(
+                div()
+                    .id(ElementId::Name(SharedString::new(format!(
+                        "files-check-{}",
+                        entry.name
+                    ))))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(16.0))
+                    .h(px(16.0))
+                    .rounded(px(3.0))
+                    .bg(check_bg)
+                    .border_1()
+                    .border_color(check_border)
+                    .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(FilesToggleCheck {
+                                path: check_path.clone(),
+                            }),
+                            cx,
+                        );
+                    })
+                    .when(is_checked, |el| {
+                        el.child(
+                            Icon::new(IconName::Check)
+                                .size_3()
+                                .text_color(check_icon_color),
+                        )
+                    }),
+            )
+        } else {
+            None
+        };
+
         let row_click_name = entry.name.clone();
         let row_click_is_dir = entry.is_directory;
         let mut row = div()
@@ -796,7 +909,14 @@ impl FilesPanel {
                     cx,
                 );
             })
-            .gap(theme.space_2)
+            .gap(theme.space_2);
+
+        // Checkbox (files only, placed before icon)
+        if let Some(cb) = checkbox {
+            row = row.child(cb);
+        }
+
+        row = row
             // Icon
             .child(
                 div()
@@ -967,7 +1087,12 @@ impl FilesPanel {
     // 4. Action bar (bottom)
     // ------------------------------------------------------------------
 
-    fn action_bar(dir_count: usize, file_count: usize, theme: &HiveTheme) -> impl IntoElement {
+    fn action_bar(
+        dir_count: usize,
+        file_count: usize,
+        checked_count: usize,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         let total = dir_count + file_count;
         let summary = if total == 0 {
             "Empty directory".to_string()
@@ -1028,6 +1153,41 @@ impl FilesPanel {
             )
             // Spacer
             .child(div().flex_1())
+            // Checked count + clear button
+            .when(checked_count > 0, |el| {
+                let label = if checked_count == 1 {
+                    "1 selected".to_string()
+                } else {
+                    format!("{checked_count} selected")
+                };
+                el.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(theme.space_1)
+                        .child(
+                            div()
+                                .text_size(theme.font_size_xs)
+                                .text_color(theme.accent_aqua)
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(label),
+                        )
+                        .child(
+                            div()
+                                .id("files-clear-checked")
+                                .px(theme.space_1)
+                                .rounded(theme.radius_sm)
+                                .cursor_pointer()
+                                .text_size(theme.font_size_xs)
+                                .text_color(theme.text_muted)
+                                .hover(|el| el.text_color(theme.accent_red))
+                                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                                    window.dispatch_action(Box::new(FilesClearChecked), cx);
+                                })
+                                .child(Icon::new(IconName::Close).size_3()),
+                        ),
+                )
+            })
             // Item count
             .child(
                 div()

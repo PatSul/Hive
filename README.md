@@ -15,12 +15,12 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.24-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.25-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-tracked-yellow" alt="Warnings" />
-  <img src="https://img.shields.io/badge/lines-192k%2B-informational" alt="Lines of Rust" />
+  <img src="https://img.shields.io/badge/lines-200k%2B-informational" alt="Lines of Rust" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
   <img src="https://img.shields.io/badge/UI-GPUI-blueviolet" alt="GPUI" />
 </p>
@@ -631,7 +631,7 @@ hive_cli   (standalone binary) ── hive_core
 
 ---
 
-## UI — 24 Panels
+## UI — 26 Panels
 
 All panels are wired to live backend data. No mock data in the production path. **8 built-in themes** (HiveCode Dark/Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark) with community voting and custom theme support via `~/.hive/themes/`.
 
@@ -656,6 +656,8 @@ All panels are wired to live backend data. No mock data in the production path. 
 | Shield | Security scanning status | `HiveShield` |
 | Assistant | Personal assistant: email, calendar, reminders | `AssistantService` |
 | Token Launch | Token deployment wizard with chain selection | `hive_blockchain` |
+| Code Map | Symbol browser: functions, structs, traits, enums grouped by file with search | `AppQuickIndex` |
+| Prompt Library | Save, browse, and reuse prompt templates with tag-based search | `~/.hive/prompts/` |
 | Settings | Application configuration with persist-on-save, cloud account fields | `HiveConfig` |
 | Terminal | Interactive shell with real PTY, command history, kill/restart | `InteractiveShell` via `hive_terminal` |
 | Network | P2P federation peer browser | `hive_network` |
@@ -844,6 +846,23 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.25
+
+**Hybrid Pipeline, Code Map, Prompt Library & Context Attachments**
+
+- **Hybrid Task Pipeline** — Deterministic AI execution using the Stripe Minions pattern: `CURATE_CONTEXT → AI_EXECUTE → VALIDATE → retry/complete`. Configurable validation gates (empty-output, refusal detection, security scan, code-block presence, custom patterns) with automatic retry.
+- **Code Map Panel** — Symbol browser powered by the background code index. Displays functions, structs, traits, and enums grouped by file with color-coded icons and real-time search.
+- **Prompt Library Panel** — Save, browse, and reuse prompt templates stored as JSON in `~/.hive/prompts/`. Search by name, description, or tags; one-click load into chat.
+- **Context File Attachments** — Check files in the Files panel to attach them as AI context. Selected files appear as chips above the chat input with token counts.
+- **Apply Code Blocks** — AI-generated code blocks with file paths now show an "Apply" button to write changes directly to disk.
+- **Markdown Renderer** — Extracted reusable markdown rendering component (headings, code blocks, bold, italic, lists, horizontal rules).
+- **Monitor: Background Tasks** — Live task-tree display with progress bars, cost tracking, and per-task status.
+- **Response Parser** — Parse AI output for file-targeted edits in two formats (fenced ````lang:path```` and XML `<edit>`).
+- **AI Context Export** — XML-wrapped project context generation for structured AI consumption (overview, dependencies, symbols, git history).
+- **Ollama Model Management** — Pull and delete models on connected Ollama instances from the UI.
+- **Voice Intent Classification** — Process text through wake-word + intent pipeline for voice-driven commands.
+- **Reminder Notifications** — In-app reminder delivery from the assistant tick driver.
 
 ### v0.3.24
 

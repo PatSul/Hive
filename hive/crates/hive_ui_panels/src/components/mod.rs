@@ -1,5 +1,6 @@
 pub mod code_block;
 pub mod connectivity_badge;
+pub mod markdown;
 pub mod context_attachment;
 pub mod diff_viewer;
 pub mod message_bubble;
@@ -12,7 +13,8 @@ pub mod wallet_card;
 pub mod wizard_stepper;
 
 // Re-export key types for convenience.
-pub use code_block::render_code_block;
+pub use code_block::{render_code_block, render_code_block_with_path};
+pub use markdown::render_markdown;
 pub use connectivity_badge::{ConnectivityState, render_connectivity_badge};
 pub use context_attachment::{AttachedContext, AttachedFile, render_context_attachment};
 pub use diff_viewer::{DiffLine, render_diff};
