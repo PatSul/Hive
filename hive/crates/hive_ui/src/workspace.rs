@@ -3927,6 +3927,11 @@ impl HiveWorkspace {
 
                 // Auto-check context files
                 for file in &template.context_files {
+                    // Security: block absolute paths and directory traversal.
+                    if std::path::Path::new(file).is_absolute() || file.contains("..") {
+                        tracing::warn!("Skipping unsafe context file path: {file}");
+                        continue;
+                    }
                     let path = std::path::PathBuf::from(file);
                     if !self.files_data.checked_files.contains(&path) {
                         self.files_data.checked_files.insert(path);

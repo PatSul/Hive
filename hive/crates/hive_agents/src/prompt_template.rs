@@ -48,6 +48,26 @@ pub fn prompts_dir() -> PathBuf {
         .join("prompts")
 }
 
+/// Validate that a template ID contains only safe characters.
+///
+/// Allows `[A-Za-z0-9_-]` which matches what `slug()` + `uuid_v4_simple()` produce.
+/// Blocks path traversal attacks (e.g. `../../.ssh/id_rsa`).
+fn validate_template_id(id: &str) -> Result<()> {
+    if id.is_empty() {
+        anyhow::bail!("Template ID must not be empty");
+    }
+    if id.len() > 128 {
+        anyhow::bail!("Template ID exceeds maximum length");
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        anyhow::bail!("Template ID contains invalid characters");
+    }
+    Ok(())
+}
+
 /// List all saved prompt templates.
 pub fn list_templates() -> Result<Vec<PromptTemplate>> {
     let dir = prompts_dir();
@@ -74,6 +94,7 @@ pub fn list_templates() -> Result<Vec<PromptTemplate>> {
 
 /// Save a prompt template to disk.
 pub fn save_template(template: &PromptTemplate) -> Result<PathBuf> {
+    validate_template_id(&template.id)?;
     let dir = prompts_dir();
     std::fs::create_dir_all(&dir).context("creating prompts dir")?;
 
@@ -85,12 +106,14 @@ pub fn save_template(template: &PromptTemplate) -> Result<PathBuf> {
 
 /// Load a template by ID.
 pub fn load_template(id: &str) -> Result<PromptTemplate> {
+    validate_template_id(id)?;
     let path = prompts_dir().join(format!("{id}.json"));
     load_template_from_path(&path)
 }
 
 /// Delete a template by ID.
 pub fn delete_template(id: &str) -> Result<()> {
+    validate_template_id(id)?;
     let path = prompts_dir().join(format!("{id}.json"));
     if path.exists() {
         std::fs::remove_file(&path).context("deleting template")?;
@@ -112,12 +135,7 @@ fn slug(s: &str) -> String {
 }
 
 fn uuid_v4_simple() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:016x}", nanos)
+    uuid::Uuid::new_v4().to_string().replace('-', "")
 }
 
 #[cfg(test)]
@@ -152,5 +170,35 @@ mod tests {
         let t2: PromptTemplate = serde_json::from_str(&json).unwrap();
         assert_eq!(t.id, t2.id);
         assert_eq!(t.name, t2.name);
+    }
+
+    #[test]
+    fn test_validate_template_id_accepts_valid() {
+        assert!(validate_template_id("review-code-abc123").is_ok());
+        assert!(validate_template_id("my_template-42").is_ok());
+        assert!(validate_template_id("a").is_ok());
+    }
+
+    #[test]
+    fn test_validate_template_id_rejects_traversal() {
+        assert!(validate_template_id("../../etc/passwd").is_err());
+        assert!(validate_template_id("..\\windows\\system32").is_err());
+        assert!(validate_template_id("test/path").is_err());
+        assert!(validate_template_id("test.json").is_err());
+    }
+
+    #[test]
+    fn test_validate_template_id_rejects_empty_and_long() {
+        assert!(validate_template_id("").is_err());
+        let long_id = "a".repeat(129);
+        assert!(validate_template_id(&long_id).is_err());
+    }
+
+    #[test]
+    fn test_uuid_v4_simple_uniqueness() {
+        let a = uuid_v4_simple();
+        let b = uuid_v4_simple();
+        assert_ne!(a, b, "Two consecutive UUIDs must differ");
+        assert_eq!(a.len(), 32, "UUID v4 without hyphens should be 32 chars");
     }
 }
