@@ -94,6 +94,10 @@ pub struct Spec {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     pub version: u32,
     pub auto_update: bool,
+    /// Optional domain grouping (e.g. "auth", "billing", "agent").
+    /// Used to organize specs into `specs/{domain}/` directories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
 }
 
 impl Spec {
@@ -118,6 +122,7 @@ impl Spec {
             updated_at: now,
             version: 1,
             auto_update: true,
+            domain: None,
         }
     }
 
@@ -609,5 +614,44 @@ mod tests {
         assert_eq!(spec.title, "Test Spec");
         let plan = spec.sections.get(&SpecSection::Plan).unwrap();
         assert_eq!(plan.len(), 1);
+    }
+
+    #[test]
+    fn spec_domain_defaults_to_none() {
+        let spec = Spec::new("id", "Title", "Desc");
+        assert!(spec.domain.is_none());
+    }
+
+    #[test]
+    fn spec_domain_can_be_set() {
+        let mut spec = Spec::new("id", "Auth", "Authentication spec");
+        spec.domain = Some("auth".into());
+        assert_eq!(spec.domain.as_deref(), Some("auth"));
+    }
+
+    #[test]
+    fn spec_domain_survives_serialization() {
+        let mut spec = Spec::new("id", "Auth", "Desc");
+        spec.domain = Some("auth".into());
+        let json = serde_json::to_string(&spec).unwrap();
+        let parsed: Spec = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.domain.as_deref(), Some("auth"));
+    }
+
+    #[test]
+    fn spec_without_domain_deserializes_from_old_format() {
+        let json = r#"{
+            "id": "old-id",
+            "title": "Old Spec",
+            "description": "From before domain existed",
+            "status": "draft",
+            "sections": {},
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "version": 1,
+            "auto_update": true
+        }"#;
+        let spec: Spec = serde_json::from_str(json).unwrap();
+        assert!(spec.domain.is_none());
     }
 }
