@@ -111,6 +111,10 @@ impl ChatMessage {
         Self::new(MessageRole::Assistant, "")
     }
 
+    pub fn system(content: impl Into<String>) -> Self {
+        Self::new(MessageRole::System, content)
+    }
+
     pub fn error(content: impl Into<String>) -> Self {
         Self::new(MessageRole::Error, content)
     }
@@ -540,6 +544,41 @@ impl ChatService {
     pub fn send_message(&mut self, content: String, model: &str, cx: &mut Context<Self>) {
         // Clear previous error.
         self.error = None;
+
+        // Shield: scan outgoing message for secrets/credentials.
+        let shield_enabled = if cx.has_global::<crate::AppConfig>() {
+            cx.global::<crate::AppConfig>().0.get().shield_enabled
+        } else {
+            true // default to enabled if no config
+        };
+        if shield_enabled && cx.has_global::<crate::AppShield>() {
+            let shield = &cx.global::<crate::AppShield>().0;
+            let secrets = shield.scan_secrets(&content);
+            if !secrets.is_empty() {
+                let count = secrets.len();
+                let types: Vec<String> = secrets.iter().map(|s| s.secret_type.to_string()).collect();
+                let unique_types: Vec<&str> = {
+                    let mut seen = std::collections::HashSet::new();
+                    types.iter().filter(|t| seen.insert(t.as_str())).map(|t| t.as_str()).collect()
+                };
+                warn!(
+                    "Shield: detected {} secret(s) in outgoing message: [{}]",
+                    count,
+                    unique_types.join(", ")
+                );
+                // Insert a warning message into the chat so the user is aware.
+                let warning_text = format!(
+                    "\u{26a0}\u{fe0f} Secret scan: {} credential(s) detected ({}). \
+                     The message was sent, but consider removing secrets before sharing with AI.",
+                    count,
+                    unique_types.join(", ")
+                );
+                let warning_msg = ChatMessage::system(&warning_text);
+                self.messages.push(warning_msg);
+                self.generation += 1;
+                cx.notify();
+            }
+        }
 
         // 1. Record the user message.
         let user_msg = ChatMessage::user(&content);

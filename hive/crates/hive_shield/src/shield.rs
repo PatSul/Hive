@@ -142,6 +142,17 @@ impl HiveShield {
         self.threats_caught.load(Ordering::Relaxed)
     }
 
+    /// Convenience method: scan text for secrets/credentials only, returning
+    /// any matches found. This is cheaper than the full `process_outgoing`
+    /// pipeline when only secret detection is needed.
+    pub fn scan_secrets(&self, text: &str) -> Vec<SecretMatch> {
+        if self.config.enable_secret_scan {
+            self.secret_scanner.scan_text(text)
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Run the full shield pipeline on an outgoing message headed to
     /// `provider`. Returns the shield decision plus detailed findings.
     pub fn process_outgoing(&self, text: &str, provider: &str) -> ShieldResult {
