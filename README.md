@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.26-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.30-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -631,7 +631,7 @@ hive_cli   (standalone binary) ── hive_core
 
 ---
 
-## UI — 26 Panels
+## UI — 27 Panels
 
 All panels are wired to live backend data. No mock data in the production path. **8 built-in themes** (HiveCode Dark/Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark) with community voting and custom theme support via `~/.hive/themes/`.
 
@@ -662,6 +662,7 @@ All panels are wired to live backend data. No mock data in the production path. 
 | Terminal | Interactive shell with real PTY, command history, kill/restart | `InteractiveShell` via `hive_terminal` |
 | Network | P2P federation peer browser | `hive_network` |
 | Quick Start | Guided project onboarding with goal-driven AI | `AppConfig` + AI providers |
+| Activity | Live agent event stream with approval cards, filters, and CSV export | `ActivityService` event bus |
 | Help | Documentation and guides | Static content |
 
 ---
@@ -814,7 +815,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.26 |
+| Version | 0.3.30 |
 | Crates | 21 |
 | Rust source files | 400+ |
 | Lines of Rust | 200,000+ |
@@ -846,6 +847,46 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.30
+
+**Agent Orchestration Platform**
+
+- **Event Bus** — `ActivityService` broadcast channel (`tokio::sync::broadcast`) for real-time agent event streaming with `ActivityEvent` enum covering 10+ event types (agent started, task completed, cost incurred, approval requested, etc.).
+- **Activity Log** — SQLite-backed `ActivityLog` persists every event with full-text search, filtering by category/time range, and CSV export. Auto-subscribes to the event bus.
+- **Budget Enforcement** — `BudgetEnforcer` with daily and per-agent spending limits. Pre-flight checks in the Coordinator's task dispatch loop block tasks when limits are reached. `CostIncurred` events emitted after every AI response.
+- **Approval Gates** — `ApprovalGate` with async oneshot response channels for human-in-the-loop decisions. `ApprovalRule` engine with glob-based pattern matching routes operations to auto-approve, prompt, or block.
+- **Heartbeat Scheduler** — Background task scheduler for periodic health checks, budget resets, and stale-agent cleanup.
+- **Notification Service** — Push notification system for approval requests, budget warnings, task completions, and errors.
+- **Security Decision** — Graduated response type (`Allow`, `Prompt`, `Block`) in `hive_core` for approval routing.
+- **Activity Panel** — New GPUI panel with live event stream, approval cards, and filter controls.
+- **Budget Gauge** — Real-time spending visualization in the Costs panel.
+- **Notification Tray** — Statusbar notification bell with unread count and dropdown.
+- **Progressive Disclosure** — Beginner/Intermediate/Advanced detail levels in Chat and Agents panels.
+- **Queen/HiveMind Wiring** — Full integration: Queen bridges Coordinator task events to the activity bus, HiveMind emits cost events after each AI response.
+
+### v0.3.29
+
+**AutoResearch Engine**
+
+- **AutoResearchEngine** — Autonomous prompt improvement loop: evaluate → mutate → re-evaluate → converge. Configurable generation limits, improvement thresholds, and stop conditions.
+- **EvalSuite** — TOML-based evaluation suite parser with weighted pass rates and multi-case support.
+- **EvalRunner** — Skill execution and judgment pipeline for evaluating prompt quality.
+- **PromptMutator** — Evidence-based prompt rewriting using evaluation feedback.
+- **Prompt Injection Scanner** — Standalone scanner for detecting injection attempts in prompts.
+- **OpenSpec Domain Field** — Optional domain grouping for specs.
+
+### v0.3.28
+
+**Security Hardening & RAG Wiring**
+
+- Fixes for SSRF hardening, JS eval gate, RAG pipeline wiring, and MCP tool dispatch (see v0.3.26 changelog for details — shipped together).
+
+### v0.3.27
+
+**CI Fixes**
+
+- Fix borrowed data escape and unused import errors in `hive_ui` for cross-platform CI.
 
 ### v0.3.26
 
