@@ -9,6 +9,8 @@ use hive_ui_core::{
 };
 use hive_ui_core::HiveTheme;
 
+use super::chat::DisclosureLevel;
+
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -51,6 +53,8 @@ pub struct RunDisplay {
     pub cost: f64,
     pub elapsed: String,
     pub tasks: Vec<crate::components::task_tree::TaskDisplay>,
+    /// Progressive disclosure level for this run's detail.
+    pub disclosure: DisclosureLevel,
 }
 
 impl RunDisplay {
@@ -265,6 +269,7 @@ impl AgentsPanelData {
                 cost: 0.42,
                 elapsed: "3m 22s".into(),
                 tasks: vec![],
+                disclosure: DisclosureLevel::default(),
             }],
             run_history: vec![
                 RunDisplay {
@@ -277,6 +282,7 @@ impl AgentsPanelData {
                     cost: 0.18,
                     elapsed: "1m 47s".into(),
                     tasks: vec![],
+                    disclosure: DisclosureLevel::default(),
                 },
             ],
             workflow_source_dir: ".hive/workflows".into(),

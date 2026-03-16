@@ -305,6 +305,24 @@ impl CachedChatData {
 // Display types
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DisclosureLevel {
+    #[default]
+    Summary,
+    Steps,
+    Raw,
+}
+
+impl DisclosureLevel {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Summary => Self::Steps,
+            Self::Steps => Self::Raw,
+            Self::Raw => Self::Summary,
+        }
+    }
+}
+
 /// A fully-resolved message ready for rendering.
 /// A tool call to display in the chat UI.
 #[derive(Clone)]
@@ -326,6 +344,8 @@ pub struct DisplayMessage {
     pub tool_calls: Vec<ToolCallDisplay>,
     /// For tool result messages: the ID of the tool call this responds to.
     pub tool_call_id: Option<String>,
+    /// Progressive disclosure level for this message.
+    pub disclosure: DisclosureLevel,
 }
 
 impl DisplayMessage {
@@ -341,6 +361,7 @@ impl DisplayMessage {
             show_thinking: false,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            disclosure: DisclosureLevel::default(),
         }
     }
 
@@ -356,6 +377,7 @@ impl DisplayMessage {
             show_thinking: false,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            disclosure: DisclosureLevel::default(),
         }
     }
 
@@ -371,6 +393,7 @@ impl DisplayMessage {
             show_thinking: false,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            disclosure: DisclosureLevel::default(),
         }
     }
 }

@@ -1929,6 +1929,7 @@ impl HiveWorkspace {
                         .map(|_| "recent".to_string())
                         .unwrap_or_else(|| "-".to_string()),
                     tasks: vec![],
+                    disclosure: Default::default(),
                 })
                 .collect();
 
@@ -1956,6 +1957,7 @@ impl HiveWorkspace {
                             (run.completed_at - run.started_at).num_seconds().max(0)
                         ),
                         tasks: vec![],
+                        disclosure: Default::default(),
                     })
                 })
                 .collect();
@@ -12078,6 +12080,7 @@ fn sync_chat_cache(cache: &mut CachedChatData, svc: &ChatService) {
             show_thinking: false,
             tool_calls,
             tool_call_id: msg.tool_call_id.clone(),
+            disclosure: Default::default(),
         };
         if let Some(c) = display_msg.cost {
             cache.total_cost += c;
