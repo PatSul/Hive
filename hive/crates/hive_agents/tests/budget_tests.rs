@@ -1,6 +1,6 @@
 use hive_agents::activity::budget::{BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction};
 use hive_agents::activity::log::ActivityLog;
-use hive_agents::activity::{ActivityEvent, ActivityService};
+use hive_agents::activity::ActivityEvent;
 use std::sync::Arc;
 
 fn test_enforcer(daily_limit: f64) -> (Arc<ActivityLog>, BudgetEnforcer) {
@@ -19,7 +19,7 @@ fn test_enforcer(daily_limit: f64) -> (Arc<ActivityLog>, BudgetEnforcer) {
 
 #[test]
 fn budget_proceed_when_under_limit() {
-    let (log, enforcer) = test_enforcer(10.0);
+    let (_log, enforcer) = test_enforcer(10.0);
     let decision = enforcer.check("agent-1", 0.5);
     assert!(matches!(decision, BudgetDecision::Proceed));
 }

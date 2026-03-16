@@ -1,4 +1,4 @@
-use hive_agents::activity::{ActivityEvent, ActivityService, PauseReason, FileOp};
+use hive_agents::activity::{ActivityEvent, ActivityService, PauseReason};
 use hive_agents::activity::log::{ActivityLog, ActivityFilter};
 
 #[test]
