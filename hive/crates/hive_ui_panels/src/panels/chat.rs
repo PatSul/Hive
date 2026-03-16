@@ -6,6 +6,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::ChatReadAloud;
+use hive_ui_core::ToggleDisclosure;
 use crate::components::markdown::render_markdown;
 use crate::components::thinking_indicator::{ThinkingPhase, render_thinking_indicator};
 use hive_ui_core::WelcomeScreen;
@@ -300,6 +301,12 @@ impl CachedChatData {
         }
     }
 
+    /// Cycle the disclosure level on a cached display message.
+    pub fn toggle_disclosure(&mut self, index: usize) {
+        if let Some(msg) = self.display_messages.get_mut(index) {
+            msg.disclosure = msg.disclosure.next();
+        }
+    }
 }
 
 
@@ -485,6 +492,13 @@ impl ChatPanel {
         }
     }
 
+    /// Cycle the disclosure level on a message (Summary → Steps → Raw → Summary).
+    pub fn toggle_disclosure(&mut self, index: usize) {
+        if let Some(msg) = self.messages.get_mut(index) {
+            msg.disclosure = msg.disclosure.next();
+        }
+    }
+
     pub fn render(&self, theme: &HiveTheme) -> AnyElement {
         if self.messages.is_empty() && !self.is_streaming {
             return div()
@@ -505,8 +519,8 @@ impl ChatPanel {
             .gap(theme.space_3);
 
         // Render completed messages
-        for msg in &self.messages {
-            content = content.child(render_message_bubble(msg, theme));
+        for (idx, msg) in self.messages.iter().enumerate() {
+            content = content.child(render_message_bubble(msg, idx, theme));
         }
 
         // Render streaming bubble
@@ -572,9 +586,10 @@ impl ChatPanel {
             .gap(theme.space_3);
 
         // Render cached display messages
-        for msg in &cached.display_messages {
+        for (idx, msg) in cached.display_messages.iter().enumerate() {
             content = content.child(render_message_bubble_cached(
                 msg,
+                idx,
                 &mut cached.markdown_cache,
                 theme,
             ));
@@ -641,7 +656,14 @@ fn disclosure_label(level: DisclosureLevel) -> &'static str {
 }
 
 /// Render a small disclosure toggle badge for assistant messages.
-fn render_disclosure_toggle(level: DisclosureLevel, theme: &HiveTheme) -> AnyElement {
+///
+/// Clicking the badge dispatches [`ToggleDisclosure`] which cycles the
+/// message through Summary → Steps → Raw → Summary.
+fn render_disclosure_toggle(
+    level: DisclosureLevel,
+    message_index: usize,
+    theme: &HiveTheme,
+) -> AnyElement {
     use gpui_component::IconName;
 
     let icon = match level {
@@ -651,6 +673,7 @@ fn render_disclosure_toggle(level: DisclosureLevel, theme: &HiveTheme) -> AnyEle
     };
 
     div()
+        .id(ElementId::Name(format!("disclosure-toggle-{message_index}").into()))
         .flex()
         .items_center()
         .gap(theme.space_1)
@@ -671,6 +694,12 @@ fn render_disclosure_toggle(level: DisclosureLevel, theme: &HiveTheme) -> AnyEle
                 .text_color(theme.text_muted)
                 .child(disclosure_label(level)),
         )
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(ToggleDisclosure { message_index }),
+                cx,
+            );
+        })
         .into_any_element()
 }
 
@@ -712,7 +741,11 @@ fn render_tool_calls(calls: &[ToolCallDisplay], theme: &HiveTheme) -> AnyElement
     container.into_any_element()
 }
 
-fn render_message_bubble(msg: &DisplayMessage, theme: &HiveTheme) -> AnyElement {
+fn render_message_bubble(
+    msg: &DisplayMessage,
+    message_index: usize,
+    theme: &HiveTheme,
+) -> AnyElement {
     let is_user = msg.role == MessageRole::User;
     let is_error = msg.role == MessageRole::Error;
 
@@ -787,7 +820,7 @@ fn render_message_bubble(msg: &DisplayMessage, theme: &HiveTheme) -> AnyElement 
     // Disclosure toggle for assistant messages
     let is_assistant = msg.role == MessageRole::Assistant;
     if is_assistant {
-        header = header.child(render_disclosure_toggle(msg.disclosure, theme));
+        header = header.child(render_disclosure_toggle(msg.disclosure, message_index, theme));
     }
 
     // Read Aloud button for assistant messages
@@ -841,6 +874,7 @@ fn render_message_bubble(msg: &DisplayMessage, theme: &HiveTheme) -> AnyElement 
 /// Cached variant of `render_message_bubble` — renders markdown from pre-parsed IR.
 fn render_message_bubble_cached(
     msg: &DisplayMessage,
+    message_index: usize,
     md_cache: &mut MarkdownCache,
     theme: &HiveTheme,
 ) -> AnyElement {
@@ -913,7 +947,7 @@ fn render_message_bubble_cached(
     // Disclosure toggle for assistant messages
     let is_assistant = msg.role == MessageRole::Assistant;
     if is_assistant {
-        header = header.child(render_disclosure_toggle(msg.disclosure, theme));
+        header = header.child(render_disclosure_toggle(msg.disclosure, message_index, theme));
     }
 
     // Read Aloud button for assistant messages

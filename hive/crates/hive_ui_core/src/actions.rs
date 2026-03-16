@@ -665,3 +665,10 @@ pub struct OllamaDeleteModel {
 pub struct VoiceProcessText {
     pub text: String,
 }
+
+/// Cycle the disclosure level (Summary → Steps → Raw → Summary) on a chat message.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ToggleDisclosure {
+    pub message_index: usize,
+}
