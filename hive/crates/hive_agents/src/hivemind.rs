@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelTier, TokenUsage};
 
+use crate::activity::{ActivityEvent, ActivityService};
 use crate::message_queue::SharedMessageQueue;
 
 // ---------------------------------------------------------------------------
@@ -390,6 +391,8 @@ pub struct HiveMind<E: AiExecutor> {
     status_callback: Option<StatusCallback>,
     accumulated_cost: Arc<Mutex<f64>>,
     message_queue: Option<SharedMessageQueue>,
+    /// Optional activity service for emitting cost events.
+    activity: Option<Arc<ActivityService>>,
 }
 
 impl<E: AiExecutor> HiveMind<E> {
@@ -401,6 +404,7 @@ impl<E: AiExecutor> HiveMind<E> {
             status_callback: None,
             accumulated_cost: Arc::new(Mutex::new(0.0)),
             message_queue: None,
+            activity: None,
         }
     }
 
@@ -413,6 +417,12 @@ impl<E: AiExecutor> HiveMind<E> {
     /// Set the message queue after construction.
     pub fn set_message_queue(&mut self, queue: SharedMessageQueue) {
         self.message_queue = Some(queue);
+    }
+
+    /// Attach an activity service for cost event emission.
+    pub fn with_activity(mut self, activity: Arc<ActivityService>) -> Self {
+        self.activity = Some(activity);
+        self
     }
 
     /// Register a callback for status updates.
@@ -486,6 +496,17 @@ impl<E: AiExecutor> HiveMind<E> {
             Ok(response) => {
                 let duration_ms = start.elapsed().as_millis() as u64;
                 let cost = estimate_cost_from_usage(&model_used, &response.usage);
+
+                // Emit CostIncurred event to the activity service if present.
+                if let Some(ref activity) = self.activity {
+                    activity.emit(ActivityEvent::CostIncurred {
+                        agent_id: format!("hivemind-{}", role.label()),
+                        model: model_used.clone(),
+                        input_tokens: response.usage.prompt_tokens,
+                        output_tokens: response.usage.completion_tokens,
+                        cost_usd: cost,
+                    });
+                }
 
                 AgentOutput {
                     role,

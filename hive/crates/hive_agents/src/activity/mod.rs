@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 pub use types::{ActivityEvent, FileOp, OperationType, PauseReason};
 
+use crate::coordinator::TaskEvent;
+
 /// Central event bus for all agent activity.
 ///
 /// Created once at app startup. All agent infrastructure holds an `Arc<ActivityService>`
@@ -52,5 +54,46 @@ impl ActivityService {
     /// Subscribe to the event stream.
     pub fn subscribe(&self) -> broadcast::Receiver<ActivityEvent> {
         self.tx.subscribe()
+    }
+
+    /// Bridge coordinator TaskEvents into ActivityEvents.
+    ///
+    /// Call after creating a Coordinator:
+    /// `activity.bridge_task_events(coordinator.subscribe())`
+    pub fn bridge_task_events(&self, mut task_rx: broadcast::Receiver<TaskEvent>) {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            while let Ok(task_event) = task_rx.recv().await {
+                if let Some(activity_event) = translate_task_event(task_event) {
+                    let _ = tx.send(activity_event);
+                }
+            }
+        });
+    }
+}
+
+fn translate_task_event(event: TaskEvent) -> Option<ActivityEvent> {
+    match event {
+        TaskEvent::TaskStarted { task_id, persona, .. } => {
+            Some(ActivityEvent::AgentStarted {
+                agent_id: persona,
+                role: "task".into(),
+                task_id: Some(task_id),
+            })
+        }
+        TaskEvent::TaskCompleted { task_id, cost, .. } => {
+            Some(ActivityEvent::TaskCompleted {
+                task_id,
+                agent_id: "coordinator".into(),
+                cost,
+            })
+        }
+        TaskEvent::TaskFailed { task_id, error } => {
+            Some(ActivityEvent::TaskFailed {
+                task_id,
+                error,
+            })
+        }
+        _ => None,
     }
 }

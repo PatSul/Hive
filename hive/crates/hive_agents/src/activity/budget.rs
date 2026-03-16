@@ -46,6 +46,14 @@ pub struct BudgetEnforcer {
     log: Arc<ActivityLog>,
 }
 
+impl std::fmt::Debug for BudgetEnforcer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BudgetEnforcer")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
 impl BudgetEnforcer {
     pub fn new(config: BudgetConfig, log: Arc<ActivityLog>) -> Self {
         Self { config, log }

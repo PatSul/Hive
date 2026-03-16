@@ -13,6 +13,8 @@ use tokio::sync::broadcast;
 use hive_ai::rag::RagService;
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
+use crate::activity::budget::{BudgetDecision, BudgetEnforcer};
+
 use crate::hivemind::{AiExecutor, default_model_for_tier};
 use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona_model};
 use crate::pipeline::{PipelineConfig, TaskPipeline};
@@ -96,6 +98,9 @@ pub struct CoordinatorConfig {
     /// RAG service for pipeline context curation (not serialized).
     #[serde(skip)]
     pub rag: Option<Arc<Mutex<RagService>>>,
+    /// Optional budget enforcer for pre-flight cost checks.
+    #[serde(skip)]
+    pub budget: Option<Arc<BudgetEnforcer>>,
 }
 
 impl Default for CoordinatorConfig {
@@ -107,6 +112,7 @@ impl Default for CoordinatorConfig {
             model_for_coordination: default_model_for_tier(ModelTier::Mid),
             pipeline: None,
             rag: None,
+            budget: None,
         }
     }
 }
@@ -423,6 +429,34 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
             // non-Send future, preventing tokio::spawn. The wave structure
             // still provides correct dependency ordering across waves.
             for task in &batch {
+                // Budget pre-flight check: estimate per-task cost and consult the
+                // budget enforcer. Blocked tasks are marked as failed and skipped.
+                if let Some(ref budget) = self.config.budget {
+                    let task_cost_estimate = 0.10_f64;
+                    let decision = budget.check(&task.id, task_cost_estimate);
+                    match decision {
+                        BudgetDecision::Blocked { .. } => {
+                            self.emit(TaskEvent::TaskFailed {
+                                task_id: task.id.clone(),
+                                error: "Budget limit reached".into(),
+                            });
+                            let skip_result = TaskResult {
+                                task_id: task.id.clone(),
+                                persona: task.persona.clone(),
+                                output: String::new(),
+                                cost: 0.0,
+                                duration_ms: 0,
+                                success: false,
+                                error: Some("Budget limit reached".into()),
+                            };
+                            failed.insert(task.id.clone());
+                            results.push(skip_result);
+                            continue;
+                        }
+                        _ => {} // Proceed or Warning — both allow execution
+                    }
+                }
+
                 // Emit TaskStarted before execution.
                 self.emit(TaskEvent::TaskStarted {
                     task_id: task.id.clone(),
