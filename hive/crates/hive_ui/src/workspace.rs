@@ -95,6 +95,7 @@ pub use hive_ui_core::{
     PromptLibrarySaveCurrent, PromptLibraryRefresh, PromptLibraryLoad, PromptLibraryDelete,
     VoiceProcessText,
     OllamaPullModel, OllamaDeleteModel,
+    ToggleDisclosure,
 };
 use hive_ui_panels::panels::chat::{DisplayMessage, ToolCallDisplay};
 use hive_ui_panels::panels::{
@@ -11576,6 +11577,15 @@ impl HiveWorkspace {
             })
             .ok();
     }
+
+    fn handle_toggle_disclosure(
+        &mut self,
+        action: &ToggleDisclosure,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        self.cached_chat_data.toggle_disclosure(action.message_index);
+    }
 }
 
 fn network_peer_status_label(state: &hive_network::PeerState) -> String {
@@ -11874,6 +11884,8 @@ impl Render for HiveWorkspace {
             // Ollama model management
             .on_action(cx.listener(Self::handle_ollama_pull_model))
             .on_action(cx.listener(Self::handle_ollama_delete_model))
+            // Chat disclosure
+            .on_action(cx.listener(Self::handle_toggle_disclosure))
             // Titlebar
                 .child(Titlebar::render(theme, window, &self.current_project_root))
             // Project dropdown backdrop (dismisses on click)
