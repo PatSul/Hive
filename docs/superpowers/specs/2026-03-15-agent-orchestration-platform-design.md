@@ -335,23 +335,21 @@ pub enum BudgetDecision {
 
 ### 2.2 Integration Point
 
-Pre-flight check added to `AiService::chat()` and `AiService::stream_chat()`:
+**Important:** Budget check happens in the **Coordinator/HiveMind/Queen** layer (in `hive_agents`), NOT inside `AiService` (in `hive_ai`). This avoids a circular dependency — `hive_agents` depends on `hive_ai`, not the other way around. The orchestrators already know the `agent_id` and control when AI calls happen.
 
 ```rust
-// In AiService, before calling provider:
+// In Coordinator, before executing a task's AI call:
+let estimated_cost = hive_ai::cost::predict_cost(&model, &prompt).total_cost;
 let decision = self.budget_enforcer.check(agent_id, estimated_cost);
 match decision {
-    BudgetDecision::Proceed => { /* continue */ },
+    BudgetDecision::Proceed => { /* continue to AI call */ },
     BudgetDecision::Warning { message, .. } => {
         self.activity.emit(ActivityEvent::BudgetWarning { .. });
         // continue, but user sees notification
     },
     BudgetDecision::Blocked { reason } => {
         self.activity.emit(ActivityEvent::BudgetExhausted { .. });
-        return Err(ProviderError::BudgetExceeded(reason));
-    },
-    BudgetDecision::NeedsApproval { request_id } => {
-        // Route through approval gate (Phase 3)
+        // Skip this task, emit TaskFailed
     },
 }
 ```
@@ -654,7 +652,7 @@ pub enum DisclosureLevel {
 `DisplayMessage` gains a `disclosure: DisclosureLevel` field (default: `Summary`).
 
 - **Summary:** Role icon + one-line summary + cost badge + chevron to expand
-- **Steps:** Expandable section showing the `TaskEvent` stream for this message's orchestration run. Uses the existing `TaskTreeView` component from `hive_ui_panels/src/components/`.
+- **Steps:** Expandable section showing the `TaskEvent` stream for this message's orchestration run. Uses the existing `task_tree::TaskDisplay` component from `hive_ui_panels/src/components/`.
 - **Raw:** Code blocks showing full prompts, responses, tool call JSON. Uses existing `render_code_block()`.
 
 Toggle is a simple click on the chevron. State is per-message, not global.
@@ -670,6 +668,51 @@ Toggle is a simple click on the chevron. State is per-message, not global.
 ---
 
 ## Cross-Cutting Concerns
+
+### Event Bridge: TaskEvent → ActivityEvent
+
+The Coordinator already emits `TaskEvent` (TaskStarted, TaskCompleted, TaskFailed, etc.) via a broadcast channel. Rather than emitting duplicate `ActivityEvent`s from the same call sites, `ActivityService` subscribes to the existing `TaskEvent` broadcast and translates events internally:
+
+```rust
+// In ActivityService construction:
+fn bridge_task_events(task_rx: broadcast::Receiver<TaskEvent>, activity_tx: broadcast::Sender<ActivityEvent>) {
+    tokio::spawn(async move {
+        while let Ok(task_event) = task_rx.recv().await {
+            let activity_event = match task_event {
+                TaskEvent::TaskStarted { task_id, description, persona } => {
+                    ActivityEvent::TaskClaimed { task_id, agent_id: persona }
+                },
+                TaskEvent::TaskCompleted { task_id, cost, .. } => {
+                    ActivityEvent::TaskCompleted { task_id, agent_id: String::new(), cost }
+                },
+                // ... etc
+            };
+            let _ = activity_tx.send(activity_event);
+        }
+    });
+}
+```
+
+This means: **no changes to Coordinator/HiveMind/Queen for task lifecycle events.** Only new event types (CostIncurred, BudgetWarning, ApprovalRequested, etc.) need explicit `activity.emit()` calls.
+
+### GPUI Bridge Pattern
+
+GPUI is immediate-mode — tokio events must be bridged into the render cycle. Follow the existing pattern used by the Agents panel for `TaskEvent`:
+
+1. A `Model<ActivityPanelState>` holds the panel data
+2. A tokio task subscribes to `ActivityService` events
+3. On event, calls `cx.update_model()` to push data + `cx.notify()` to trigger re-render
+4. The panel's `render()` reads from the model
+
+### Dependency Direction
+
+```
+hive_core ← hive_ai ← hive_agents ← hive_ui
+```
+
+- `BudgetEnforcer` lives in `hive_agents` (not `hive_ai`) to avoid circular deps
+- Budget checks happen in the orchestrator layer (Coordinator/Queen), not in AiService
+- `SecurityDecision` lives in `hive_core` (both `hive_agents` and `hive_ai` can use it)
 
 ### Configuration
 

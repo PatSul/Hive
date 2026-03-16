@@ -39,8 +39,6 @@
 |------|--------|
 | `hive_agents/src/lib.rs` | Add `pub mod activity;` + `pub mod heartbeat_scheduler;` + re-exports |
 | `hive_agents/Cargo.toml` | Add `glob = "0.3"` dependency |
-| `hive_ai/src/cost.rs` | Add `check_budget()` method to `CostTracker` returning `BudgetDecision` |
-| `hive_ai/src/service.rs` | Add budget pre-flight check before AI calls |
 | `hive_core/src/security.rs` | Add `SecurityDecision` enum with `NeedsApproval` variant |
 | `hive_ui_core/src/sidebar.rs` | Add `Panel::Activity` variant |
 | `hive_ui_core/src/actions.rs` | Add Activity/Approval/Notification actions |
@@ -2476,27 +2474,47 @@ git commit -m "feat(ui): wire Activity panel, notification tray, and approval ha
 
 ### Task 17: Final integration — wire event bus into orchestration
 
+**Key design decisions (from spec review):**
+- **No duplicate events:** ActivityService bridges from Coordinator's existing `TaskEvent` broadcast — no changes to Coordinator/HiveMind/Queen for task lifecycle events.
+- **Budget check in orchestrators, not AiService:** Avoids circular dependency (`hive_agents` → `hive_ai`, not the reverse). Coordinator calls `budget.check()` before dispatching AI calls.
+- **HeartbeatScheduler calls `coordinator.execute()`** (not `execute_plan()`) since it takes a string spec.
+
 **Files:**
+- Modify: `hive/crates/hive_agents/src/activity/mod.rs`
 - Modify: `hive/crates/hive_agents/src/coordinator.rs`
 - Modify: `hive/crates/hive_agents/src/hivemind.rs`
 - Modify: `hive/crates/hive_agents/src/queen.rs`
-- Modify: `hive/crates/hive_ai/src/service.rs`
 
-- [ ] **Step 1: Add ActivityService to Coordinator**
+- [ ] **Step 1: Add TaskEvent → ActivityEvent bridge in ActivityService**
 
-Add `activity: Option<Arc<ActivityService>>` field to `Coordinator` and `CoordinatorConfig`. Emit `TaskClaimed`, `TaskCompleted`, `TaskFailed`, and `CostIncurred` events at the appropriate points in the execution loop.
+In `activity/mod.rs`, add a `bridge_task_events()` method that subscribes to the Coordinator's existing `TaskEvent` broadcast and translates events into `ActivityEvent`s. This means the Coordinator emits events once (as `TaskEvent`), and the bridge produces the corresponding `ActivityEvent`s automatically.
 
-- [ ] **Step 2: Add ActivityService to HiveMind**
+```rust
+impl ActivityService {
+    pub fn bridge_task_events(&self, mut task_rx: broadcast::Receiver<coordinator::TaskEvent>) {
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            while let Ok(task_event) = task_rx.recv().await {
+                if let Some(activity_event) = translate_task_event(task_event) {
+                    let _ = tx.send(activity_event);
+                }
+            }
+        });
+    }
+}
+```
 
-Same pattern — emit `AgentStarted`, `AgentCompleted`, `CostIncurred` per role.
+- [ ] **Step 2: Add budget pre-flight check to Coordinator and Queen**
 
-- [ ] **Step 3: Add ActivityService to Queen**
+Add `budget: Option<Arc<BudgetEnforcer>>` field to `CoordinatorConfig` and `SwarmConfig`. Before each task's AI call in the execution loop, check the budget. This does NOT touch `hive_ai` at all — the check happens in `hive_agents`.
 
-Emit team-level events: `AgentStarted` per team, `AgentCompleted` per team, `CostIncurred` accumulated.
+- [ ] **Step 3: Add ActivityService to HiveMind for cost events**
 
-- [ ] **Step 4: Add budget pre-flight check to AiService**
+Only `CostIncurred` events need explicit emission (task lifecycle is handled by the bridge). Add `activity: Option<Arc<ActivityService>>` and emit `CostIncurred` after each role's AI response returns.
 
-In `AiService::chat()` and `AiService::stream_chat()`, add the budget check before the provider call (3-line check as described in the spec). This requires adding an optional `BudgetEnforcer` to `AiService`.
+- [ ] **Step 4: Wire bridge in Queen after creating Coordinator**
+
+When Queen creates a Coordinator for a team, pass the Coordinator's `subscribe()` receiver to `activity.bridge_task_events()`.
 
 - [ ] **Step 5: Run full test suite**
 
@@ -2506,8 +2524,8 @@ Expected: all tests pass (no regressions)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add hive/crates/hive_agents/src/coordinator.rs hive/crates/hive_agents/src/hivemind.rs hive/crates/hive_agents/src/queen.rs hive/crates/hive_ai/src/service.rs
-git commit -m "feat: wire event bus into orchestration layer and add budget pre-flight check"
+git add hive/crates/hive_agents/src/activity/mod.rs hive/crates/hive_agents/src/coordinator.rs hive/crates/hive_agents/src/hivemind.rs hive/crates/hive_agents/src/queen.rs
+git commit -m "feat: wire event bus bridge and budget checks into orchestration layer"
 ```
 
 ### Task 18: Update lib.rs re-exports and final cleanup
