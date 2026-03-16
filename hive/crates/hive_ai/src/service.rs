@@ -352,13 +352,21 @@ impl AiService {
             return Some((pt, provider, model.to_string()));
         }
 
-        // Capability-aware auto-routing: use discovered models + conversation content.
-        let available = self.all_available_models();
+        // Capability-aware auto-routing: use discovered + registered cloud models.
+        let available = self.available_models_for_routing();
         let decision = self.router.route_with_capabilities(
             messages,
             &available,
             None, // no explicit model
             None, // no classification context
+        );
+
+        info!(
+            model = %decision.model_id,
+            provider = %decision.provider,
+            tier = ?decision.tier,
+            models_considered = available.len(),
+            "Capability-aware routing decision"
         );
 
         let provider_type = map_router_provider(decision.provider);
@@ -581,6 +589,33 @@ impl AiService {
             .map(|d| d.snapshot().all_models())
             .unwrap_or_default()
     }
+
+    /// All models available for capability-aware routing.
+    ///
+    /// Combines locally discovered models with cloud models from the static
+    /// [`MODEL_REGISTRY`](crate::model_registry::MODEL_REGISTRY) whose provider
+    /// is actually registered (i.e. the user has configured an API key).
+    /// This ensures the capability router can score cloud models even when no
+    /// local discovery has been run.
+    fn available_models_for_routing(&self) -> Vec<crate::types::ModelInfo> {
+        use std::collections::HashSet;
+
+        let mut models = self.all_available_models();
+        let existing_ids: HashSet<String> = models.iter().map(|m| m.id.clone()).collect();
+
+        // Add cloud models from the registry whose provider is registered.
+        for info in crate::model_registry::MODEL_REGISTRY.iter() {
+            if existing_ids.contains(&info.id) {
+                continue;
+            }
+            let provider_type = info.provider_type;
+            if self.providers.contains_key(&provider_type) {
+                models.push(info.clone());
+            }
+        }
+
+        models
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -772,5 +807,62 @@ mod tests {
             let back = map_router_provider(rp);
             assert_eq!(pt, back);
         }
+    }
+
+    #[test]
+    fn test_available_models_for_routing_includes_registry() {
+        // Service with Anthropic key — no discovery running.
+        let svc = AiService::new(test_config());
+        let models = svc.available_models_for_routing();
+
+        // Without discovery, all_available_models() would be empty.
+        // But available_models_for_routing() should include Anthropic models
+        // from MODEL_REGISTRY because the provider is registered.
+        assert!(
+            !models.is_empty(),
+            "Should include cloud models from registry"
+        );
+        assert!(
+            models.iter().any(|m| m.id.starts_with("claude-")),
+            "Should include Anthropic models since the key is configured"
+        );
+    }
+
+    #[test]
+    fn test_available_models_for_routing_excludes_unregistered_providers() {
+        // Privacy mode: no cloud providers registered (except local).
+        let config = AiServiceConfig {
+            privacy_mode: true,
+            ollama_url: "http://localhost:11434".into(),
+            default_model: "llama3.2".into(),
+            ..Default::default()
+        };
+        let svc = AiService::new(config);
+        let models = svc.available_models_for_routing();
+
+        // Should not include Anthropic, OpenAI, etc. since no keys configured.
+        assert!(
+            !models.iter().any(|m| m.id.starts_with("claude-")),
+            "Should NOT include Anthropic models in privacy mode"
+        );
+        assert!(
+            !models.iter().any(|m| m.id.starts_with("gpt-")),
+            "Should NOT include OpenAI models in privacy mode"
+        );
+    }
+
+    #[test]
+    fn test_resolve_provider_smart_uses_capability_routing() {
+        let svc = AiService::new(test_config());
+        let messages = vec![ChatMessage::text(MessageRole::User, "Write a Rust function to sort a vector")];
+
+        // Trigger auto-routing by using the default model name.
+        let result = svc.resolve_provider_smart(&messages, &svc.config.default_model.clone());
+        assert!(result.is_some(), "Should resolve a provider via capability routing");
+
+        let (_pt, _provider, resolved_model) = result.unwrap();
+        // The model should have been selected by the capability router from
+        // the registry — it should be a real model ID, not the default_model alias.
+        assert!(!resolved_model.is_empty());
     }
 }
