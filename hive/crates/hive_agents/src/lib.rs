@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod auto_commit;
 pub mod automation;
 pub mod collective_memory;
@@ -5,6 +6,7 @@ pub mod competence_detection;
 pub mod coordinator;
 pub mod guardian;
 pub mod heartbeat;
+pub mod heartbeat_scheduler;
 pub mod hiveloop;
 pub mod hivemind;
 pub mod integration_tools;
@@ -92,3 +94,12 @@ pub use tool_use::builtin_registry_with_sandbox;
 pub use worktree::{MergeBranchResult, TeamWorktree, WorktreeManager};
 pub use prompt_template::PromptTemplate;
 pub use response_parser::{ParsedEdit, parse_edits};
+pub use activity::{
+    ActivityEvent, ActivityService, FileOp, OperationType, PauseReason,
+    ActivityLog, ActivityEntry, ActivityFilter, CostSummary,
+    BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction,
+    ApprovalGate, ApprovalDecision, ApprovalRequest,
+    NotificationService, NotificationKind, Notification,
+    ApprovalRule, RuleTrigger,
+};
+pub use heartbeat_scheduler::{HeartbeatMode, HeartbeatScheduler, HeartbeatTask};

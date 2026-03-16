@@ -1876,6 +1876,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     }
     let host = parsed
         .host_str()
+        .filter(|h| !h.is_empty())
         .ok_or_else(|| "URL has no host — cannot validate".to_string())?;
     if is_private_or_local(host) {
         return Err("Access to private/internal hosts is blocked".into());
@@ -2381,8 +2382,13 @@ mod tests {
 
     #[test]
     fn test_validate_url_rejects_no_host() {
-        // URL with no host should be rejected
-        assert!(validate_url("http:///path/to/resource").is_err());
+        // The url crate normalizes "http:///path" → "http://path/" (WHATWG spec),
+        // treating "path" as the host. Use schemes that actually lack a host, or
+        // test malformed URLs that truly fail to parse.
+        assert!(validate_url("not-a-url").is_err());
+        assert!(validate_url("file:///etc/passwd").is_err()); // non-http scheme
+        assert!(validate_url("ftp://example.com").is_err()); // non-http scheme
+        assert!(validate_url("http://").is_err()); // empty host after parse
     }
 
     #[test]

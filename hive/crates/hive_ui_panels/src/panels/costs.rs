@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use hive_ai::CostTracker;
 
+use crate::components::budget_gauge::BudgetGaugeData;
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{CostsClearHistory, CostsExportCsv, CostsResetToday};
 
@@ -38,6 +39,8 @@ pub struct CostData {
     pub total_output_tokens: usize,
     /// Per-model breakdown, sorted descending by cost.
     pub by_model: Vec<ModelCostEntry>,
+    /// Budget gauge data for limit visualization.
+    pub budget: BudgetGaugeData,
 }
 
 impl CostData {
@@ -82,6 +85,7 @@ impl CostData {
             total_input_tokens: tracker.total_input_tokens(),
             total_output_tokens: tracker.total_output_tokens(),
             by_model,
+            budget: BudgetGaugeData::default(),
         }
     }
 
@@ -94,6 +98,7 @@ impl CostData {
             total_input_tokens: 0,
             total_output_tokens: 0,
             by_model: Vec::new(),
+            budget: BudgetGaugeData::default(),
         }
     }
 }

@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelTier};
 
+use crate::activity::ActivityService;
 use crate::collective_memory::{CollectiveMemory, MemoryCategory, MemoryEntry};
 use crate::coordinator::{Coordinator, CoordinatorConfig, CoordinatorResult};
 use crate::hivemind::{
@@ -55,6 +56,8 @@ pub struct Queen<E: AiExecutor> {
     status_callback: Option<SwarmStatusCallback>,
     /// RAG service for pipeline context curation.
     rag: Option<Arc<Mutex<hive_ai::rag::RagService>>>,
+    /// Optional activity service for bridging task events.
+    activity: Option<Arc<ActivityService>>,
     /// Accumulated cost stored as the bit-pattern of an f64 so we can use
     /// atomic operations without a mutex.
     accumulated_cost: AtomicU64,
@@ -69,6 +72,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
             memory: None,
             status_callback: None,
             rag: None,
+            activity: None,
             accumulated_cost: AtomicU64::new(0f64.to_bits()),
         }
     }
@@ -88,6 +92,12 @@ impl<E: AiExecutor + 'static> Queen<E> {
     /// Register a callback for swarm-level status updates.
     pub fn with_status_callback(mut self, cb: SwarmStatusCallback) -> Self {
         self.status_callback = Some(cb);
+        self
+    }
+
+    /// Attach an activity service for bridging coordinator task events.
+    pub fn with_activity(mut self, activity: Arc<ActivityService>) -> Self {
+        self.activity = Some(activity);
         self
     }
 
@@ -560,7 +570,11 @@ impl<E: AiExecutor + 'static> Queen<E> {
         };
 
         let arc_exec = ArcExecutor(Arc::clone(&self.executor));
-        let hm = HiveMind::new(config, arc_exec);
+        let hm = if let Some(ref activity) = self.activity {
+            HiveMind::new(config, arc_exec).with_activity(Arc::clone(activity))
+        } else {
+            HiveMind::new(config, arc_exec)
+        };
         let result = hm.execute(description).await;
 
         let cost = result.total_cost;
@@ -585,6 +599,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 .unwrap_or_else(|| default_model_for_tier(ModelTier::Mid)),
             pipeline: Some(crate::pipeline::PipelineConfig::default()),
             rag: self.rag.clone(),
+            budget: None,
         };
 
         // Build a simple TaskPlan from the objective description.
@@ -594,6 +609,12 @@ impl<E: AiExecutor + 'static> Queen<E> {
 
         let arc_exec = ArcExecutor(Arc::clone(&self.executor));
         let coordinator = Coordinator::new(config, arc_exec);
+
+        // Bridge coordinator task events into the activity service.
+        if let Some(ref activity) = self.activity {
+            activity.bridge_task_events(coordinator.subscribe());
+        }
+
         let result = coordinator.execute_plan(&plan).await;
 
         let cost = result.total_cost;

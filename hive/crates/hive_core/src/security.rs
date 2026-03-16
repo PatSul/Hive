@@ -26,6 +26,15 @@ pub enum SandboxPolicy {
     Sandboxed,
 }
 
+/// Graduated security decision — allows routing risky (but not catastrophic)
+/// operations through an approval gate instead of hard-blocking.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SecurityDecision {
+    Allow,
+    NeedsApproval(String),  // Operation description
+    Deny(String),           // Hard block reason
+}
+
 /// Security gateway that validates commands, URLs, file paths, and content.
 /// Ported from the Electron SecurityGateway.
 pub struct SecurityGateway {
@@ -113,6 +122,30 @@ impl SecurityGateway {
             }
         }
         Ok(())
+    }
+
+    /// Graduated command check: dangerous commands are Deny, risky patterns
+    /// are NeedsApproval, safe commands are Allow.
+    pub fn check_command_graduated(&self, command: &str) -> SecurityDecision {
+        if self.policy == SandboxPolicy::Sandboxed {
+            return SecurityDecision::Allow;
+        }
+
+        // Dangerous commands → hard deny (unchanged behavior)
+        for pattern in &self.dangerous_commands {
+            if pattern.is_match(command) {
+                return SecurityDecision::Deny(format!("Blocked dangerous command: {command}"));
+            }
+        }
+
+        // Risky patterns → soft deny → route to approval
+        for pattern in &self.risky_patterns {
+            if pattern.is_match(command) {
+                return SecurityDecision::NeedsApproval(command.to_string());
+            }
+        }
+
+        SecurityDecision::Allow
     }
 
     /// Validate a URL for fetching.
@@ -958,5 +991,26 @@ mod tests {
             err.contains("command injection"),
             "Error should mention command injection"
         );
+    }
+
+    #[test]
+    fn check_command_graduated_returns_needs_approval_for_risky() {
+        let g = gw();
+        let result = g.check_command_graduated("echo $(whoami)");
+        assert!(matches!(result, SecurityDecision::NeedsApproval(_)));
+    }
+
+    #[test]
+    fn check_command_graduated_returns_deny_for_dangerous() {
+        let g = gw();
+        let result = g.check_command_graduated("rm -rf /");
+        assert!(matches!(result, SecurityDecision::Deny(_)));
+    }
+
+    #[test]
+    fn check_command_graduated_returns_allow_for_safe() {
+        let g = gw();
+        let result = g.check_command_graduated("ls -la");
+        assert!(matches!(result, SecurityDecision::Allow));
     }
 }

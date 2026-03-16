@@ -34,6 +34,10 @@ actions!(
         SwitchToNetwork,
         SwitchToTerminal,
         SwitchToHelp,
+        SwitchToActivity,
+        // Activity panel
+        ActivityRefresh,
+        ActivityExportCsv,
         OpenWorkspaceDirectory,
         ToggleProjectDropdown,
         // Files panel
@@ -401,6 +405,39 @@ pub struct ReviewGitflowSetName {
 #[action(namespace = hive_workspace, no_json)]
 pub struct ReviewLfsSetPattern {
     pub pattern: String,
+}
+
+// ---------------------------------------------------------------------------
+// Activity panel actions
+// ---------------------------------------------------------------------------
+
+/// Set activity filter by category.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ActivitySetFilter {
+    pub categories: String,
+}
+
+/// Approve an approval request by ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ActivityApprove {
+    pub request_id: String,
+}
+
+/// Deny an approval request by ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ActivityDeny {
+    pub request_id: String,
+    pub reason: String,
+}
+
+/// Toggle event detail disclosure.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ActivityExpandEvent {
+    pub event_id: String,
 }
 
 // ---------------------------------------------------------------------------

@@ -37,6 +37,7 @@ fn run_display_is_active() {
         cost: 0.1,
         elapsed: "1m".into(),
         tasks: vec![],
+        disclosure: Default::default(),
     };
     assert!(running.is_active());
 
@@ -50,6 +51,7 @@ fn run_display_is_active() {
         cost: 0.0,
         elapsed: "0s".into(),
         tasks: vec![],
+        disclosure: Default::default(),
     };
     assert!(pending.is_active());
 
@@ -63,6 +65,7 @@ fn run_display_is_active() {
         cost: 0.2,
         elapsed: "2m".into(),
         tasks: vec![],
+        disclosure: Default::default(),
     };
     assert!(!complete.is_active());
 }

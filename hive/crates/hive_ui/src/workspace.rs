@@ -43,7 +43,7 @@ pub use hive_ui_core::{
     ClearChat, NewConversation,
     SwitchToChat, SwitchToQuickStart, SwitchToHistory, SwitchToFiles, SwitchToCodeMap,
     SwitchToPromptLibrary, SwitchToKanban, SwitchToMonitor,
-    SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
+    SwitchToActivity, SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
     SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToTerminal, SwitchToHelp,
     OpenWorkspaceDirectory,
@@ -74,6 +74,8 @@ pub use hive_ui_core::{
     TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSetStep,
     TokenLaunchSelectChain, TokenLaunchSelectWallet,
     SettingsSave, ExportConfig, ImportConfig,
+    ActivityRefresh, ActivityExportCsv, ActivityApprove, ActivityDeny,
+    ActivityExpandEvent, ActivitySetFilter,
     MonitorRefresh, NetworkRefresh,
     TerminalClear, TerminalSubmitCommand, TerminalKill, TerminalRestart,
     ToolApprove, ToolReject,
@@ -264,6 +266,7 @@ pub struct HiveWorkspace {
     token_launch_inputs: TokenLaunchInputs,
     specs_data: SpecPanelData,
     agents_data: AgentsPanelData,
+    activity_data: hive_ui_panels::panels::activity::ActivityData,
     shield_data: ShieldPanelData,
     learning_data: LearningPanelData,
     assistant_data: AssistantPanelData,
@@ -839,6 +842,7 @@ impl HiveWorkspace {
             token_launch_inputs,
             specs_data,
             agents_data,
+            activity_data: Default::default(),
             shield_data,
             learning_data,
             assistant_data,
@@ -1929,6 +1933,7 @@ impl HiveWorkspace {
                         .map(|_| "recent".to_string())
                         .unwrap_or_else(|| "-".to_string()),
                     tasks: vec![],
+                    disclosure: Default::default(),
                 })
                 .collect();
 
@@ -1956,6 +1961,7 @@ impl HiveWorkspace {
                             (run.completed_at - run.started_at).num_seconds().max(0)
                         ),
                         tasks: vec![],
+                        disclosure: Default::default(),
                     })
                 })
                 .collect();
@@ -3473,6 +3479,10 @@ impl HiveWorkspace {
             }
             Panel::Kanban => KanbanPanel::render(&self.kanban_data, theme).into_any_element(),
             Panel::Monitor => MonitorPanel::render(&self.monitor_data, theme).into_any_element(),
+            Panel::Activity => {
+                hive_ui_panels::panels::activity::ActivityPanel::render(&self.activity_data, theme)
+                    .into_any_element()
+            }
             Panel::Logs => LogsPanel::render(&self.logs_data, theme).into_any_element(),
             Panel::Costs => CostsPanel::render(&self.cost_data, theme).into_any_element(),
             Panel::Review => ReviewPanel::render(&self.review_data, theme).into_any_element(),
@@ -4103,6 +4113,15 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Monitor, cx);
+    }
+
+    fn handle_switch_to_activity(
+        &mut self,
+        _action: &SwitchToActivity,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::Activity, cx);
     }
 
     fn handle_switch_to_logs(
@@ -6286,6 +6305,84 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.logs_data.auto_scroll = !self.logs_data.auto_scroll;
+        cx.notify();
+    }
+
+    // -- Activity panel handlers ----------------------------------------------
+
+    fn handle_activity_refresh(
+        &mut self,
+        _action: &ActivityRefresh,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Activity refresh requested");
+        cx.notify();
+    }
+
+    fn handle_activity_approve(
+        &mut self,
+        action: &ActivityApprove,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Activity: approve request_id={}", action.request_id);
+        cx.notify();
+    }
+
+    fn handle_activity_deny(
+        &mut self,
+        action: &ActivityDeny,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Activity: deny request_id={} reason={}", action.request_id, action.reason);
+        cx.notify();
+    }
+
+    fn handle_activity_expand_event(
+        &mut self,
+        action: &ActivityExpandEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Ok(id) = action.event_id.parse::<i64>() {
+            if !self.activity_data.expanded_events.remove(&id) {
+                self.activity_data.expanded_events.insert(id);
+            }
+            cx.notify();
+        } else {
+            warn!("Activity: invalid event_id '{}'", action.event_id);
+        }
+    }
+
+    fn handle_activity_export_csv(
+        &mut self,
+        _action: &ActivityExportCsv,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        info!("Activity: CSV export requested");
+    }
+
+    fn handle_activity_set_filter(
+        &mut self,
+        action: &ActivitySetFilter,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let categories: Vec<String> = action
+            .categories
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        info!("Activity: set filter categories={:?}", categories);
+        self.activity_data.filter.categories = if categories.is_empty() {
+            None
+        } else {
+            Some(categories)
+        };
         cx.notify();
     }
 
@@ -11290,6 +11387,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_files))
             .on_action(cx.listener(Self::handle_switch_to_kanban))
             .on_action(cx.listener(Self::handle_switch_to_monitor))
+            .on_action(cx.listener(Self::handle_switch_to_activity))
             .on_action(cx.listener(Self::handle_switch_to_logs))
             .on_action(cx.listener(Self::handle_switch_to_costs))
             .on_action(cx.listener(Self::handle_switch_to_review))
@@ -11351,6 +11449,13 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_logs_clear))
             .on_action(cx.listener(Self::handle_logs_set_filter))
             .on_action(cx.listener(Self::handle_logs_toggle_auto_scroll))
+            // Activity
+            .on_action(cx.listener(Self::handle_activity_refresh))
+            .on_action(cx.listener(Self::handle_activity_approve))
+            .on_action(cx.listener(Self::handle_activity_deny))
+            .on_action(cx.listener(Self::handle_activity_expand_event))
+            .on_action(cx.listener(Self::handle_activity_export_csv))
+            .on_action(cx.listener(Self::handle_activity_set_filter))
             // Terminal
             .on_action(cx.listener(Self::handle_terminal_clear))
             .on_action(cx.listener(Self::handle_terminal_submit))
@@ -11607,7 +11712,7 @@ impl HiveWorkspace {
                     ))
                     .child(render_sidebar_section(
                         "Observe",
-                        &[Panel::Monitor, Panel::Logs, Panel::Terminal, Panel::Costs, Panel::Shield, Panel::Network],
+                        &[Panel::Monitor, Panel::Activity, Panel::Logs, Panel::Terminal, Panel::Costs, Panel::Shield, Panel::Network],
                         active,
                         theme,
                         cx,
@@ -12078,6 +12183,7 @@ fn sync_chat_cache(cache: &mut CachedChatData, svc: &ChatService) {
             show_thinking: false,
             tool_calls,
             tool_call_id: msg.tool_call_id.clone(),
+            disclosure: Default::default(),
         };
         if let Some(c) = display_msg.cost {
             cache.total_cost += c;

@@ -545,18 +545,45 @@ fn resolve_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
     } else {
         root.join(path)
     };
-    let canonical = resolved
-        .canonicalize()
-        .map_err(|e| format!("Invalid path: {e}"))?;
+
+    // Try to canonicalize; if the path doesn't exist yet (e.g. write_file to
+    // a new path, or read_file for a not-found check), fall back to
+    // canonicalizing the parent directory and appending the file name.
+    let canonical = match resolved.canonicalize() {
+        Ok(c) => c,
+        Err(_) => {
+            if let Some(parent) = resolved.parent() {
+                let canonical_parent = parent
+                    .canonicalize()
+                    .map_err(|e| format!("Invalid path: {e}"))?;
+                let file_name = resolved
+                    .file_name()
+                    .ok_or_else(|| format!("Invalid path: no filename in {}", resolved.display()))?;
+                canonical_parent.join(file_name)
+            } else {
+                return Err(format!("Invalid path: {}", resolved.display()));
+            }
+        }
+    };
+
     let path_str_lower = canonical.to_string_lossy().to_lowercase();
     for segment in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
         if path_str_lower.contains(segment) {
             return Err(format!("Access to sensitive path blocked: {segment}"));
         }
     }
-    if !path.is_absolute() && !canonical.starts_with(root) {
-        return Err("Path traversal outside workspace blocked".into());
+
+    // Canonicalize root too so both sides use the same prefix (on Windows,
+    // canonicalize() returns \\?\ extended-length paths).
+    if !path.is_absolute() {
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|e| format!("Invalid workspace root: {e}"))?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err("Path traversal outside workspace blocked".into());
+        }
     }
+
     Ok(canonical)
 }
 
@@ -619,7 +646,8 @@ mod tests {
         let (_dir, server) = setup_workspace();
         let tools = server.list_tools();
 
-        assert_eq!(tools.len(), 34);
+        // 9 builtins + integration tools (count may grow as integrations are added)
+        assert_eq!(tools.len(), 48);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
@@ -652,7 +680,7 @@ mod tests {
         assert!(resp.is_success());
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 34);
+        assert_eq!(tools.len(), 48);
     }
 
     // -- Initialize tests --
