@@ -317,6 +317,11 @@ pub struct HiveWorkspace {
     /// Completed swarm task trees. Appended after `/swarm` execution and shown
     /// in the monitor panel's background tasks section alongside active runs.
     swarm_task_trees: Vec<hive_ui_panels::components::task_tree::TaskTreeState>,
+    /// Active toast notifications shown as an overlay in the top-right corner.
+    /// Each entry holds (notification_id, summary, toast_kind, created_at).
+    toast_messages: Vec<(String, String, hive_ui_panels::components::toast::ToastKind, std::time::Instant)>,
+    /// IDs of notifications already surfaced as toasts, preventing duplicates.
+    seen_notification_ids: HashSet<String>,
 }
 
 const MAX_RECENT_WORKSPACES: usize = 8;
@@ -889,6 +894,8 @@ impl HiveWorkspace {
             pending_plugin_preview: None,
             _file_watcher: None,
             swarm_task_trees: Vec::new(),
+            toast_messages: Vec::new(),
+            seen_notification_ids: HashSet::new(),
         }
     }
 
@@ -3441,8 +3448,47 @@ impl HiveWorkspace {
         if cx.has_global::<AppAgentNotifications>() {
             let svc = &cx.global::<AppAgentNotifications>().0;
             self.status_bar.notification_tray.unread_count = svc.unread_count();
-            self.status_bar.notification_tray.notifications = svc.all();
+            let all = svc.all();
+
+            // Surface new notifications as toast overlays.
+            for n in &all {
+                if !n.read && !self.seen_notification_ids.contains(&n.id) {
+                    let toast_kind = match n.kind {
+                        hive_agents::activity::notification::NotificationKind::AgentCompleted => {
+                            hive_ui_panels::components::toast::ToastKind::Success
+                        }
+                        hive_agents::activity::notification::NotificationKind::AgentFailed => {
+                            hive_ui_panels::components::toast::ToastKind::Error
+                        }
+                        hive_agents::activity::notification::NotificationKind::BudgetWarning
+                        | hive_agents::activity::notification::NotificationKind::ApprovalRequest => {
+                            hive_ui_panels::components::toast::ToastKind::Warning
+                        }
+                        hive_agents::activity::notification::NotificationKind::BudgetExhausted => {
+                            hive_ui_panels::components::toast::ToastKind::Error
+                        }
+                        hive_agents::activity::notification::NotificationKind::HeartbeatReport => {
+                            hive_ui_panels::components::toast::ToastKind::Info
+                        }
+                    };
+                    self.toast_messages.push((
+                        n.id.clone(),
+                        n.summary.clone(),
+                        toast_kind,
+                        std::time::Instant::now(),
+                    ));
+                    self.seen_notification_ids.insert(n.id.clone());
+                }
+            }
+
+            self.status_bar.notification_tray.notifications = all;
         }
+
+        // -- Auto-dismiss toasts older than 5 seconds --
+        let now = std::time::Instant::now();
+        self.toast_messages.retain(|(_id, _msg, _kind, created)| {
+            now.duration_since(*created).as_secs() < 5
+        });
 
         // -- Discovery: periodic scan + connectivity update --
         self.maybe_trigger_discovery_scan(cx);
@@ -11834,6 +11880,27 @@ impl Render for HiveWorkspace {
             )
             // Status bar
             .child(self.status_bar.render(theme))
+            // Toast notification overlay (top-right corner)
+            .when(!self.toast_messages.is_empty(), |el| {
+                let toast_els: Vec<_> = self
+                    .toast_messages
+                    .iter()
+                    .map(|(_id, msg, kind, _created)| {
+                        hive_ui_panels::components::toast::render_toast(*kind, msg, theme)
+                    })
+                    .collect();
+                el.child(
+                    div()
+                        .absolute()
+                        .top(px(48.0))
+                        .right(px(16.0))
+                        .w(px(360.0))
+                        .flex()
+                        .flex_col()
+                        .gap(theme.space_2)
+                        .children(toast_els),
+                )
+            })
     }
 }
 
