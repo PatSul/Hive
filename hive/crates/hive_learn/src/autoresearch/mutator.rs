@@ -84,9 +84,13 @@ impl PromptMutator {
             return Err("AI returned empty prompt mutation".into());
         }
 
-        // Enforce length limit
+        // Enforce length limit (find nearest char boundary to avoid panic)
         if new_prompt.len() > self.max_prompt_length {
-            new_prompt.truncate(self.max_prompt_length);
+            let mut end = self.max_prompt_length;
+            while !new_prompt.is_char_boundary(end) && end > 0 {
+                end -= 1;
+            }
+            new_prompt.truncate(end);
         }
 
         Ok(new_prompt)

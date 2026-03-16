@@ -126,7 +126,7 @@ impl EvalRunner {
             sample_pass_rates.iter().sum::<f64>() / sample_pass_rates.len() as f64
         };
 
-        if success_count > 0 && success_count < (self.eval_samples + 1) / 2 {
+        if success_count > 0 && success_count < self.eval_samples.div_ceil(2) {
             warn!(
                 success_count,
                 total = self.eval_samples,

@@ -28,7 +28,7 @@ pub struct AutoResearchConfig {
     pub skill_execution_model: Option<String>,
 
     // -- Safety --
-    /// Maximum character length for mutated prompts. Default: 2000.
+    /// Maximum byte length for mutated prompts. Default: 2000.
     pub max_prompt_length: usize,
     /// Optional USD budget cap. None = unlimited.
     pub cost_budget: Option<f64>,

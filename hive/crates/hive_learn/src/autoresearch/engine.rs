@@ -140,24 +140,24 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
 
         // Budget check after baseline
         let total_cost = eval_runner.accumulated_cost() + mutator.accumulated_cost();
-        if let Some(budget) = self.config.cost_budget {
-            if total_cost >= budget {
-                return AutoResearchReport {
-                    skill_name: skill_name.into(),
-                    iterations_run: 0,
-                    baseline_pass_rate,
-                    final_pass_rate: best_pass_rate,
-                    best_prompt_version: best_version,
-                    improvement: 0.0,
-                    stopped_reason: AutoResearchStopReason::BudgetExhausted {
-                        spent: total_cost,
-                        budget,
-                    },
-                    iteration_history,
-                    total_cost,
-                    duration_ms: start.elapsed().as_millis() as u64,
-                };
-            }
+        if let Some(budget) = self.config.cost_budget
+            && total_cost >= budget
+        {
+            return AutoResearchReport {
+                skill_name: skill_name.into(),
+                iterations_run: 0,
+                baseline_pass_rate,
+                final_pass_rate: best_pass_rate,
+                best_prompt_version: best_version,
+                improvement: 0.0,
+                stopped_reason: AutoResearchStopReason::BudgetExhausted {
+                    spent: total_cost,
+                    budget,
+                },
+                iteration_history,
+                total_cost,
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
         }
 
         // Step 3: Mutation loop
@@ -166,14 +166,14 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
 
             // Budget check
             let total_cost = eval_runner.accumulated_cost() + mutator.accumulated_cost();
-            if let Some(budget) = self.config.cost_budget {
-                if total_cost >= budget {
-                    stopped_reason = AutoResearchStopReason::BudgetExhausted {
-                        spent: total_cost,
-                        budget,
-                    };
-                    break;
-                }
+            if let Some(budget) = self.config.cost_budget
+                && total_cost >= budget
+            {
+                stopped_reason = AutoResearchStopReason::BudgetExhausted {
+                    spent: total_cost,
+                    budget,
+                };
+                break;
             }
 
             // 3a: Mutate
@@ -197,14 +197,14 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
 
             // Budget check after mutation
             let total_cost = eval_runner.accumulated_cost() + mutator.accumulated_cost();
-            if let Some(budget) = self.config.cost_budget {
-                if total_cost >= budget {
-                    stopped_reason = AutoResearchStopReason::BudgetExhausted {
-                        spent: total_cost,
-                        budget,
-                    };
-                    break;
-                }
+            if let Some(budget) = self.config.cost_budget
+                && total_cost >= budget
+            {
+                stopped_reason = AutoResearchStopReason::BudgetExhausted {
+                    spent: total_cost,
+                    budget,
+                };
+                break;
             }
 
             // 3b: Safety checks
@@ -260,14 +260,14 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
 
             // Budget check after eval
             let total_cost = eval_runner.accumulated_cost() + mutator.accumulated_cost();
-            if let Some(budget) = self.config.cost_budget {
-                if total_cost >= budget {
-                    stopped_reason = AutoResearchStopReason::BudgetExhausted {
-                        spent: total_cost,
-                        budget,
-                    };
-                    break;
-                }
+            if let Some(budget) = self.config.cost_budget
+                && total_cost >= budget
+            {
+                stopped_reason = AutoResearchStopReason::BudgetExhausted {
+                    spent: total_cost,
+                    budget,
+                };
+                break;
             }
 
             let candidate_pass_rate = candidate_result.pass_rate;
@@ -340,10 +340,12 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
                     "Iteration {iteration}: pass_rate={:.2}, is_new_best={is_new_best}",
                     candidate_pass_rate
                 ),
-                details: format!(
-                    "{{\"skill\":\"{skill_name}\",\"iteration\":{iteration},\
-                     \"pass_rate\":{candidate_pass_rate},\"is_new_best\":{is_new_best}}}"
-                ),
+                details: serde_json::json!({
+                    "skill": skill_name,
+                    "iteration": iteration,
+                    "pass_rate": candidate_pass_rate,
+                    "is_new_best": is_new_best
+                }).to_string(),
                 reversible: false,
                 timestamp: chrono::Utc::now().to_rfc3339(),
             });
@@ -359,11 +361,13 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
                 "AutoResearch for '{skill_name}': {baseline_pass_rate:.2} -> {best_pass_rate:.2} \
                  ({iterations_run} iterations)"
             ),
-            details: format!(
-                "{{\"skill\":\"{skill_name}\",\"baseline\":{baseline_pass_rate},\
-                 \"final\":{best_pass_rate},\"iterations\":{iterations_run},\
-                 \"cost\":{total_cost}}}"
-            ),
+            details: serde_json::json!({
+                "skill": skill_name,
+                "baseline": baseline_pass_rate,
+                "final": best_pass_rate,
+                "iterations": iterations_run,
+                "cost": total_cost
+            }).to_string(),
             reversible: false,
             timestamp: chrono::Utc::now().to_rfc3339(),
         });

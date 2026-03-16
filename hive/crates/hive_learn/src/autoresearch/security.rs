@@ -42,6 +42,11 @@ static OVERRIDE_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|
         r"(?i)system\s*:\s*you\s+are",
         r"(?i)override\s+(all\s+)?safety",
         r"(?i)bypass\s+(all\s+)?restrictions",
+        r"(?i)jailbreak",
+        r"<\|im_start\|>",
+        r"\[\[system\]\]",
+        r"(?i)act\s+as\s+(if\s+you\s+(are|were)\s+)?an?\s+unrestricted",
+        r"(?i)do\s+not\s+follow\s+(any\s+)?rules",
     ]
     .iter()
     .filter_map(|p| Regex::new(p).ok().map(|r| (r, *p)))
