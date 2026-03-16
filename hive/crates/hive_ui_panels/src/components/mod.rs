@@ -1,3 +1,4 @@
+pub mod budget_gauge;
 pub mod code_block;
 pub mod connectivity_badge;
 pub mod markdown;
