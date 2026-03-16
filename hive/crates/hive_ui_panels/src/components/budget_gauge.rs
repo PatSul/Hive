@@ -2,6 +2,7 @@ use gpui::prelude::*;
 use hive_ui_core::HiveTheme;
 
 /// Data for the budget gauge.
+#[derive(Debug, Clone)]
 pub struct BudgetGaugeData {
     pub current_usd: f64,
     pub limit_usd: Option<f64>,
@@ -23,7 +24,7 @@ pub struct BudgetGauge;
 
 impl BudgetGauge {
     pub fn render(data: &BudgetGaugeData, theme: &HiveTheme) -> impl IntoElement {
-        use gpui::{div, rgb, relative};
+        use gpui::{div, relative};
 
         let limit = data.limit_usd.unwrap_or(0.0);
         if limit <= 0.0 {
@@ -32,9 +33,9 @@ impl BudgetGauge {
 
         let pct = (data.current_usd / limit).min(1.0);
         let bar_color = if pct >= 0.95 {
-            rgb(0xEF4444) // red
+            theme.accent_red
         } else if pct >= data.warning_pct {
-            rgb(0xF59E0B) // amber
+            theme.accent_yellow
         } else {
             theme.accent_cyan
         };
