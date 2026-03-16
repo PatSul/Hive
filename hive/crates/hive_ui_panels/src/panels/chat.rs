@@ -5,6 +5,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 
 use hive_ui_core::HiveTheme;
+use hive_ui_core::ChatReadAloud;
 use crate::components::markdown::render_markdown;
 use hive_ui_core::WelcomeScreen;
 use hive_ai::MessageRole;
@@ -596,6 +597,70 @@ impl ChatPanel {
 
 
 // ---------------------------------------------------------------------------
+// Progressive disclosure helpers
+// ---------------------------------------------------------------------------
+
+/// Extract the visible content for a given disclosure level.
+/// - Summary: first paragraph only (up to first double-newline or end).
+/// - Steps: full content (thinking shown if available).
+/// - Raw: full content including tool calls (handled at the caller level).
+fn content_for_disclosure(content: &str, level: DisclosureLevel) -> &str {
+    match level {
+        DisclosureLevel::Summary => {
+            // First paragraph: up to the first blank line.
+            content
+                .find("\n\n")
+                .map(|pos| &content[..pos])
+                .unwrap_or(content)
+        }
+        DisclosureLevel::Steps | DisclosureLevel::Raw => content,
+    }
+}
+
+/// Label for the disclosure toggle icon.
+fn disclosure_label(level: DisclosureLevel) -> &'static str {
+    match level {
+        DisclosureLevel::Summary => "Summary",
+        DisclosureLevel::Steps => "Steps",
+        DisclosureLevel::Raw => "Raw",
+    }
+}
+
+/// Render a small disclosure toggle badge for assistant messages.
+fn render_disclosure_toggle(level: DisclosureLevel, theme: &HiveTheme) -> AnyElement {
+    use gpui_component::IconName;
+
+    let icon = match level {
+        DisclosureLevel::Summary => IconName::ChevronRight,
+        DisclosureLevel::Steps => IconName::ChevronDown,
+        DisclosureLevel::Raw => IconName::ArrowDown,
+    };
+
+    div()
+        .flex()
+        .items_center()
+        .gap(theme.space_1)
+        .px(theme.space_1)
+        .py(px(1.0))
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_tertiary)
+        .cursor_pointer()
+        .hover(|s| s.bg(theme.bg_surface))
+        .child(
+            gpui_component::Icon::new(icon)
+                .size_3p5()
+                .text_color(theme.text_muted),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(disclosure_label(level)),
+        )
+        .into_any_element()
+}
+
+// ---------------------------------------------------------------------------
 // Message bubble
 // ---------------------------------------------------------------------------
 
@@ -705,27 +770,47 @@ fn render_message_bubble(msg: &DisplayMessage, theme: &HiveTheme) -> AnyElement 
             header = header.child(render_cost_badge(cost, msg.tokens, theme));
         }
 
-    bubble = bubble.child(header);
-
-    // Thinking section (collapsible)
-    if let Some(ref thinking) = msg.thinking {
-        bubble = bubble.child(render_thinking_section(thinking, msg.show_thinking, theme));
+    // Disclosure toggle for assistant messages
+    let is_assistant = msg.role == MessageRole::Assistant;
+    if is_assistant {
+        header = header.child(render_disclosure_toggle(msg.disclosure, theme));
     }
 
-    // Content — rendered as markdown for assistant/system, plain for user
+    // Read Aloud button for assistant messages
+    if is_assistant && !msg.content.is_empty() {
+        header = header.child(render_read_aloud_button(&msg.content, theme));
+    }
+
+    bubble = bubble.child(header);
+
+    // Thinking section (collapsible) — shown at Steps and Raw levels
+    if let Some(ref thinking) = msg.thinking {
+        let show = msg.show_thinking
+            || matches!(msg.disclosure, DisclosureLevel::Steps | DisclosureLevel::Raw);
+        bubble = bubble.child(render_thinking_section(thinking, show, theme));
+    }
+
+    // Content — rendered as markdown for assistant/system, plain for user.
+    // Apply progressive disclosure filtering for non-user messages.
+    let visible_content = if is_user {
+        &msg.content
+    } else {
+        content_for_disclosure(&msg.content, msg.disclosure)
+    };
+
     let content_el = if is_user {
         div()
             .text_size(theme.font_size_base)
             .text_color(text_color)
-            .child(msg.content.clone())
+            .child(visible_content.to_string())
             .into_any_element()
     } else {
-        render_markdown(&msg.content, theme)
+        render_markdown(visible_content, theme)
     };
     bubble = bubble.child(content_el);
 
-    // Tool calls (shown on assistant messages that triggered tool use)
-    if !msg.tool_calls.is_empty() {
+    // Tool calls — only shown at Raw disclosure level
+    if !msg.tool_calls.is_empty() && matches!(msg.disclosure, DisclosureLevel::Raw) {
         bubble = bubble.child(render_tool_calls(&msg.tool_calls, theme));
     }
 
@@ -811,26 +896,47 @@ fn render_message_bubble_cached(
             header = header.child(render_cost_badge(cost, msg.tokens, theme));
         }
 
-    bubble = bubble.child(header);
-
-    if let Some(ref thinking) = msg.thinking {
-        bubble = bubble.child(render_thinking_section(thinking, msg.show_thinking, theme));
+    // Disclosure toggle for assistant messages
+    let is_assistant = msg.role == MessageRole::Assistant;
+    if is_assistant {
+        header = header.child(render_disclosure_toggle(msg.disclosure, theme));
     }
 
-    // Content — cached markdown parse for assistant/system, plain for user
+    // Read Aloud button for assistant messages
+    if is_assistant && !msg.content.is_empty() {
+        header = header.child(render_read_aloud_button(&msg.content, theme));
+    }
+
+    bubble = bubble.child(header);
+
+    // Thinking section — shown at Steps and Raw levels
+    if let Some(ref thinking) = msg.thinking {
+        let show = msg.show_thinking
+            || matches!(msg.disclosure, DisclosureLevel::Steps | DisclosureLevel::Raw);
+        bubble = bubble.child(render_thinking_section(thinking, show, theme));
+    }
+
+    // Content — cached markdown parse for assistant/system, plain for user.
+    // Apply progressive disclosure filtering for non-user messages.
+    let visible_content: std::borrow::Cow<'_, str> = if is_user {
+        std::borrow::Cow::Borrowed(&msg.content)
+    } else {
+        std::borrow::Cow::Borrowed(content_for_disclosure(&msg.content, msg.disclosure))
+    };
+
     let content_el = if is_user {
         div()
             .text_size(theme.font_size_base)
             .text_color(text_color)
-            .child(msg.content.clone())
+            .child(visible_content.to_string())
             .into_any_element()
     } else {
-        render_markdown_cached(&msg.content, md_cache, theme)
+        render_markdown_cached(&visible_content, md_cache, theme)
     };
     bubble = bubble.child(content_el);
 
-    // Tool calls (shown on assistant messages that triggered tool use)
-    if !msg.tool_calls.is_empty() {
+    // Tool calls — only shown at Raw disclosure level
+    if !msg.tool_calls.is_empty() && matches!(msg.disclosure, DisclosureLevel::Raw) {
         bubble = bubble.child(render_tool_calls(&msg.tool_calls, theme));
     }
 
@@ -1022,6 +1128,32 @@ fn render_model_badge(model: &str, theme: &HiveTheme) -> AnyElement {
         .text_size(theme.font_size_xs)
         .text_color(theme.accent_cyan)
         .child(model.to_string())
+        .into_any_element()
+}
+
+/// Small "Read Aloud" button that dispatches `ChatReadAloud` to speak the
+/// message content via TTS.
+fn render_read_aloud_button(content: &str, theme: &HiveTheme) -> AnyElement {
+    let text = content.to_string();
+    div()
+        .id("chat-read-aloud")
+        .px(theme.space_2)
+        .py(px(1.0))
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_tertiary)
+        .cursor_pointer()
+        .hover(|s| s.bg(theme.bg_primary))
+        .text_size(theme.font_size_xs)
+        .text_color(theme.text_muted)
+        .child("Read Aloud")
+        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+            window.dispatch_action(
+                Box::new(ChatReadAloud {
+                    content: text.clone(),
+                }),
+                cx,
+            );
+        })
         .into_any_element()
 }
 

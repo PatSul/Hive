@@ -78,6 +78,13 @@ impl CostData {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        let limits = tracker.budget_limits();
+        let budget = BudgetGaugeData {
+            current_usd: tracker.today_cost(),
+            limit_usd: limits.daily_limit,
+            warning_pct: 0.8,
+        };
+
         Self {
             today_cost: tracker.today_cost(),
             all_time_cost: tracker.total_cost(),
@@ -85,7 +92,7 @@ impl CostData {
             total_input_tokens: tracker.total_input_tokens(),
             total_output_tokens: tracker.total_output_tokens(),
             by_model,
-            budget: BudgetGaugeData::default(),
+            budget,
         }
     }
 
@@ -113,6 +120,8 @@ pub struct CostsPanel;
 impl CostsPanel {
     /// Main entry point -- renders the full dashboard from live cost data.
     pub fn render(data: &CostData, theme: &HiveTheme) -> impl IntoElement {
+        use crate::components::budget_gauge::BudgetGauge;
+
         div()
             .id("costs-panel")
             .flex()
@@ -123,6 +132,7 @@ impl CostsPanel {
             .gap(theme.space_4)
             .child(Self::header(theme))
             .child(Self::summary_cards(data, theme))
+            .child(BudgetGauge::render(&data.budget, theme))
             .child(Self::model_table(data, theme))
             .child(Self::action_buttons(theme))
     }

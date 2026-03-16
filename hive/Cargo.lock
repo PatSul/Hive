@@ -5322,7 +5322,7 @@ dependencies = [
 
 [[package]]
 name = "hive_a2a"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "a2a-rs",
  "anyhow",
@@ -5348,7 +5348,7 @@ dependencies = [
 
 [[package]]
 name = "hive_admin"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -5366,7 +5366,7 @@ dependencies = [
 
 [[package]]
 name = "hive_agents"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5377,7 +5377,9 @@ dependencies = [
  "futures",
  "git2",
  "hive_ai",
+ "hive_blockchain",
  "hive_core",
+ "hive_docs",
  "hive_fs",
  "hive_integrations",
  "hive_learn",
@@ -5399,7 +5401,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ai"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -5431,7 +5433,7 @@ dependencies = [
 
 [[package]]
 name = "hive_app"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -5465,7 +5467,7 @@ dependencies = [
 
 [[package]]
 name = "hive_assistant"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5488,7 +5490,7 @@ dependencies = [
 
 [[package]]
 name = "hive_blockchain"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5520,7 +5522,7 @@ dependencies = [
 
 [[package]]
 name = "hive_cli"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "clap",
@@ -5543,7 +5545,7 @@ dependencies = [
 
 [[package]]
 name = "hive_cloud"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "async-stripe",
@@ -5562,7 +5564,7 @@ dependencies = [
 
 [[package]]
 name = "hive_core"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5593,7 +5595,7 @@ dependencies = [
 
 [[package]]
 name = "hive_docs"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5608,7 +5610,7 @@ dependencies = [
 
 [[package]]
 name = "hive_fs"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5628,7 +5630,7 @@ dependencies = [
 
 [[package]]
 name = "hive_integrations"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5649,25 +5651,27 @@ dependencies = [
 
 [[package]]
 name = "hive_learn"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "chrono",
  "hive_ai",
  "hive_core",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "uuid 1.20.0",
 ]
 
 [[package]]
 name = "hive_network"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "chrono",
  "futures",
@@ -5682,7 +5686,7 @@ dependencies = [
 
 [[package]]
 name = "hive_remote"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5717,7 +5721,7 @@ dependencies = [
 
 [[package]]
 name = "hive_shield"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "chrono",
  "once_cell",
@@ -5733,7 +5737,7 @@ dependencies = [
 
 [[package]]
 name = "hive_terminal"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5755,7 +5759,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5788,7 +5792,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui_core"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -5809,7 +5813,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui_panels"
-version = "0.3.27"
+version = "0.3.30"
 dependencies = [
  "anyhow",
  "chrono",

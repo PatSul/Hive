@@ -65,6 +65,16 @@ pub struct BreadcrumbSegment {
     pub full_path: PathBuf,
 }
 
+/// A semantic search match displayed in the Files panel when filename
+/// filtering yields no results and semantic search is available.
+#[derive(Debug, Clone)]
+pub struct FileSearchMatch {
+    pub file_path: String,
+    pub line_number: usize,
+    pub snippet: String,
+    pub score: f32,
+}
+
 /// Everything the file-browser panel needs to render.
 #[derive(Debug, Clone)]
 pub struct FilesData {
@@ -80,6 +90,9 @@ pub struct FilesData {
     pub viewed_file_size: u64,
     /// Files checked for AI context attachment (absolute paths).
     pub checked_files: HashSet<PathBuf>,
+    /// Semantic search results — populated when the filename filter has no
+    /// matches and the `SemanticSearchService` global is available.
+    pub semantic_results: Vec<FileSearchMatch>,
 }
 
 impl Default for FilesData {
@@ -99,6 +112,7 @@ impl Default for FilesData {
                 viewed_file_language: String::new(),
                 viewed_file_size: 0,
                 checked_files: HashSet::new(),
+                semantic_results: Vec::new(),
             },
         }
     }
@@ -133,6 +147,7 @@ impl FilesData {
             viewed_file_language: String::new(),
             viewed_file_size: 0,
             checked_files: HashSet::new(),
+            semantic_results: Vec::new(),
         }
     }
 
@@ -226,6 +241,47 @@ impl FilesData {
     /// Clear all checked files.
     pub fn clear_checked(&mut self) {
         self.checked_files.clear();
+    }
+
+    /// Run semantic search as a fallback when filename filtering yields no
+    /// results. Call this after updating `search_query` with a
+    /// `SemanticSearchService` reference obtained from the global.
+    ///
+    /// The caller (workspace) should invoke this when filename filtering
+    /// returns zero results and the query is non-empty.
+    pub fn run_semantic_search(
+        &mut self,
+        semantic: &mut hive_ai::SemanticSearchService,
+    ) {
+        self.semantic_results.clear();
+
+        let query = self.search_query.trim();
+        if query.is_empty() {
+            return;
+        }
+
+        // Only search if filename filtering found nothing.
+        if !self.filtered_sorted_entries().is_empty() {
+            return;
+        }
+
+        let path = self.current_path.as_path();
+        let results = semantic.search(query, &[path], 10);
+
+        self.semantic_results = results
+            .into_iter()
+            .map(|r| FileSearchMatch {
+                file_path: r.file_path,
+                line_number: r.line_number,
+                snippet: r.content,
+                score: r.score,
+            })
+            .collect();
+    }
+
+    /// Whether there are semantic search results to display.
+    pub fn has_semantic_results(&self) -> bool {
+        !self.semantic_results.is_empty()
     }
 }
 
@@ -408,7 +464,9 @@ impl FilesPanel {
         let file_count = entries.len() - dir_count;
         let now = Utc::now();
 
-        let file_browser = div()
+        let show_semantic = entries.is_empty() && data.has_semantic_results();
+
+        let mut file_browser = div()
             .flex()
             .flex_col()
             .flex_1()
@@ -429,9 +487,17 @@ impl FilesPanel {
                 &data.current_path,
                 &now,
                 theme,
-            ))
-            // 4. Action bar
-            .child(Self::action_bar(
+            ));
+
+        // 3b. Semantic search results — shown when filename filter has no
+        // matches but content-based search found relevant files.
+        if show_semantic {
+            file_browser = file_browser
+                .child(Self::semantic_results_section(&data.semantic_results, theme));
+        }
+
+        // 4. Action bar
+        let file_browser = file_browser.child(Self::action_bar(
                 dir_count,
                 file_count,
                 data.checked_files.len(),
@@ -756,6 +822,113 @@ impl FilesPanel {
                             .child(placeholder),
                     ),
             )
+    }
+
+    // ------------------------------------------------------------------
+    // 3b. Semantic search results (content-based fallback)
+    // ------------------------------------------------------------------
+
+    fn semantic_results_section(
+        results: &[FileSearchMatch],
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
+        let mut list = div()
+            .id("files-semantic-results")
+            .flex()
+            .flex_col()
+            .overflow_y_scroll()
+            .px(theme.space_3)
+            .py(theme.space_2)
+            .gap(theme.space_1);
+
+        // Header label
+        list = list.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(theme.space_2)
+                .mb(theme.space_1)
+                .child(
+                    Icon::new(IconName::Search)
+                        .size_3p5()
+                        .text_color(theme.accent_cyan),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.accent_cyan)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("Content matches ({})", results.len())),
+                ),
+        );
+
+        for result in results {
+            // Extract just the filename from the full path for display.
+            let display_name = Path::new(&result.file_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| result.file_path.clone());
+
+            let snippet = if result.snippet.len() > 120 {
+                format!("{}...", &result.snippet[..120])
+            } else {
+                result.snippet.clone()
+            };
+
+            let file_path = result.file_path.clone();
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "semantic-{}",
+                        result.file_path
+                    )))
+                    .flex()
+                    .flex_col()
+                    .px(theme.space_2)
+                    .py(theme.space_1)
+                    .rounded(theme.radius_sm)
+                    .bg(theme.bg_primary)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(theme.bg_tertiary))
+                    .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(FilesNavigateTo {
+                                path: file_path.clone(),
+                            }),
+                            cx,
+                        );
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(theme.space_2)
+                            .child(
+                                Icon::new(IconName::File)
+                                    .size_3p5()
+                                    .text_color(theme.accent_aqua),
+                            )
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_sm)
+                                    .text_color(theme.text_primary)
+                                    .child(format!(
+                                        "{} :{}",
+                                        display_name, result.line_number
+                                    )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .overflow_hidden()
+                            .child(snippet),
+                    ),
+            );
+        }
+
+        list
     }
 
     // ------------------------------------------------------------------

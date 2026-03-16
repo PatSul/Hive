@@ -127,6 +127,16 @@ async fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
         azure: Arc::new(hive_integrations::cloud::AzureClient::new(None)),
         gcp: Arc::new(hive_integrations::cloud::GcpClient::new(None)),
         docs_indexer,
+        google_drive: None,
+        google_sheets: None,
+        google_docs: None,
+        google_tasks: None,
+        google_contacts: None,
+        bitbucket: None,
+        gitlab: None,
+        webhooks: Arc::new(std::sync::Mutex::new(
+            hive_integrations::webhooks::WebhookRegistry::new(),
+        )),
     };
 
     let mut server = McpServer::new(workspace_root);

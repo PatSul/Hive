@@ -169,6 +169,23 @@ pub struct FilesToggleCheck {
     pub path: String,
 }
 
+/// Update the search query in the Files panel.
+///
+/// When the query doesn't match any filenames, the workspace will fall back
+/// to `SemanticSearchService` for content-based search results.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct FilesSetSearchQuery {
+    pub query: String,
+}
+
+/// Speak a message's content aloud via TTS.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ChatReadAloud {
+    pub content: String,
+}
+
 /// Apply a single code block edit to a file.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = hive_workspace, no_json)]

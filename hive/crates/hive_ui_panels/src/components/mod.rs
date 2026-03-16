@@ -15,6 +15,7 @@ pub mod wallet_card;
 pub mod wizard_stepper;
 
 // Re-export key types for convenience.
+pub use budget_gauge::{BudgetGauge, BudgetGaugeData};
 pub use code_block::{render_code_block, render_code_block_with_path};
 pub use markdown::render_markdown;
 pub use connectivity_badge::{ConnectivityState, render_connectivity_badge};
@@ -22,6 +23,7 @@ pub use context_attachment::{AttachedContext, AttachedFile, render_context_attac
 pub use diff_viewer::{DiffLine, render_diff};
 pub use message_bubble::{render_ai_message, render_error_message, render_user_message};
 pub use model_selector::{ModelSelected, ModelSelectorView, render_model_badge};
+pub use notification_tray::{NotificationTray, NotificationTrayData};
 pub use split_pane::{PaneLayout, SplitDirection, TilingState, render_split_pane};
 pub use thinking_indicator::{ThinkingPhase, render_thinking_indicator};
 pub use toast::{ToastKind, render_toast};

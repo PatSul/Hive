@@ -3,6 +3,7 @@ use gpui::prelude::FluentBuilder;
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::{HiveTheme, SwitchToSettings, TriggerAppUpdate};
+use hive_ui_panels::components::notification_tray::{NotificationTray, NotificationTrayData};
 
 /// Status bar at the bottom of the window.
 /// Shows connectivity, model, privacy mode, project scope, cost, and version.
@@ -15,6 +16,8 @@ pub struct StatusBar {
     pub version: String,
     /// If set, a newer version is available for download/install.
     pub update_available: Option<String>,
+    /// Notification tray state for agent/system notifications.
+    pub notification_tray: NotificationTrayData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,7 @@ impl Default for StatusBar {
             total_cost: 0.0,
             version: env!("CARGO_PKG_VERSION").into(),
             update_available: None,
+            notification_tray: NotificationTrayData::default(),
         }
     }
 }
@@ -162,6 +166,8 @@ impl StatusBar {
                     .flex()
                     .items_center()
                     .gap(theme.space_2)
+                    // Notification tray bell
+                    .child(NotificationTray::render(&self.notification_tray, theme))
                     // Update badge (only visible when update is available)
                     .when(update_version.is_some(), |el: Div| {
                         let new_ver = update_version.unwrap_or_default();

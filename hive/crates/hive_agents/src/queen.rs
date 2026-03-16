@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelTier};
 
+use crate::activity::budget::BudgetEnforcer;
 use crate::activity::ActivityService;
 use crate::collective_memory::{CollectiveMemory, MemoryCategory, MemoryEntry};
 use crate::coordinator::{Coordinator, CoordinatorConfig, CoordinatorResult};
@@ -58,6 +59,8 @@ pub struct Queen<E: AiExecutor> {
     rag: Option<Arc<Mutex<hive_ai::rag::RagService>>>,
     /// Optional activity service for bridging task events.
     activity: Option<Arc<ActivityService>>,
+    /// Optional budget enforcer for pre-flight cost checks (propagated to Coordinator).
+    budget: Option<Arc<BudgetEnforcer>>,
     /// Accumulated cost stored as the bit-pattern of an f64 so we can use
     /// atomic operations without a mutex.
     accumulated_cost: AtomicU64,
@@ -73,6 +76,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
             status_callback: None,
             rag: None,
             activity: None,
+            budget: None,
             accumulated_cost: AtomicU64::new(0f64.to_bits()),
         }
     }
@@ -98,6 +102,12 @@ impl<E: AiExecutor + 'static> Queen<E> {
     /// Attach an activity service for bridging coordinator task events.
     pub fn with_activity(mut self, activity: Arc<ActivityService>) -> Self {
         self.activity = Some(activity);
+        self
+    }
+
+    /// Attach a budget enforcer for pre-flight cost checks in Coordinator teams.
+    pub fn with_budget(mut self, budget: Arc<BudgetEnforcer>) -> Self {
+        self.budget = Some(budget);
         self
     }
 
@@ -599,7 +609,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 .unwrap_or_else(|| default_model_for_tier(ModelTier::Mid)),
             pipeline: Some(crate::pipeline::PipelineConfig::default()),
             rag: self.rag.clone(),
-            budget: None,
+            budget: self.budget.clone(),
         };
 
         // Build a simple TaskPlan from the objective description.

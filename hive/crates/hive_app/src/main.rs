@@ -19,13 +19,16 @@ use hive_core::persistence::Database;
 use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
-    AppA2aClient, AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
+    AppA2aClient, AppActivityService, AppAgentNotifications, AppAiService, AppApprovalGate, AppAssistant, AppAutomation,
+    AppAws, AppAzure, AppBitbucket, AppBrowser,
     AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppDatabase,
-    AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppIde, AppIntegrationDb,
+    AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppHeartbeatScheduler,
+    AppIde, AppIntegrationDb,
     AppHueClient, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager, AppPersonas,
     AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
     AppSecurity, AppSemanticSearch, AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService,
-    AppReminderRx, AppTts, AppUiActionTx, AppUpdater, AppVoiceAssistant, AppWallets,
+    AppLocalAiDetection, AppReminderRx, AppTts, AppUiActionTx, AppUpdater, AppVoiceAssistant,
+    AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
@@ -341,6 +344,37 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     cx.set_global(AppCompetenceDetector(std::sync::Arc::new(std::sync::Mutex::new(competence))));
     info!("CompetenceDetector initialized");
 
+    // Activity event bus with SQLite persistence.
+    let activity_db_path = HiveConfig::base_dir()
+        .map(|d| d.join("activity.db"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("activity.db"));
+    let activity_log = hive_agents::ActivityLog::open(&activity_db_path)
+        .unwrap_or_else(|e| {
+            warn!("ActivityLog open failed, using in-memory: {e}");
+            hive_agents::ActivityLog::open_in_memory().expect("in-memory ActivityLog")
+        });
+    let activity_service = std::sync::Arc::new(
+        hive_agents::ActivityService::new_with_log(std::sync::Arc::new(activity_log)),
+    );
+    cx.set_global(AppActivityService(activity_service.clone()));
+    info!("ActivityService initialized");
+
+    // Agent notification service — approval requests, budget warnings, completions.
+    let agent_notifications = std::sync::Arc::new(hive_agents::NotificationService::new());
+    cx.set_global(AppAgentNotifications(agent_notifications));
+    info!("Agent NotificationService initialized");
+
+    // Heartbeat scheduler — periodic agent health checks.
+    let heartbeat = std::sync::Arc::new(hive_agents::HeartbeatScheduler::new());
+    cx.set_global(AppHeartbeatScheduler(heartbeat));
+    info!("HeartbeatScheduler initialized");
+
+    // Approval gate — rule-based operation approval for agent orchestration.
+    let approval_rules = hive_agents::ApprovalRule::defaults();
+    let approval_gate = std::sync::Arc::new(hive_agents::ApprovalGate::new(approval_rules));
+    cx.set_global(AppApprovalGate(approval_gate));
+    info!("ApprovalGate initialized with default rules");
+
     // Skills registry — file-backed, loads from ~/.hive/skills/*.toml.
     // Ensures all 15 built-in skills exist on disk on first run.
     {
@@ -643,33 +677,42 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     info!("OllamaManager initialized");
 
     // Local AI provider detection — probe well-known ports in background.
-    std::thread::Builder::new()
-        .name("local-ai-detect".into())
-        .spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build();
-            if let Ok(rt) = rt {
-                let detected = rt.block_on(async {
-                    let detector = hive_terminal::local_ai::LocalAiDetector::new();
-                    detector.detect_all().await
-                });
-                let available: Vec<_> = detected.iter().filter(|p| p.available).collect();
-                info!(
-                    "Local AI detection: found {} provider(s)",
-                    available.len()
-                );
-                for provider in &available {
+    let local_ai_results: std::sync::Arc<std::sync::Mutex<Vec<hive_terminal::local_ai::LocalProviderInfo>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    cx.set_global(AppLocalAiDetection(local_ai_results.clone()));
+    {
+        let results = local_ai_results;
+        std::thread::Builder::new()
+            .name("local-ai-detect".into())
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                if let Ok(rt) = rt {
+                    let detected = rt.block_on(async {
+                        let detector = hive_terminal::local_ai::LocalAiDetector::new();
+                        detector.detect_all().await
+                    });
+                    let available: Vec<_> = detected.iter().filter(|p| p.available).collect();
                     info!(
-                        "  - {} at {} ({} model(s))",
-                        provider.name,
-                        provider.base_url,
-                        provider.models.len()
+                        "Local AI detection: found {} provider(s)",
+                        available.len()
                     );
+                    for provider in &available {
+                        info!(
+                            "  - {} at {} ({} model(s))",
+                            provider.name,
+                            provider.base_url,
+                            provider.models.len()
+                        );
+                    }
+                    if let Ok(mut guard) = results.lock() {
+                        *guard = detected;
+                    }
                 }
-            }
-        })
-        .ok();
+            })
+            .ok();
+    }
 
     let hue_client = config
         .hue_bridge_ip
@@ -769,6 +812,16 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             azure: cx.global::<AppAzure>().0.clone(),
             gcp: cx.global::<AppGcp>().0.clone(),
             docs_indexer,
+            google_drive: None,
+            google_sheets: None,
+            google_docs: None,
+            google_tasks: None,
+            google_contacts: None,
+            bitbucket: Some(cx.global::<AppBitbucket>().0.clone()),
+            gitlab: Some(cx.global::<AppGitLab>().0.clone()),
+            webhooks: Arc::new(std::sync::Mutex::new(
+                hive_integrations::webhooks::WebhookRegistry::new(),
+            )),
         };
         cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
         info!("MCP integration tools wired to live services");

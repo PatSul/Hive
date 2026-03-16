@@ -252,6 +252,11 @@ impl CostTracker {
         &self.records
     }
 
+    /// Read the current budget limits.
+    pub fn budget_limits(&self) -> &BudgetLimits {
+        &self.budget
+    }
+
     /// Update budget limits.
     pub fn set_budget(&mut self, budget: BudgetLimits) {
         self.budget = budget;

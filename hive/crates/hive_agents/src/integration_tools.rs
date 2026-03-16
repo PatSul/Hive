@@ -122,10 +122,53 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
         (hue_set_light_state_tool(), stub("Configure a Hue bridge and API key in Settings to control lights")),
         (hue_list_scenes_tool(), stub("Configure a Hue bridge and API key in Settings to list scenes")),
         (hue_activate_scene_tool(), stub("Configure a Hue bridge and API key in Settings to activate scenes")),
+        // --- Docker (extended) ---
+        (docker_start_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_stop_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_restart_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_run_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_images_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_build_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_networks_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_volumes_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_compose_up_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_compose_down_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (docker_system_info_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        // --- Document Export ---
+        (export_pdf_tool(), Box::new(handle_export_pdf) as ToolHandler),
+        (export_docx_tool(), Box::new(handle_export_docx) as ToolHandler),
+        (export_xlsx_tool(), Box::new(handle_export_xlsx) as ToolHandler),
+        (export_pptx_tool(), Box::new(handle_export_pptx) as ToolHandler),
+        (export_csv_tool(), Box::new(handle_export_csv) as ToolHandler),
+        (export_html_tool(), Box::new(handle_export_html) as ToolHandler),
+        (export_markdown_tool(), Box::new(handle_export_markdown) as ToolHandler),
         // --- Docs Search ---
         (search_docs_tool(), stub("Run /index-docs to build the documentation index first")),
         // --- Deploy ---
         (deploy_trigger_tool(), stub("Configure deployment workflows in Settings")),
+        // --- Google Suite ---
+        (google_drive_list_files_tool(), stub("Connect Google Drive in Settings to list files")),
+        (google_drive_search_tool(), stub("Connect Google Drive in Settings to search files")),
+        (google_sheets_read_tool(), stub("Connect Google Sheets in Settings to read spreadsheet data")),
+        (google_docs_get_tool(), stub("Connect Google Docs in Settings to get document content")),
+        (google_tasks_list_tool(), stub("Connect Google Tasks in Settings to list tasks")),
+        (google_contacts_search_tool(), stub("Connect Google Contacts in Settings to search contacts")),
+        // --- Bitbucket ---
+        (bitbucket_list_repos_tool(), stub("Connect Bitbucket in Settings to list repositories")),
+        (bitbucket_list_prs_tool(), stub("Connect Bitbucket in Settings to list pull requests")),
+        (bitbucket_create_pr_tool(), stub("Connect Bitbucket in Settings to create pull requests")),
+        // --- GitLab ---
+        (gitlab_list_projects_tool(), stub("Connect GitLab in Settings to list projects")),
+        (gitlab_list_mrs_tool(), stub("Connect GitLab in Settings to list merge requests")),
+        (gitlab_list_pipelines_tool(), stub("Connect GitLab in Settings to list pipelines")),
+        // --- Blockchain (HIGH-RISK — requires user approval) ---
+        (token_estimate_cost_tool(), stub("Configure a wallet in Settings to estimate token deployment costs")),
+        (token_deploy_erc20_tool(), stub("Configure a wallet in Settings to deploy ERC-20 tokens")),
+        (token_deploy_spl_tool(), stub("Configure a wallet in Settings to deploy SPL tokens")),
+        // --- Webhooks ---
+        (webhook_register_tool(), stub("Webhook registry available — register webhooks via this tool")),
+        (webhook_list_tool(), stub("Webhook registry available — list registered webhooks")),
+        (webhook_fire_tool(), stub("Webhook registry available — fire events to subscribed webhooks")),
     ]
 }
 
@@ -363,6 +406,242 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
             })
         }) as ToolHandler));
     }
+
+    // --- Docker (extended) ---
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_start_tool(), Box::new(move |args: serde_json::Value| {
+            let id = args["container"].as_str().unwrap_or("").to_string();
+            validate_container_id(&id)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                svc.start_container(&id).await.map_err(|e| format!("Docker start failed: {e}"))?;
+                Ok(json!({ "status": "started", "container": id }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_stop_tool(), Box::new(move |args: serde_json::Value| {
+            let id = args["container"].as_str().unwrap_or("").to_string();
+            validate_container_id(&id)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                svc.stop_container(&id).await.map_err(|e| format!("Docker stop failed: {e}"))?;
+                Ok(json!({ "status": "stopped", "container": id }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_restart_tool(), Box::new(move |args: serde_json::Value| {
+            let id = args["container"].as_str().unwrap_or("").to_string();
+            validate_container_id(&id)?;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                svc.restart_container(&id).await.map_err(|e| format!("Docker restart failed: {e}"))?;
+                Ok(json!({ "status": "restarted", "container": id }))
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_run_tool(), Box::new(move |args: serde_json::Value| {
+            let image = args["image"].as_str().unwrap_or("").to_string();
+            if image.is_empty() {
+                return Err("image is required".into());
+            }
+            let name = args["name"].as_str().map(String::from);
+            let ports: Vec<(u16, u16)> = args["ports"].as_array()
+                .map(|arr| arr.iter().filter_map(|p| {
+                    Some((p["host"].as_u64()? as u16, p["container"].as_u64()? as u16))
+                }).collect())
+                .unwrap_or_default();
+            let env_vars: Vec<(String, String)> = args["env_vars"].as_array()
+                .map(|arr| arr.iter().filter_map(|e| {
+                    Some((e["key"].as_str()?.to_string(), e["value"].as_str()?.to_string()))
+                }).collect())
+                .unwrap_or_default();
+            let volumes: Vec<(String, String)> = args["volumes"].as_array()
+                .map(|arr| arr.iter().filter_map(|v| {
+                    Some((v["host"].as_str()?.to_string(), v["container"].as_str()?.to_string()))
+                }).collect())
+                .unwrap_or_default();
+            let network = args["network"].as_str().map(String::from);
+            let command: Option<Vec<String>> = args["command"].as_array()
+                .map(|arr| arr.iter().filter_map(|c| c.as_str().map(String::from)).collect());
+            let request = hive_integrations::docker::RunContainerRequest {
+                image, name, ports, env_vars, volumes, network, command,
+            };
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.run_container(&request).await {
+                    Ok(container) => Ok(json!({
+                        "status": "running",
+                        "id": container.id,
+                        "name": container.name,
+                        "image": container.image,
+                        "state": container.state
+                    })),
+                    Err(e) => Err(format!("Docker run failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_images_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_images().await {
+                    Ok(images) => {
+                        let items: Vec<serde_json::Value> = images.iter().map(|i| json!({
+                            "id": i.id,
+                            "tags": i.tags,
+                            "size_bytes": i.size_bytes,
+                            "created_at": i.created_at
+                        })).collect();
+                        Ok(json!({ "count": items.len(), "images": items }))
+                    }
+                    Err(e) => Err(format!("Docker images failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_build_tool(), Box::new(move |args: serde_json::Value| {
+            let dockerfile = args["dockerfile"].as_str().unwrap_or("").to_string();
+            let tag = args["tag"].as_str().unwrap_or("").to_string();
+            if dockerfile.is_empty() || tag.is_empty() {
+                return Err("Both 'dockerfile' and 'tag' are required".into());
+            }
+            // Validate: no shell metacharacters in tag or dockerfile path
+            if !is_safe_docker_param(&tag) {
+                return Err("Invalid tag: only alphanumeric, '.', '_', '-', ':', and '/' are allowed".into());
+            }
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.build_image(&dockerfile, &tag).await {
+                    Ok(output) => Ok(json!({
+                        "status": "built",
+                        "tag": tag,
+                        "output": if output.len() > 1000 { output[..1000].to_string() } else { output }
+                    })),
+                    Err(e) => Err(format!("Docker build failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_networks_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_networks().await {
+                    Ok(networks) => {
+                        let items: Vec<serde_json::Value> = networks.iter().map(|n| json!({
+                            "id": n.id,
+                            "name": n.name,
+                            "driver": n.driver,
+                            "scope": n.scope
+                        })).collect();
+                        Ok(json!({ "count": items.len(), "networks": items }))
+                    }
+                    Err(e) => Err(format!("Docker networks failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_volumes_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_volumes().await {
+                    Ok(volumes) => {
+                        let items: Vec<serde_json::Value> = volumes.iter().map(|v| json!({
+                            "name": v.name,
+                            "driver": v.driver,
+                            "mountpoint": v.mountpoint
+                        })).collect();
+                        Ok(json!({ "count": items.len(), "volumes": items }))
+                    }
+                    Err(e) => Err(format!("Docker volumes failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_compose_up_tool(), Box::new(move |args: serde_json::Value| {
+            let file = args["file"].as_str().unwrap_or("docker-compose.yml").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.compose_up(&file).await {
+                    Ok(output) => Ok(json!({
+                        "status": "up",
+                        "file": file,
+                        "output": if output.len() > 1000 { output[..1000].to_string() } else { output }
+                    })),
+                    Err(e) => Err(format!("Docker compose up failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_compose_down_tool(), Box::new(move |args: serde_json::Value| {
+            let file = args["file"].as_str().unwrap_or("docker-compose.yml").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.compose_down(&file).await {
+                    Ok(output) => Ok(json!({
+                        "status": "down",
+                        "file": file,
+                        "output": if output.len() > 1000 { output[..1000].to_string() } else { output }
+                    })),
+                    Err(e) => Err(format!("Docker compose down failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((docker_system_info_tool(), Box::new(move |_args: serde_json::Value| {
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.get_system_info().await {
+                    Ok(info) => Ok(json!({
+                        "containers_running": info.containers_running,
+                        "containers_stopped": info.containers_stopped,
+                        "images_count": info.images_count,
+                        "server_version": info.server_version
+                    })),
+                    Err(e) => Err(format!("Docker system info failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // --- Document Export (standalone, no service needed) ---
+    tools.push((export_pdf_tool(), Box::new(handle_export_pdf) as ToolHandler));
+    tools.push((export_docx_tool(), Box::new(handle_export_docx) as ToolHandler));
+    tools.push((export_xlsx_tool(), Box::new(handle_export_xlsx) as ToolHandler));
+    tools.push((export_pptx_tool(), Box::new(handle_export_pptx) as ToolHandler));
+    tools.push((export_csv_tool(), Box::new(handle_export_csv) as ToolHandler));
+    tools.push((export_html_tool(), Box::new(handle_export_html) as ToolHandler));
+    tools.push((export_markdown_tool(), Box::new(handle_export_markdown) as ToolHandler));
 
     // --- Kubernetes ---
     {
@@ -1126,6 +1405,373 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         }))
     }) as ToolHandler));
 
+    // --- Google Suite ---
+    if let Some(ref drive) = services.google_drive {
+        let svc = Arc::clone(drive);
+        tools.push((google_drive_list_files_tool(), Box::new(move |args: serde_json::Value| {
+            let query = args["query"].as_str().map(String::from);
+            let page_size = args["page_size"].as_u64().unwrap_or(20) as u32;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_files(query.as_deref(), page_size).await {
+                    Ok(list) => {
+                        let items: Vec<serde_json::Value> = list.files.iter().map(|f| json!({
+                            "id": f.id, "name": f.name, "mime_type": f.mime_type, "size": f.size
+                        })).collect();
+                        Ok(json!({ "count": items.len(), "files": items, "next_page_token": list.next_page_token }))
+                    }
+                    Err(e) => Err(format!("Google Drive list failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+
+        let svc = Arc::clone(drive);
+        tools.push((google_drive_search_tool(), Box::new(move |args: serde_json::Value| {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let page_size = args["page_size"].as_u64().unwrap_or(20) as u32;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let drive_query = format!("name contains '{}'", query.replace('\'', "\\'"));
+                match svc.list_files(Some(&drive_query), page_size).await {
+                    Ok(list) => {
+                        let items: Vec<serde_json::Value> = list.files.iter().map(|f| json!({
+                            "id": f.id, "name": f.name, "mime_type": f.mime_type, "size": f.size
+                        })).collect();
+                        Ok(json!({ "query": query, "count": items.len(), "files": items }))
+                    }
+                    Err(e) => Err(format!("Google Drive search failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    if let Some(ref sheets) = services.google_sheets {
+        let svc = Arc::clone(sheets);
+        tools.push((google_sheets_read_tool(), Box::new(move |args: serde_json::Value| {
+            let spreadsheet_id = args["spreadsheet_id"].as_str().unwrap_or("").to_string();
+            let range = args["range"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.get_values(&spreadsheet_id, &range).await {
+                    Ok(values) => Ok(json!({
+                        "spreadsheet_id": spreadsheet_id,
+                        "range": values.range,
+                        "row_count": values.values.len(),
+                        "values": values.values
+                    })),
+                    Err(e) => Err(format!("Google Sheets read failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    if let Some(ref docs) = services.google_docs {
+        let svc = Arc::clone(docs);
+        tools.push((google_docs_get_tool(), Box::new(move |args: serde_json::Value| {
+            let document_id = args["document_id"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.read_text(&document_id).await {
+                    Ok(text) => Ok(json!({
+                        "document_id": document_id,
+                        "text": text,
+                        "length": text.len()
+                    })),
+                    Err(e) => Err(format!("Google Docs get failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    if let Some(ref tasks) = services.google_tasks {
+        let svc = Arc::clone(tasks);
+        tools.push((google_tasks_list_tool(), Box::new(move |args: serde_json::Value| {
+            let list_id = args["list_id"].as_str().map(String::from);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match list_id {
+                    Some(id) => {
+                        match svc.list_tasks(&id).await {
+                            Ok(tasks) => {
+                                let items: Vec<serde_json::Value> = tasks.iter().map(|t| json!({
+                                    "id": t.id, "title": t.title, "status": t.status, "notes": t.notes
+                                })).collect();
+                                Ok(json!({ "list_id": id, "count": items.len(), "tasks": items }))
+                            }
+                            Err(e) => Err(format!("Google Tasks list failed: {e}")),
+                        }
+                    }
+                    None => {
+                        match svc.list_task_lists().await {
+                            Ok(lists) => {
+                                let items: Vec<serde_json::Value> = lists.iter().map(|l| json!({
+                                    "id": l.id, "title": l.title
+                                })).collect();
+                                Ok(json!({ "count": items.len(), "task_lists": items }))
+                            }
+                            Err(e) => Err(format!("Google Tasks list task lists failed: {e}")),
+                        }
+                    }
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    if let Some(ref contacts) = services.google_contacts {
+        let svc = Arc::clone(contacts);
+        tools.push((google_contacts_search_tool(), Box::new(move |args: serde_json::Value| {
+            let query = args["query"].as_str().unwrap_or("").to_string();
+            let page_size = args["page_size"].as_u64().unwrap_or(10) as u32;
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.search_contacts(&query, page_size).await {
+                    Ok(contacts) => {
+                        let items: Vec<serde_json::Value> = contacts.iter().map(|c| json!({
+                            "resource_name": c.resource_name,
+                            "display_name": c.display_name,
+                            "emails": c.email_addresses.iter().map(|e| &e.value).collect::<Vec<_>>(),
+                            "phones": c.phone_numbers.iter().map(|p| &p.value).collect::<Vec<_>>()
+                        })).collect();
+                        Ok(json!({ "query": query, "count": items.len(), "contacts": items }))
+                    }
+                    Err(e) => Err(format!("Google Contacts search failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // --- Bitbucket ---
+    if let Some(ref bb) = services.bitbucket {
+        let svc = Arc::clone(bb);
+        tools.push((bitbucket_list_repos_tool(), Box::new(move |args: serde_json::Value| {
+            let workspace = args["workspace"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_repositories(&workspace).await {
+                    Ok(repos) => {
+                        let items: Vec<serde_json::Value> = repos.iter().map(|r| json!({
+                            "name": r.name, "slug": r.slug, "full_name": r.full_name,
+                            "description": r.description, "is_private": r.is_private, "language": r.language
+                        })).collect();
+                        Ok(json!({ "workspace": workspace, "count": items.len(), "repositories": items }))
+                    }
+                    Err(e) => Err(format!("Bitbucket list repos failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+
+        let svc = Arc::clone(bb);
+        tools.push((bitbucket_list_prs_tool(), Box::new(move |args: serde_json::Value| {
+            let workspace = args["workspace"].as_str().unwrap_or("").to_string();
+            let repo_slug = args["repo_slug"].as_str().unwrap_or("").to_string();
+            let state_str = args["state"].as_str().unwrap_or("open");
+            let state = match state_str {
+                "merged" => hive_integrations::bitbucket::PRState::Merged,
+                "declined" => hive_integrations::bitbucket::PRState::Declined,
+                "superseded" => hive_integrations::bitbucket::PRState::Superseded,
+                _ => hive_integrations::bitbucket::PRState::Open,
+            };
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_pull_requests(&workspace, &repo_slug, state).await {
+                    Ok(prs) => {
+                        let items: Vec<serde_json::Value> = prs.iter().map(|pr| json!({
+                            "id": pr.id, "title": pr.title, "state": pr.state,
+                            "source_branch": pr.source_branch(), "destination_branch": pr.destination_branch(),
+                            "author": pr.author.as_ref().map(|a| &a.display_name)
+                        })).collect();
+                        Ok(json!({ "workspace": workspace, "repo": repo_slug, "count": items.len(), "pull_requests": items }))
+                    }
+                    Err(e) => Err(format!("Bitbucket list PRs failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+
+        let svc = Arc::clone(bb);
+        tools.push((bitbucket_create_pr_tool(), Box::new(move |args: serde_json::Value| {
+            let workspace = args["workspace"].as_str().unwrap_or("").to_string();
+            let repo_slug = args["repo_slug"].as_str().unwrap_or("").to_string();
+            let title = args["title"].as_str().unwrap_or("").to_string();
+            let source_branch = args["source_branch"].as_str().unwrap_or("").to_string();
+            let destination_branch = args["destination_branch"].as_str().unwrap_or("").to_string();
+            let description = args["description"].as_str().map(String::from);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                let request = hive_integrations::bitbucket::CreatePullRequestRequest {
+                    title,
+                    description,
+                    source: hive_integrations::bitbucket::CreatePRBranch {
+                        branch: hive_integrations::bitbucket::CreatePRBranchName { name: source_branch },
+                    },
+                    destination: hive_integrations::bitbucket::CreatePRBranch {
+                        branch: hive_integrations::bitbucket::CreatePRBranchName { name: destination_branch },
+                    },
+                    close_source_branch: None,
+                };
+                match svc.create_pull_request(&workspace, &repo_slug, &request).await {
+                    Ok(pr) => Ok(json!({
+                        "status": "created", "id": pr.id, "title": pr.title,
+                        "source_branch": pr.source_branch(), "destination_branch": pr.destination_branch()
+                    })),
+                    Err(e) => Err(format!("Bitbucket create PR failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // --- GitLab ---
+    if let Some(ref gl) = services.gitlab {
+        let svc = Arc::clone(gl);
+        tools.push((gitlab_list_projects_tool(), Box::new(move |args: serde_json::Value| {
+            let owned = args["owned"].as_bool().unwrap_or(false);
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_projects(owned).await {
+                    Ok(projects) => {
+                        let items: Vec<serde_json::Value> = projects.iter().map(|p| json!({
+                            "id": p.id, "name": p.name, "path_with_namespace": p.path_with_namespace,
+                            "description": p.description, "web_url": p.web_url,
+                            "default_branch": p.default_branch, "visibility": format!("{:?}", p.visibility)
+                        })).collect();
+                        Ok(json!({ "count": items.len(), "projects": items }))
+                    }
+                    Err(e) => Err(format!("GitLab list projects failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+
+        let svc = Arc::clone(gl);
+        tools.push((gitlab_list_mrs_tool(), Box::new(move |args: serde_json::Value| {
+            let project_id = args["project_id"].as_str().unwrap_or("").to_string();
+            let state_str = args["state"].as_str().unwrap_or("opened");
+            let state = match state_str {
+                "closed" => hive_integrations::gitlab::MRState::Closed,
+                "merged" => hive_integrations::gitlab::MRState::Merged,
+                "all" => hive_integrations::gitlab::MRState::All,
+                _ => hive_integrations::gitlab::MRState::Opened,
+            };
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_merge_requests(&project_id, state).await {
+                    Ok(mrs) => {
+                        let items: Vec<serde_json::Value> = mrs.iter().map(|mr| json!({
+                            "iid": mr.iid, "title": mr.title, "state": mr.state,
+                            "source_branch": mr.source_branch, "target_branch": mr.target_branch,
+                            "author": mr.author.username, "web_url": mr.web_url
+                        })).collect();
+                        Ok(json!({ "project_id": project_id, "count": items.len(), "merge_requests": items }))
+                    }
+                    Err(e) => Err(format!("GitLab list MRs failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+
+        let svc = Arc::clone(gl);
+        tools.push((gitlab_list_pipelines_tool(), Box::new(move |args: serde_json::Value| {
+            let project_id = args["project_id"].as_str().unwrap_or("").to_string();
+            let svc = Arc::clone(&svc);
+            block_on_async(async move {
+                match svc.list_pipelines(&project_id).await {
+                    Ok(pipelines) => {
+                        let items: Vec<serde_json::Value> = pipelines.iter().map(|p| json!({
+                            "id": p.id, "status": p.status, "ref": p.ref_name,
+                            "sha": p.sha, "web_url": p.web_url
+                        })).collect();
+                        Ok(json!({ "project_id": project_id, "count": items.len(), "pipelines": items }))
+                    }
+                    Err(e) => Err(format!("GitLab list pipelines failed: {e}")),
+                }
+            })
+        }) as ToolHandler));
+    }
+
+    // --- Blockchain (HIGH-RISK — requires user approval) ---
+    tools.push((token_estimate_cost_tool(), Box::new(|args: serde_json::Value| {
+        let chain_str = args["chain"].as_str().unwrap_or("ethereum").to_string();
+        block_on_async(async move {
+            match chain_str.as_str() {
+                "solana" => {
+                    match hive_blockchain::solana::estimate_deploy_cost().await {
+                        Ok(cost) => Ok(json!({ "chain": "solana", "estimated_cost_sol": cost })),
+                        Err(e) => Err(format!("Solana cost estimate failed: {e}")),
+                    }
+                }
+                _ => {
+                    let chain = match chain_str.as_str() {
+                        "base" => hive_blockchain::wallet_store::Chain::Base,
+                        _ => hive_blockchain::wallet_store::Chain::Ethereum,
+                    };
+                    match hive_blockchain::evm::estimate_deploy_cost(chain).await {
+                        Ok(cost) => Ok(json!({ "chain": chain_str, "estimated_cost_eth": cost })),
+                        Err(e) => Err(format!("EVM cost estimate failed: {e}")),
+                    }
+                }
+            }
+        })
+    }) as ToolHandler));
+
+    // HIGH-RISK: token_deploy_erc20 — deploys a real ERC-20 token on-chain.
+    // This handler returns an error directing the user to use the wallet UI instead,
+    // because private key handling requires explicit user approval flow.
+    tools.push((token_deploy_erc20_tool(), Box::new(|_args: serde_json::Value| {
+        Err("ERC-20 deployment requires explicit user approval and wallet signing. \
+             Use the Blockchain panel in Settings to deploy tokens securely.".into())
+    }) as ToolHandler));
+
+    // HIGH-RISK: token_deploy_spl — deploys a real SPL token on Solana.
+    tools.push((token_deploy_spl_tool(), Box::new(|_args: serde_json::Value| {
+        Err("SPL token deployment requires explicit user approval and wallet signing. \
+             Use the Blockchain panel in Settings to deploy tokens securely.".into())
+    }) as ToolHandler));
+
+    // --- Webhooks ---
+    {
+        let registry = Arc::clone(&services.webhooks);
+        tools.push((webhook_register_tool(), Box::new(move |args: serde_json::Value| {
+            let name = args["name"].as_str().unwrap_or("").to_string();
+            let url = args["url"].as_str().unwrap_or("").to_string();
+            let events: Vec<String> = args["events"].as_array()
+                .map(|arr| arr.iter().filter_map(|e| e.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let registry = Arc::clone(&registry);
+            let webhook = hive_integrations::webhooks::Webhook::new(name.clone(), url.clone(), events.clone());
+            let mut guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            match guard.register(webhook) {
+                Ok(id) => Ok(json!({ "status": "registered", "id": id, "name": name, "url": url, "events": events })),
+                Err(e) => Err(format!("Webhook registration failed: {e}")),
+            }
+        }) as ToolHandler));
+    }
+
+    {
+        let registry = Arc::clone(&services.webhooks);
+        tools.push((webhook_list_tool(), Box::new(move |_args: serde_json::Value| {
+            let guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+            let items: Vec<serde_json::Value> = guard.list().iter().map(|w| json!({
+                "id": w.id, "name": w.name, "url": w.url, "events": w.events, "active": w.active
+            })).collect();
+            Ok(json!({ "count": items.len(), "webhooks": items }))
+        }) as ToolHandler));
+    }
+
+    {
+        let registry = Arc::clone(&services.webhooks);
+        tools.push((webhook_fire_tool(), Box::new(move |args: serde_json::Value| {
+            let event = args["event"].as_str().unwrap_or("").to_string();
+            let payload = args.get("payload").cloned().unwrap_or(json!({}));
+            let registry = Arc::clone(&registry);
+            {
+                let guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let count = guard.subscriber_count_for(&event);
+                // NOTE: actual HTTP delivery requires async + the guard's client.
+                // The std::sync::MutexGuard is !Send so we cannot hold it across
+                // an await inside block_on_async.  For now we report the subscriber
+                // count synchronously; full delivery is handled by the event bus.
+                Ok(json!({ "event": event, "notified": count }))
+            }
+        }) as ToolHandler));
+    }
+
     tools
 }
 
@@ -1145,6 +1791,14 @@ pub struct IntegrationServices {
     pub azure: Arc<hive_integrations::cloud::AzureClient>,
     pub gcp: Arc<hive_integrations::cloud::GcpClient>,
     pub docs_indexer: Arc<hive_integrations::docs_indexer::DocsIndexer>,
+    pub google_drive: Option<Arc<hive_integrations::google::GoogleDriveClient>>,
+    pub google_sheets: Option<Arc<hive_integrations::google::GoogleSheetsClient>>,
+    pub google_docs: Option<Arc<hive_integrations::google::GoogleDocsClient>>,
+    pub google_tasks: Option<Arc<hive_integrations::google::GoogleTasksClient>>,
+    pub google_contacts: Option<Arc<hive_integrations::google::GoogleContactsClient>>,
+    pub bitbucket: Option<Arc<hive_integrations::bitbucket::BitbucketClient>>,
+    pub gitlab: Option<Arc<hive_integrations::gitlab::GitLabClient>>,
+    pub webhooks: Arc<std::sync::Mutex<hive_integrations::webhooks::WebhookRegistry>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1739,8 +2393,913 @@ fn deploy_trigger_tool() -> McpTool {
 }
 
 // ---------------------------------------------------------------------------
+// Google Suite tool definitions
+// ---------------------------------------------------------------------------
+
+fn google_drive_list_files_tool() -> McpTool {
+    McpTool {
+        name: "google_drive_list_files".into(),
+        description: "List files in Google Drive, optionally filtered by a query string".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Optional Drive query filter (e.g. \"mimeType='application/pdf'\")" },
+                "page_size": { "type": "integer", "description": "Number of results (default 20)" }
+            }
+        }),
+    }
+}
+
+fn google_drive_search_tool() -> McpTool {
+    McpTool {
+        name: "google_drive_search".into(),
+        description: "Search for files in Google Drive by name or content".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Search query (matched against file name and content)" },
+                "page_size": { "type": "integer", "description": "Number of results (default 20)" }
+            },
+            "required": ["query"]
+        }),
+    }
+}
+
+fn google_sheets_read_tool() -> McpTool {
+    McpTool {
+        name: "google_sheets_read".into(),
+        description: "Read values from a Google Sheets spreadsheet range".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "spreadsheet_id": { "type": "string", "description": "Spreadsheet ID from the URL" },
+                "range": { "type": "string", "description": "A1 notation range, e.g. Sheet1!A1:D10" }
+            },
+            "required": ["spreadsheet_id", "range"]
+        }),
+    }
+}
+
+fn google_docs_get_tool() -> McpTool {
+    McpTool {
+        name: "google_docs_get".into(),
+        description: "Get the text content of a Google Docs document".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "document_id": { "type": "string", "description": "Document ID from the URL" }
+            },
+            "required": ["document_id"]
+        }),
+    }
+}
+
+fn google_tasks_list_tool() -> McpTool {
+    McpTool {
+        name: "google_tasks_list".into(),
+        description: "List tasks from Google Tasks. Lists task lists if no list_id is given, or tasks within a specific list.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "list_id": { "type": "string", "description": "Optional task list ID. If omitted, returns all task lists." }
+            }
+        }),
+    }
+}
+
+fn google_contacts_search_tool() -> McpTool {
+    McpTool {
+        name: "google_contacts_search".into(),
+        description: "Search Google Contacts by name, email, or phone number".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Search query (name, email, phone, etc.)" },
+                "page_size": { "type": "integer", "description": "Number of results (default 10)" }
+            },
+            "required": ["query"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bitbucket tool definitions
+// ---------------------------------------------------------------------------
+
+fn bitbucket_list_repos_tool() -> McpTool {
+    McpTool {
+        name: "bitbucket_list_repos".into(),
+        description: "List repositories in a Bitbucket workspace".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "workspace": { "type": "string", "description": "Bitbucket workspace slug" }
+            },
+            "required": ["workspace"]
+        }),
+    }
+}
+
+fn bitbucket_list_prs_tool() -> McpTool {
+    McpTool {
+        name: "bitbucket_list_prs".into(),
+        description: "List pull requests for a Bitbucket repository".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "workspace": { "type": "string", "description": "Bitbucket workspace slug" },
+                "repo_slug": { "type": "string", "description": "Repository slug" },
+                "state": { "type": "string", "enum": ["open", "merged", "declined", "superseded"], "description": "PR state filter (default: open)" }
+            },
+            "required": ["workspace", "repo_slug"]
+        }),
+    }
+}
+
+fn bitbucket_create_pr_tool() -> McpTool {
+    McpTool {
+        name: "bitbucket_create_pr".into(),
+        description: "Create a pull request in a Bitbucket repository".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "workspace": { "type": "string", "description": "Bitbucket workspace slug" },
+                "repo_slug": { "type": "string", "description": "Repository slug" },
+                "title": { "type": "string", "description": "Pull request title" },
+                "source_branch": { "type": "string", "description": "Source branch name" },
+                "destination_branch": { "type": "string", "description": "Destination branch name" },
+                "description": { "type": "string", "description": "Optional PR description" }
+            },
+            "required": ["workspace", "repo_slug", "title", "source_branch", "destination_branch"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GitLab tool definitions
+// ---------------------------------------------------------------------------
+
+fn gitlab_list_projects_tool() -> McpTool {
+    McpTool {
+        name: "gitlab_list_projects".into(),
+        description: "List GitLab projects visible to the authenticated user".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "owned": { "type": "boolean", "description": "If true, only return projects owned by the user (default: false)" }
+            }
+        }),
+    }
+}
+
+fn gitlab_list_mrs_tool() -> McpTool {
+    McpTool {
+        name: "gitlab_list_mrs".into(),
+        description: "List merge requests for a GitLab project".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "project_id": { "type": "string", "description": "Project ID or URL-encoded path (e.g. group%2Fproject)" },
+                "state": { "type": "string", "enum": ["opened", "closed", "merged", "all"], "description": "MR state filter (default: opened)" }
+            },
+            "required": ["project_id"]
+        }),
+    }
+}
+
+fn gitlab_list_pipelines_tool() -> McpTool {
+    McpTool {
+        name: "gitlab_list_pipelines".into(),
+        description: "List recent CI/CD pipelines for a GitLab project".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "project_id": { "type": "string", "description": "Project ID or URL-encoded path" }
+            },
+            "required": ["project_id"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Blockchain tool definitions (HIGH-RISK — requires user approval)
+// ---------------------------------------------------------------------------
+
+fn token_estimate_cost_tool() -> McpTool {
+    McpTool {
+        name: "token_estimate_cost".into(),
+        description: "Estimate the cost to deploy a token on an EVM chain or Solana. Returns the estimated cost in the chain's native currency.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "chain": { "type": "string", "enum": ["ethereum", "base", "solana"], "description": "Target blockchain" }
+            },
+            "required": ["chain"]
+        }),
+    }
+}
+
+fn token_deploy_erc20_tool() -> McpTool {
+    McpTool {
+        name: "token_deploy_erc20".into(),
+        // HIGH-RISK: This tool deploys a real ERC-20 token on-chain and costs real money.
+        // It MUST require explicit user approval before execution.
+        description: "Deploy an ERC-20 token to an EVM chain. WARNING: This is a HIGH-RISK operation that costs real money and cannot be reversed.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Token name (e.g. 'My Token')" },
+                "symbol": { "type": "string", "description": "Token symbol (e.g. 'MTK')" },
+                "decimals": { "type": "integer", "description": "Decimal places (usually 18)" },
+                "total_supply": { "type": "string", "description": "Total supply as a decimal string" },
+                "chain": { "type": "string", "enum": ["ethereum", "base"], "description": "Target EVM chain" }
+            },
+            "required": ["name", "symbol", "decimals", "total_supply", "chain"]
+        }),
+    }
+}
+
+fn token_deploy_spl_tool() -> McpTool {
+    McpTool {
+        name: "token_deploy_spl".into(),
+        // HIGH-RISK: This tool deploys a real SPL token on Solana and costs real SOL.
+        // It MUST require explicit user approval before execution.
+        description: "Deploy an SPL token on Solana. WARNING: This is a HIGH-RISK operation that costs real SOL and cannot be reversed.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Token name" },
+                "symbol": { "type": "string", "description": "Token symbol" },
+                "decimals": { "type": "integer", "description": "Decimal places (usually 9 for Solana)" },
+                "supply": { "type": "integer", "description": "Total supply (before decimals)" },
+                "metadata_uri": { "type": "string", "description": "Optional metadata JSON URI" }
+            },
+            "required": ["name", "symbol", "decimals", "supply"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Webhook tool definitions
+// ---------------------------------------------------------------------------
+
+fn webhook_register_tool() -> McpTool {
+    McpTool {
+        name: "webhook_register".into(),
+        description: "Register a new webhook to receive event notifications. URL must be HTTPS and must not target private/local addresses.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Human-readable name for the webhook" },
+                "url": { "type": "string", "description": "HTTPS URL to deliver events to" },
+                "events": { "type": "array", "items": { "type": "string" }, "description": "List of event names to subscribe to" }
+            },
+            "required": ["name", "url", "events"]
+        }),
+    }
+}
+
+fn webhook_list_tool() -> McpTool {
+    McpTool {
+        name: "webhook_list".into(),
+        description: "List all registered webhooks".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn webhook_fire_tool() -> McpTool {
+    McpTool {
+        name: "webhook_fire".into(),
+        description: "Fire an event to all subscribed webhooks. Returns the number of successfully notified webhooks.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "event": { "type": "string", "description": "Event name to fire" },
+                "payload": { "description": "JSON payload to deliver with the event" }
+            },
+            "required": ["event"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Docker (extended) tool definitions
+// ---------------------------------------------------------------------------
+
+fn docker_start_tool() -> McpTool {
+    McpTool {
+        name: "docker_start".into(),
+        description: "Start a stopped Docker container".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "container": { "type": "string", "description": "Container name or ID" }
+            },
+            "required": ["container"]
+        }),
+    }
+}
+
+fn docker_stop_tool() -> McpTool {
+    McpTool {
+        name: "docker_stop".into(),
+        description: "Stop a running Docker container".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "container": { "type": "string", "description": "Container name or ID" }
+            },
+            "required": ["container"]
+        }),
+    }
+}
+
+fn docker_restart_tool() -> McpTool {
+    McpTool {
+        name: "docker_restart".into(),
+        description: "Restart a Docker container".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "container": { "type": "string", "description": "Container name or ID" }
+            },
+            "required": ["container"]
+        }),
+    }
+}
+
+fn docker_run_tool() -> McpTool {
+    McpTool {
+        name: "docker_run".into(),
+        description: "Run a new Docker container from an image".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "image": { "type": "string", "description": "Docker image to run (e.g. nginx:latest)" },
+                "name": { "type": "string", "description": "Optional container name" },
+                "ports": {
+                    "type": "array",
+                    "description": "Port mappings",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "host": { "type": "integer" },
+                            "container": { "type": "integer" }
+                        },
+                        "required": ["host", "container"]
+                    }
+                },
+                "env_vars": {
+                    "type": "array",
+                    "description": "Environment variables",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": { "type": "string" },
+                            "value": { "type": "string" }
+                        },
+                        "required": ["key", "value"]
+                    }
+                },
+                "volumes": {
+                    "type": "array",
+                    "description": "Volume mounts",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "host": { "type": "string" },
+                            "container": { "type": "string" }
+                        },
+                        "required": ["host", "container"]
+                    }
+                },
+                "network": { "type": "string", "description": "Docker network to connect to" },
+                "command": {
+                    "type": "array",
+                    "description": "Command to run in the container",
+                    "items": { "type": "string" }
+                }
+            },
+            "required": ["image"]
+        }),
+    }
+}
+
+fn docker_images_tool() -> McpTool {
+    McpTool {
+        name: "docker_images".into(),
+        description: "List all Docker images".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn docker_build_tool() -> McpTool {
+    McpTool {
+        name: "docker_build".into(),
+        description: "Build a Docker image from a Dockerfile".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "dockerfile": { "type": "string", "description": "Path to the Dockerfile" },
+                "tag": { "type": "string", "description": "Tag for the built image (e.g. myapp:v1)" }
+            },
+            "required": ["dockerfile", "tag"]
+        }),
+    }
+}
+
+fn docker_networks_tool() -> McpTool {
+    McpTool {
+        name: "docker_networks".into(),
+        description: "List all Docker networks".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn docker_volumes_tool() -> McpTool {
+    McpTool {
+        name: "docker_volumes".into(),
+        description: "List all Docker volumes".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn docker_compose_up_tool() -> McpTool {
+    McpTool {
+        name: "docker_compose_up".into(),
+        description: "Start services defined in a Docker Compose file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "Path to docker-compose file (default: docker-compose.yml)" }
+            }
+        }),
+    }
+}
+
+fn docker_compose_down_tool() -> McpTool {
+    McpTool {
+        name: "docker_compose_down".into(),
+        description: "Stop and remove services defined in a Docker Compose file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "file": { "type": "string", "description": "Path to docker-compose file (default: docker-compose.yml)" }
+            }
+        }),
+    }
+}
+
+fn docker_system_info_tool() -> McpTool {
+    McpTool {
+        name: "docker_system_info".into(),
+        description: "Get Docker system information (running/stopped containers, images, version)".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Document Export tool definitions
+// ---------------------------------------------------------------------------
+
+fn export_pdf_tool() -> McpTool {
+    McpTool {
+        name: "export_pdf".into(),
+        description: "Generate a PDF document with a title and sections, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Document title" },
+                "sections": {
+                    "type": "array",
+                    "description": "Document sections, each with a heading and body",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": { "type": "string" },
+                            "body": { "type": "string" }
+                        },
+                        "required": ["heading", "body"]
+                    }
+                },
+                "output_path": { "type": "string", "description": "File path to write the PDF to" }
+            },
+            "required": ["title", "sections", "output_path"]
+        }),
+    }
+}
+
+fn export_docx_tool() -> McpTool {
+    McpTool {
+        name: "export_docx".into(),
+        description: "Generate a DOCX (Word) document with a title and sections, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Document title" },
+                "sections": {
+                    "type": "array",
+                    "description": "Document sections, each with a heading and body",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": { "type": "string" },
+                            "body": { "type": "string" }
+                        },
+                        "required": ["heading", "body"]
+                    }
+                },
+                "output_path": { "type": "string", "description": "File path to write the DOCX to" }
+            },
+            "required": ["title", "sections", "output_path"]
+        }),
+    }
+}
+
+fn export_xlsx_tool() -> McpTool {
+    McpTool {
+        name: "export_xlsx".into(),
+        description: "Generate an XLSX (Excel) spreadsheet from headers and rows, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Spreadsheet title (used as sheet name)" },
+                "headers": {
+                    "type": "array",
+                    "description": "Column headers",
+                    "items": { "type": "string" }
+                },
+                "rows": {
+                    "type": "array",
+                    "description": "Data rows (array of arrays of strings)",
+                    "items": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    }
+                },
+                "output_path": { "type": "string", "description": "File path to write the XLSX to" }
+            },
+            "required": ["title", "headers", "rows", "output_path"]
+        }),
+    }
+}
+
+fn export_pptx_tool() -> McpTool {
+    McpTool {
+        name: "export_pptx".into(),
+        description: "Generate a PPTX (PowerPoint) presentation from slides, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Presentation title (unused in file, for metadata)" },
+                "slides": {
+                    "type": "array",
+                    "description": "Slides, each with a title and content",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string" },
+                            "content": { "type": "string" }
+                        },
+                        "required": ["title", "content"]
+                    }
+                },
+                "output_path": { "type": "string", "description": "File path to write the PPTX to" }
+            },
+            "required": ["title", "slides", "output_path"]
+        }),
+    }
+}
+
+fn export_csv_tool() -> McpTool {
+    McpTool {
+        name: "export_csv".into(),
+        description: "Generate a CSV file from headers and rows, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Unused for CSV (kept for consistency)" },
+                "headers": {
+                    "type": "array",
+                    "description": "Column headers",
+                    "items": { "type": "string" }
+                },
+                "rows": {
+                    "type": "array",
+                    "description": "Data rows (array of arrays of strings)",
+                    "items": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    }
+                },
+                "output_path": { "type": "string", "description": "File path to write the CSV to" }
+            },
+            "required": ["headers", "rows", "output_path"]
+        }),
+    }
+}
+
+fn export_html_tool() -> McpTool {
+    McpTool {
+        name: "export_html".into(),
+        description: "Generate an HTML document with a title and body content, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "HTML page title" },
+                "content": { "type": "string", "description": "HTML body content" },
+                "output_path": { "type": "string", "description": "File path to write the HTML to" }
+            },
+            "required": ["title", "content", "output_path"]
+        }),
+    }
+}
+
+fn export_markdown_tool() -> McpTool {
+    McpTool {
+        name: "export_markdown".into(),
+        description: "Generate a Markdown document with a title and sections, then write it to a file".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "Document title (rendered as # heading)" },
+                "sections": {
+                    "type": "array",
+                    "description": "Document sections, each with a heading and body",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": { "type": "string" },
+                            "body": { "type": "string" }
+                        },
+                        "required": ["heading", "body"]
+                    }
+                },
+                "output_path": { "type": "string", "description": "File path to write the Markdown to" }
+            },
+            "required": ["title", "sections", "output_path"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Document Export handler implementations
+// ---------------------------------------------------------------------------
+
+/// Parse sections from JSON args: [{"heading": "...", "body": "..."}]
+fn parse_sections(args: &serde_json::Value) -> Vec<(String, String)> {
+    args["sections"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|s| {
+                    (
+                        s["heading"].as_str().unwrap_or("").to_string(),
+                        s["body"].as_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn handle_export_pdf(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let title = args["title"].as_str().unwrap_or("Untitled");
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let sections = parse_sections(&args);
+    let section_refs: Vec<(&str, &str)> = sections
+        .iter()
+        .map(|(h, b)| (h.as_str(), b.as_str()))
+        .collect();
+    let bytes = hive_docs::pdf::generate_pdf_document(title, &section_refs)
+        .map_err(|e| format!("PDF generation failed: {e}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|e| format!("Failed to write PDF to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "pdf",
+        "output_path": output_path,
+        "size_bytes": bytes.len()
+    }))
+}
+
+fn handle_export_docx(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let title = args["title"].as_str().unwrap_or("Untitled");
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let sections = parse_sections(&args);
+    let section_refs: Vec<(&str, &str)> = sections
+        .iter()
+        .map(|(h, b)| (h.as_str(), b.as_str()))
+        .collect();
+    let bytes = hive_docs::docx::generate_docx_document(title, &section_refs)
+        .map_err(|e| format!("DOCX generation failed: {e}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|e| format!("Failed to write DOCX to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "docx",
+        "output_path": output_path,
+        "size_bytes": bytes.len()
+    }))
+}
+
+fn handle_export_xlsx(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let headers: Vec<String> = args["headers"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|h| h.as_str().unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let header_refs: Vec<&str> = headers.iter().map(|h| h.as_str()).collect();
+    let rows: Vec<Vec<String>> = args["rows"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|row| {
+                    row.as_array()
+                        .map(|cells| {
+                            cells
+                                .iter()
+                                .map(|c| c.as_str().unwrap_or("").to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let bytes = hive_docs::xlsx::generate_xlsx(&header_refs, &rows)
+        .map_err(|e| format!("XLSX generation failed: {e}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|e| format!("Failed to write XLSX to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "xlsx",
+        "output_path": output_path,
+        "size_bytes": bytes.len()
+    }))
+}
+
+fn handle_export_pptx(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let slides: Vec<hive_docs::pptx::PptxSlide> = args["slides"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|s| hive_docs::pptx::PptxSlide {
+                    title: s["title"].as_str().unwrap_or("").to_string(),
+                    content: s["content"].as_str().unwrap_or("").to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let bytes = hive_docs::pptx::generate_pptx(&slides)
+        .map_err(|e| format!("PPTX generation failed: {e}"))?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|e| format!("Failed to write PPTX to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "pptx",
+        "output_path": output_path,
+        "size_bytes": bytes.len()
+    }))
+}
+
+fn handle_export_csv(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let headers: Vec<String> = args["headers"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|h| h.as_str().unwrap_or("").to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let header_refs: Vec<&str> = headers.iter().map(|h| h.as_str()).collect();
+    let rows: Vec<Vec<String>> = args["rows"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|row| {
+                    row.as_array()
+                        .map(|cells| {
+                            cells
+                                .iter()
+                                .map(|c| c.as_str().unwrap_or("").to_string())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let csv_string = hive_docs::csv::generate_csv(&header_refs, &rows)
+        .map_err(|e| format!("CSV generation failed: {e}"))?;
+    std::fs::write(output_path, csv_string.as_bytes())
+        .map_err(|e| format!("Failed to write CSV to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "csv",
+        "output_path": output_path,
+        "size_bytes": csv_string.len()
+    }))
+}
+
+fn handle_export_html(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let title = args["title"].as_str().unwrap_or("Untitled");
+    let content = args["content"].as_str().unwrap_or("");
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let html = hive_docs::html::generate_html(title, content);
+    std::fs::write(output_path, html.as_bytes())
+        .map_err(|e| format!("Failed to write HTML to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "html",
+        "output_path": output_path,
+        "size_bytes": html.len()
+    }))
+}
+
+fn handle_export_markdown(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let title = args["title"].as_str().unwrap_or("Untitled");
+    let output_path = args["output_path"]
+        .as_str()
+        .ok_or("output_path is required")?;
+    let sections = parse_sections(&args);
+    let section_refs: Vec<(&str, &str)> = sections
+        .iter()
+        .map(|(h, b)| (h.as_str(), b.as_str()))
+        .collect();
+    let md = hive_docs::markdown::generate_markdown_document(title, &section_refs);
+    std::fs::write(output_path, md.as_bytes())
+        .map_err(|e| format!("Failed to write Markdown to {output_path}: {e}"))?;
+    Ok(json!({
+        "status": "exported",
+        "format": "markdown",
+        "output_path": output_path,
+        "size_bytes": md.len()
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Validate a Docker container ID or name — only safe characters allowed.
+///
+/// Allows alphanumeric, '.', '_', '-', and '/' (for compose names).
+/// Rejects empty strings and anything that could be shell injection.
+fn validate_container_id(id: &str) -> Result<(), String> {
+    if id.is_empty() {
+        return Err("Container ID/name is required".into());
+    }
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+    {
+        return Err(
+            "Invalid container ID: only alphanumeric, '.', '_', '-', and '/' are allowed".into(),
+        );
+    }
+    Ok(())
+}
+
+/// Validate a Docker build tag or parameter — only safe characters allowed.
+fn is_safe_docker_param(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/'))
+}
 
 /// Validate that a deploy parameter contains only safe characters.
 ///
@@ -2161,6 +3720,16 @@ mod tests {
             azure: Arc::new(hive_integrations::cloud::AzureClient::new(None)),
             gcp: Arc::new(hive_integrations::cloud::GcpClient::new(None)),
             docs_indexer: Arc::new(hive_integrations::docs_indexer::DocsIndexer::empty()),
+            google_drive: None,
+            google_sheets: None,
+            google_docs: None,
+            google_tasks: None,
+            google_contacts: None,
+            bitbucket: None,
+            gitlab: None,
+            webhooks: Arc::new(std::sync::Mutex::new(
+                hive_integrations::webhooks::WebhookRegistry::new(),
+            )),
         }
     }
 

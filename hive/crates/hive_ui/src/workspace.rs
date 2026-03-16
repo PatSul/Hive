@@ -26,8 +26,10 @@ use crate::chat_service::{ChatService, MessageRole, StreamCompleted};
 use chrono::Utc;
 use hive_ui_core::{
     // Globals
-    AppA2aClient, AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure, AppBrowser,
-    AppChannels, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning,
+    AppA2aClient, AppActivityService, AppAiService, AppAssistant, AppAutomation, AppAws, AppAzure,
+    AppBitbucket, AppBrowser,
+    AppAgentNotifications,
+    AppChannels, AppConfig, AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning, AppGitLab,
     AppGcp, AppHueClient, AppIntegrationDb, AppKnowledge, AppKnowledgeFiles, AppHiveMemory, AppKubernetes,
     AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications,
     AppOllamaManager, AppPersonas, AppProjectManagement, AppQuickIndex, AppReminderRx,
@@ -51,6 +53,7 @@ pub use hive_ui_core::{
     SwitchToWorkspace, TogglePinWorkspace, RemoveRecentWorkspace,
     FilesClearChecked, FilesNavigateBack, FilesRefresh, FilesNewFile, FilesNewFolder,
     FilesCloseViewer, FilesNavigateTo, FilesOpenEntry, FilesDeleteEntry, FilesToggleCheck,
+    FilesSetSearchQuery, ChatReadAloud,
     HistoryRefresh, HistoryLoadConversation, HistoryDeleteConversation,
     HistoryClearAll, HistoryClearAllConfirm, HistoryClearAllCancel,
     KanbanAddTask, LogsClear, LogsToggleAutoScroll, LogsSetFilter,
@@ -473,6 +476,29 @@ impl HiveWorkspace {
             quick_index.indexed_at.elapsed()
         );
         cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
+
+        // Bootstrap RAG index — index the project directory so that RAG queries
+        // in the chat pipeline return relevant context.
+        if cx.has_global::<AppRagService>() {
+            let rag_svc = cx.global::<AppRagService>().0.clone();
+            let rag_root = project_root.clone();
+            std::thread::spawn(move || {
+                if let Ok(mut rag) = rag_svc.lock() {
+                    match rag.index_directory(&rag_root) {
+                        Ok(count) => {
+                            tracing::info!(
+                                "RAG: bootstrap indexed {} files from {}",
+                                count,
+                                rag_root.display()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!("RAG bootstrap indexing failed: {e}");
+                        }
+                    }
+                }
+            });
+        }
 
         // Initialize context selection state (files checked in Files panel).
         cx.set_global(AppContextSelection(
@@ -2477,6 +2503,31 @@ impl HiveWorkspace {
             text
         };
 
+        // Budget enforcement: block sends when daily/monthly limit exceeded.
+        if cx.has_global::<AppAiService>() {
+            let tracker = cx.global::<AppAiService>().0.cost_tracker();
+            if tracker.is_daily_budget_exceeded() {
+                self.chat_service.update(cx, |svc, cx| {
+                    svc.set_error(
+                        "Daily cost budget exceeded. Adjust your limit in Settings → Costs."
+                            .to_string(),
+                        cx,
+                    );
+                });
+                return;
+            }
+            if tracker.is_monthly_budget_exceeded() {
+                self.chat_service.update(cx, |svc, cx| {
+                    svc.set_error(
+                        "Monthly cost budget exceeded. Adjust your limit in Settings → Costs."
+                            .to_string(),
+                        cx,
+                    );
+                });
+                return;
+            }
+        }
+
         // --- /swarm command intercept ------------------------------------------
         // `/swarm <goal>` dispatches the Queen meta-coordinator instead of the
         // normal chat flow.
@@ -2518,6 +2569,46 @@ impl HiveWorkspace {
             let rag_service = cx.has_global::<AppRagService>()
                 .then(|| cx.global::<AppRagService>().0.clone());
 
+            // Optionally attach activity service for task event bridging.
+            let activity_service = cx.has_global::<AppActivityService>()
+                .then(|| cx.global::<AppActivityService>().0.clone());
+
+            // Optionally create a BudgetEnforcer from the user's config limits.
+            let budget_enforcer = if cx.has_global::<AppConfig>() {
+                let cfg = cx.global::<AppConfig>().0.get();
+                if cfg.daily_budget_usd > 0.0 || cfg.monthly_budget_usd > 0.0 {
+                    // Open a lightweight activity log for budget queries.
+                    let log_path = hive_core::config::HiveConfig::base_dir()
+                        .map(|d| d.join("activity.db"))
+                        .unwrap_or_else(|_| std::path::PathBuf::from("activity.db"));
+                    if let Ok(log) = hive_agents::ActivityLog::open(&log_path) {
+                        let budget_config = hive_agents::BudgetConfig {
+                            global_daily_limit_usd: if cfg.daily_budget_usd > 0.0 {
+                                Some(cfg.daily_budget_usd)
+                            } else {
+                                None
+                            },
+                            global_monthly_limit_usd: if cfg.monthly_budget_usd > 0.0 {
+                                Some(cfg.monthly_budget_usd)
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        };
+                        Some(Arc::new(hive_agents::BudgetEnforcer::new(
+                            budget_config,
+                            Arc::new(log),
+                        )))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let model_for_exec = model.clone();
             let chat_svc = self.chat_service.downgrade();
             cx.spawn(async move |_this, app: &mut AsyncApp| {
@@ -2547,6 +2638,12 @@ impl HiveWorkspace {
                 }
                 if let Some(rag) = rag_service.clone() {
                     queen = queen.with_rag(rag);
+                }
+                if let Some(ref activity) = activity_service {
+                    queen = queen.with_activity(activity.clone());
+                }
+                if let Some(ref budget) = budget_enforcer {
+                    queen = queen.with_budget(budget.clone());
                 }
 
                 let result_text = match queen.execute(&goal).await {
@@ -2882,8 +2979,11 @@ impl HiveWorkspace {
 
             // Inject user-selected context files (checked in Files panel).
             if !context_files.is_empty() {
+                let use_toon = ctx_format == hive_ai::ContextFormat::Toon;
                 let use_xml = ctx_format == hive_ai::ContextFormat::Xml;
-                let mut ctx_block = if use_xml {
+                let mut ctx_block = if use_toon {
+                    String::from("context_files:\n")
+                } else if use_xml {
                     String::from("<context_files>\n")
                 } else {
                     String::from("# Selected Context Files\n\n")
@@ -2898,7 +2998,16 @@ impl HiveWorkspace {
                         .and_then(|e| e.to_str())
                         .unwrap_or("");
                     let tokens = content.len().div_ceil(4);
-                    if use_xml {
+                    if use_toon {
+                        // TOON: compact file{path,tokens}:content format
+                        ctx_block.push_str(&format!(
+                            "  file{{path:{},ext:{},tok:{}}}\n{}\n---\n",
+                            rel.display(),
+                            ext,
+                            tokens,
+                            content
+                        ));
+                    } else if use_xml {
                         ctx_block.push_str(&format!(
                             "<file path=\"{}\" tokens=\"{}\"><![CDATA[{}]]></file>\n",
                             rel.display(),
@@ -3319,6 +3428,13 @@ impl HiveWorkspace {
         if cx.has_global::<AppUpdater>() {
             let info = cx.global::<AppUpdater>().0.available_update();
             self.status_bar.update_available = info.map(|i| i.version);
+        }
+
+        // -- Notification tray: sync from agent notification service --
+        if cx.has_global::<AppAgentNotifications>() {
+            let svc = &cx.global::<AppAgentNotifications>().0;
+            self.status_bar.notification_tray.unread_count = svc.unread_count();
+            self.status_bar.notification_tray.notifications = svc.all();
         }
 
         // -- Discovery: periodic scan + connectivity update --
@@ -5816,6 +5932,44 @@ impl HiveWorkspace {
             }
         }
         cx.notify();
+    }
+
+    fn handle_files_set_search_query(
+        &mut self,
+        action: &FilesSetSearchQuery,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.files_data.search_query = action.query.clone();
+        self.files_data.semantic_results.clear();
+
+        // If filename filtering yields nothing, fall back to semantic search.
+        if !action.query.trim().is_empty()
+            && self.files_data.filtered_sorted_entries().is_empty()
+            && cx.has_global::<AppSemanticSearch>()
+        {
+            if let Ok(mut semantic) = cx.global::<AppSemanticSearch>().0.lock() {
+                self.files_data.run_semantic_search(&mut semantic);
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn handle_chat_read_aloud(
+        &mut self,
+        action: &ChatReadAloud,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if cx.has_global::<AppTts>() {
+            let tts = cx.global::<AppTts>().0.clone();
+            let text = action.content.clone();
+            cx.spawn(async move |_this, _app: &mut AsyncApp| {
+                let _ = tts.speak(&text).await;
+            })
+            .detach();
+        }
     }
 
     fn handle_apply_code_block(
@@ -10146,6 +10300,16 @@ impl HiveWorkspace {
             azure: cx.global::<AppAzure>().0.clone(),
             gcp: cx.global::<AppGcp>().0.clone(),
             docs_indexer,
+            google_drive: None,
+            google_sheets: None,
+            google_docs: None,
+            google_tasks: None,
+            google_contacts: None,
+            bitbucket: Some(cx.global::<AppBitbucket>().0.clone()),
+            gitlab: Some(cx.global::<AppGitLab>().0.clone()),
+            webhooks: Arc::new(std::sync::Mutex::new(
+                hive_integrations::webhooks::WebhookRegistry::new(),
+            )),
         };
         cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
     }
@@ -10929,6 +11093,57 @@ impl HiveWorkspace {
         .detach();
     }
 
+    /// Handle the AccountDisconnectPlatform action — removes OAuth token and
+    /// connected account entry for the specified platform.
+    fn handle_account_disconnect_platform(
+        &mut self,
+        action: &AccountDisconnectPlatform,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let platform_str = action.platform.clone();
+        let Some(platform) = hive_core::config::AccountPlatform::parse_platform(&platform_str) else {
+            warn!("OAuth disconnect: unknown platform '{platform_str}'");
+            return;
+        };
+
+        info!("OAuth: disconnecting {platform_str}");
+
+        if cx.has_global::<AppConfig>() {
+            let cfg = &cx.global::<AppConfig>().0;
+            let _ = cfg.remove_oauth_token(platform);
+            let _ = cfg.remove_connected_account(platform);
+        }
+
+        // Clear tokens from the assistant service so providers stop using them.
+        if cx.has_global::<AppAssistant>() {
+            let assistant = &mut cx.global_mut::<AppAssistant>().0;
+            match platform {
+                hive_core::config::AccountPlatform::Google => {
+                    assistant.set_gmail_token(String::new());
+                    assistant.set_google_calendar_token(String::new());
+                }
+                hive_core::config::AccountPlatform::Microsoft => {
+                    assistant.set_outlook_token(String::new());
+                    assistant.set_outlook_calendar_token(String::new());
+                }
+                _ => {}
+            }
+        }
+
+        if cx.has_global::<AppNotifications>() {
+            cx.global_mut::<AppNotifications>().0.push(
+                AppNotification::new(
+                    NotificationType::Info,
+                    format!("{platform_str} account disconnected."),
+                )
+                .with_title("Account Disconnected"),
+            );
+        }
+
+        info!("OAuth: successfully disconnected {platform_str}");
+    }
+
     /// Extract the `code` parameter from an HTTP GET request line.
     fn extract_oauth_code(request: &str) -> Option<String> {
         let first_line = request.lines().next()?;
@@ -11430,6 +11645,8 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_files_close_viewer))
             .on_action(cx.listener(Self::handle_files_toggle_check))
             .on_action(cx.listener(Self::handle_files_clear_checked))
+            .on_action(cx.listener(Self::handle_files_set_search_query))
+            .on_action(cx.listener(Self::handle_chat_read_aloud))
             // Apply mode + clipboard
             .on_action(cx.listener(Self::handle_apply_code_block))
             .on_action(cx.listener(Self::handle_apply_all_edits))
@@ -11559,6 +11776,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_agents_run_workflow))
             // Connected Accounts
             .on_action(cx.listener(Self::handle_account_connect_platform))
+            .on_action(cx.listener(Self::handle_account_disconnect_platform))
             // Voice
             .on_action(cx.listener(Self::handle_voice_process_text))
             // Auto-update

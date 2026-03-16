@@ -638,6 +638,30 @@ impl ChatService {
                 let usage = final_usage;
                 let _ = this.update(app, |this: &mut ChatService, cx| {
                     this.finalize_stream(assistant_idx, &accumulated, &model_clone, usage.as_ref());
+
+                    // Shield: scan incoming AI response for PII / secrets.
+                    let shield_enabled = if cx.has_global::<crate::AppConfig>() {
+                        cx.global::<crate::AppConfig>().0.get().shield_enabled
+                    } else {
+                        true
+                    };
+                    if shield_enabled && cx.has_global::<crate::AppShield>() {
+                        let shield = &cx.global::<crate::AppShield>().0;
+                        let result = shield.process_incoming(&accumulated);
+                        match result.action {
+                            hive_shield::ShieldAction::CloakAndAllow(ref cloaked) => {
+                                if let Some(msg) = this.messages.get_mut(assistant_idx) {
+                                    info!("Shield: PII cloaked in incoming AI response");
+                                    msg.content = cloaked.text.clone();
+                                }
+                            }
+                            hive_shield::ShieldAction::Warn(ref warning) => {
+                                warn!("Shield: warning on incoming AI response: {warning}");
+                            }
+                            _ => {} // Allow or Block (we don't block incoming, just cloak)
+                        }
+                    }
+
                     this.emit_stream_completed(&model_clone, cx);
                     cx.notify();
                 });
@@ -717,6 +741,7 @@ impl ChatService {
                     if !is_tool_use {
                         // Normal end — finalize the assistant message.
                         let m = model_clone.clone();
+                        let acc_clone = accumulated.clone();
                         let _ = this.update(app, |svc: &mut ChatService, cx| {
                             svc.finalize_stream(
                                 current_assistant_idx,
@@ -724,6 +749,30 @@ impl ChatService {
                                 &m,
                                 final_usage.as_ref(),
                             );
+
+                            // Shield: scan incoming AI response for PII / secrets.
+                            let shield_enabled = if cx.has_global::<crate::AppConfig>() {
+                                cx.global::<crate::AppConfig>().0.get().shield_enabled
+                            } else {
+                                true
+                            };
+                            if shield_enabled && cx.has_global::<crate::AppShield>() {
+                                let shield = &cx.global::<crate::AppShield>().0;
+                                let result = shield.process_incoming(&acc_clone);
+                                match result.action {
+                                    hive_shield::ShieldAction::CloakAndAllow(ref cloaked) => {
+                                        if let Some(msg) = svc.messages.get_mut(current_assistant_idx) {
+                                            info!("Shield: PII cloaked in incoming AI response");
+                                            msg.content = cloaked.text.clone();
+                                        }
+                                    }
+                                    hive_shield::ShieldAction::Warn(ref warning) => {
+                                        warn!("Shield: warning on incoming AI response: {warning}");
+                                    }
+                                    _ => {}
+                                }
+                            }
+
                             svc.emit_stream_completed(&m, cx);
                             cx.notify();
                         });

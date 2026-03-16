@@ -11,6 +11,8 @@ hive_fs = { path = "../hive_fs" }
 hive_integrations = { path = "../hive_integrations" }
 hive_learn = { path = "../hive_learn" }
 hive_terminal = { path = "../hive_terminal" }
+hive_docs = { path = "../hive_docs" }
+hive_blockchain = { path = "../hive_blockchain" }
 
 async-trait.workspace = true
 tokio.workspace = true

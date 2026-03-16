@@ -332,3 +332,27 @@ pub struct AppReminderRx(
     pub Arc<Mutex<std::sync::mpsc::Receiver<Vec<hive_assistant::reminders::TriggeredReminder>>>>,
 );
 impl Global for AppReminderRx {}
+
+/// Global wrapper for the activity event bus (agent events, cost tracking, persistence).
+pub struct AppActivityService(pub Arc<hive_agents::ActivityService>);
+impl Global for AppActivityService {}
+
+/// Global wrapper for the agent notification service (approval requests, budget warnings).
+pub struct AppAgentNotifications(pub Arc<hive_agents::NotificationService>);
+impl Global for AppAgentNotifications {}
+
+/// Global wrapper for the heartbeat scheduler (periodic agent health checks).
+pub struct AppHeartbeatScheduler(pub Arc<hive_agents::HeartbeatScheduler>);
+impl Global for AppHeartbeatScheduler {}
+
+/// Global wrapper for the approval gate (rule-based operation approval for agents).
+pub struct AppApprovalGate(pub Arc<hive_agents::ApprovalGate>);
+impl Global for AppApprovalGate {}
+
+/// Global wrapper for detected local AI providers (Ollama, LM Studio, etc.).
+///
+/// Populated asynchronously by the `local-ai-detect` background thread.
+/// Initially set to an empty vec; updated once detection completes.
+/// Uses `Arc<Mutex<_>>` so the background thread can write results directly.
+pub struct AppLocalAiDetection(pub Arc<Mutex<Vec<hive_terminal::local_ai::LocalProviderInfo>>>);
+impl Global for AppLocalAiDetection {}
