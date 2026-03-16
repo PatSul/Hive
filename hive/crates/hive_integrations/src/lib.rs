@@ -1,6 +1,5 @@
 pub mod bitbucket;
 pub mod browser;
-pub mod clawdtalk;
 pub mod cloud;
 pub mod database;
 pub mod docker;
@@ -21,7 +20,7 @@ pub mod webhooks;
 
 pub use bitbucket::BitbucketClient;
 pub use browser::BrowserAutomation;
-pub use cloud::{AwsClient, AzureClient, CloudflareClient, GcpClient, SupabaseClient, VercelClient};
+pub use cloud::{AwsClient, AzureClient, GcpClient};
 pub use database::{DatabaseHub, DatabaseProvider, DatabaseType};
 pub use gitlab::GitLabClient;
 pub use github::GitHubClient;
