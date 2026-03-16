@@ -28,11 +28,21 @@ Users must manually notice quality problems, manually rewrite prompts, and manua
 
 ## Approach
 
-New `AutoResearchEngine` in `hive_learn` that orchestrates existing components (`PromptEvolver`, `LearningStorage`, `SkillMarketplace::scan_for_injection`) plus new focused structs (`EvalSuite`, `EvalRunner`, `PromptMutator`). Each piece is small, independently testable, and composed by the engine into the improvement loop.
+New `AutoResearchEngine` in `hive_learn` that orchestrates existing components (`PromptEvolver`, `LearningStorage`) plus new focused structs (`EvalSuite`, `EvalRunner`, `PromptMutator`). Each piece is small, independently testable, and composed by the engine into the improvement loop.
 
 Alternatives considered:
 - **Extend PromptEvolver directly:** Rejected — makes PromptEvolver a god struct
 - **Agent-based via HiveMind:** Rejected — over-engineered for a tight loop
+
+### Dependency Resolution
+
+`hive_agents` already depends on `hive_learn`, so `hive_learn` cannot depend on `hive_agents` (circular dependency). This affects two items:
+
+1. **`AiExecutor` trait:** Define a local `AutoResearchExecutor` trait in `hive_learn` with the same async `execute(&ChatRequest) -> Result<ChatResponse, String>` signature. The engine is generic over this trait. Callers in `hive_agents` can provide a thin adapter that delegates to their `AiExecutor`. This is a one-method trait — the duplication is trivial.
+
+2. **`SkillMarketplace::scan_for_injection`:** The security scan logic is pure string matching (regex patterns). Extract the scan function into `hive_learn::autoresearch::security` as a standalone `fn scan_prompt_for_injection(prompt: &str) -> Vec<SecurityIssue>`. This is ~30 lines of regex checks. `SkillMarketplace` can later call this function too (dedup), but that's a separate cleanup.
+
+This keeps the engine entirely in `hive_learn` with zero new inter-crate dependencies beyond what `hive_learn` already has (`hive_ai` for `ChatRequest`/`ChatResponse` types).
 
 ## Component Architecture
 
@@ -78,6 +88,44 @@ pub enum EvalSource {
 
 Eval suites are hybrid: skills can define explicit `[[eval]]` questions in TOML, and missing evals are auto-generated from the skill description via AI. Explicit questions always take priority.
 
+### Skill TOML Eval Schema
+
+The optional `[[eval]]` section in skill TOML definitions:
+
+```toml
+[skill]
+name = "Rust Code Generator"
+trigger = "/hive-rustgen"
+category = "code_generation"
+description = "Generate idiomatic Rust code from natural language descriptions."
+
+[prompt]
+template = "You are an expert Rust developer..."
+
+# Optional: explicit eval criteria for autoresearch
+[[eval]]
+id = "valid_rust"
+question = "Does the output contain syntactically valid Rust code?"
+weight = 2.0
+
+[[eval]]
+id = "idiomatic"
+question = "Does the code follow Rust idioms (Result instead of exceptions, iterators over loops)?"
+weight = 1.0
+
+[[eval]]
+id = "compiles_clean"
+question = "Would the code compile without warnings if dependencies were available?"
+weight = 1.5
+
+[[eval]]
+id = "no_unsafe"
+question = "Does the code avoid unnecessary unsafe blocks?"
+weight = 1.0
+```
+
+All fields are required per entry. `weight` defaults to 1.0 if omitted. Skills without `[[eval]]` sections work normally — the engine auto-generates eval questions from the skill description.
+
 ### Eval Results
 
 ```rust
@@ -122,7 +170,10 @@ pub enum StopReason {
     MaxIterationsReached,
     PerfectScore,
     NoImprovementPlateau { consecutive_failures: u32 },
+    BudgetExhausted { spent: f64, budget: f64 },
     UserCancelled,
+    EmptyEvalSuite,
+    NoBaselinePrompt,
 }
 ```
 
@@ -148,6 +199,7 @@ pub struct AutoResearchConfig {
     // Safety
     pub max_prompt_length: usize,         // default: 2000
     pub cost_budget: Option<f64>,         // optional USD cap
+    pub cost_per_token: f64,              // default: 0.000003 (USD)
     pub require_security_scan: bool,      // default: true
 }
 ```
@@ -159,6 +211,48 @@ Guardrail logic:
 4. Cost budget prevents runaway spend
 5. Security scan on every mutation via `SkillMarketplace::scan_for_injection`
 6. Prompt length cap enforced on mutations
+
+## Persona Key Mapping & Cold Start
+
+`PromptEvolver` keys prompt versions by `persona: &str`. The autoresearch engine maps skill names to persona keys using the pattern `"skill:{skill_name}"` (e.g., `"skill:Rust Code Generator"`). This avoids collisions with agent persona prompts that share the same `PromptEvolver` storage.
+
+**Cold start:** When `PromptEvolver::get_prompt(persona)` returns `None` (no prior version exists), the engine seeds it by calling `PromptEvolver::apply_refinement(persona, &skill.prompt_template)` to create version 1 from the skill's TOML template. This ensures a baseline always exists before eval begins.
+
+**Model resolution:** When `eval_model`, `mutation_model`, or `skill_execution_model` is `None`, the engine passes an empty string as `ChatRequest.model`, matching the existing convention in `SkillAuthoringPipeline` where empty model strings defer to the AI router's default selection based on the request tier.
+
+## Engine Struct
+
+```rust
+pub struct AutoResearchEngine<E> {
+    config: AutoResearchConfig,
+    evolver: PromptEvolver,
+    storage: Arc<LearningStorage>,
+    eval_runner: EvalRunner<E>,
+    mutator: PromptMutator<E>,
+    accumulated_cost: f64,
+    best_version: Option<u32>,
+}
+```
+
+The engine owns the config, shares storage with `PromptEvolver` via `Arc`, and is generic over `E: AutoResearchExecutor`. `accumulated_cost` is tracked per-run and `best_version` stores the `u32` returned by `PromptEvolver::apply_refinement` for the winning prompt.
+
+## Cost Accounting
+
+Cost is derived from `ChatResponse.usage.total_tokens` after each AI call, using a configurable `cost_per_token: f64` field on `AutoResearchConfig` (default: `0.000003` — roughly Claude Haiku pricing). The engine maintains a running `accumulated_cost` that is checked after every AI call (not just at iteration boundaries) to prevent budget overshoot. When `cost_budget` is `Some(budget)` and `accumulated_cost >= budget`, the loop stops immediately with `StopReason::BudgetExhausted`.
+
+## Partial Sample Failure Handling
+
+When running `eval_samples_per_iteration` samples, individual sample failures (AI call errors, JSON parse failures from the judge) are handled as follows:
+
+- **Failed samples are skipped** and the pass rate is averaged over successful samples only.
+- **If all samples in an iteration fail**, the iteration is treated as a failed eval with `pass_rate = 0.0` and counts as a plateau tick.
+- **If more than half the samples fail**, a warning is logged but the iteration still proceeds with the available data.
+
+This is the most forgiving strategy and avoids aborting the entire autoresearch run due to transient API errors.
+
+## Empty Eval Suite Handling
+
+If a skill has no explicit `[[eval]]` questions AND the AI auto-generation call fails or returns an empty list, the engine aborts with `StopReason::EmptyEvalSuite` and `iterations_run = 0`. An autoresearch run cannot proceed without at least one eval question. The `AutoResearchReport` captures this cleanly so callers know why it stopped.
 
 ## The Loop
 
@@ -192,8 +286,10 @@ AutoResearchEngine::run(skill_name)
 |     |     +- Average pass rates -> candidate_pass_rate
 |     |
 |     +- 3d. Compare
-|     |     +- If candidate > best + min_improvement_threshold:
+|     |     +- If candidate > best + min_improvement_threshold
+|     |       AND candidate >= min_pass_rate_to_replace:
 |     |     |     +- New best! Apply via PromptEvolver::apply_refinement
+|     |     |     +- Store returned version number as best_version
 |     |     |     +- Reset plateau counter
 |     |     |     +- Record quality via PromptEvolver::record_quality
 |     |     +- Else:
@@ -249,14 +345,16 @@ hive_learn/src/
     mod.rs           -- pub mod declarations, re-exports
     config.rs        -- AutoResearchConfig + Default impl
     engine.rs        -- AutoResearchEngine (the loop orchestrator)
-    eval_suite.rs    -- EvalSuite, EvalQuestion, EvalSource
+    eval_suite.rs    -- EvalSuite, EvalQuestion, EvalSource, TOML parsing
     eval_runner.rs   -- EvalRunner (execute + judge)
     mutator.rs       -- PromptMutator (AI-driven rewrite)
     types.rs         -- EvalResult, EvalRunResult, IterationResult,
                         AutoResearchReport, StopReason
+    security.rs      -- scan_prompt_for_injection (standalone, no hive_agents dep)
+    executor.rs      -- AutoResearchExecutor trait definition
 ```
 
-Seven files, each ~80-150 lines.
+Nine files, each ~60-150 lines.
 
 ### Integration with existing code
 
@@ -264,16 +362,18 @@ Seven files, each ~80-150 lines.
 |---|---|
 | `PromptEvolver` | Versioning, `apply_refinement`, `rollback`, `record_quality` |
 | `LearningStorage` | Logging iterations via `log_learning` |
-| `SkillMarketplace::scan_for_injection` | Security scan on mutated prompts |
-| `hive_ai::types::ChatRequest` | All AI calls use standard request type |
-| `hive_agents::AiExecutor` trait | Engine is generic over `E: AiExecutor` |
+| `hive_ai::types::ChatRequest/ChatResponse` | All AI calls use standard request/response types |
+
+**Not used directly** (avoiding circular dependency):
+- `SkillMarketplace::scan_for_injection` — replaced by local `security::scan_prompt_for_injection`
+- `hive_agents::AiExecutor` — replaced by local `AutoResearchExecutor` trait
 
 ### Changes to existing files
 
 - `hive_learn/src/lib.rs` — add `pub mod autoresearch;`
 - Skill TOML schema — add optional `[[eval]]` section (backward compatible)
 
-No other existing files are modified.
+No other existing files are modified. No new inter-crate dependencies added.
 
 ## Testing Strategy
 
@@ -281,13 +381,15 @@ Unit tests per component using `MockExecutor` (same pattern as `skill_authoring.
 
 | File | Key tests |
 |---|---|
-| `eval_suite.rs` | Parse from TOML, merge explicit + auto-generated, weight normalization, empty suite rejection |
-| `eval_runner.rs` | Pass/fail judgment parsing, averaging across samples, malformed AI response handling, partial pass rates |
+| `eval_suite.rs` | Parse from TOML, merge explicit + auto-generated, weight normalization, empty suite returns error |
+| `eval_runner.rs` | Pass/fail judgment parsing, averaging across samples, malformed AI response handling, partial sample failures (skip failed, average over rest), all-samples-fail yields 0.0 |
 | `mutator.rs` | Prompt rewrite produces different text, respects length limits, includes failing criteria in request |
-| `config.rs` | Default values, serde roundtrip, budget validation |
-| `engine.rs` | Full loop with mocked responses: baseline -> mutation -> improvement -> new best. Plateau stops early. Perfect score stops early. Cost budget stops early. Security scan rejects bad mutation. |
+| `config.rs` | Default values, serde roundtrip, cost_per_token validation |
+| `security.rs` | Injection patterns detected, clean prompts pass, matches `SkillMarketplace::scan_for_injection` behavior |
+| `executor.rs` | Trait definition compiles, mock impl works |
+| `engine.rs` | Full loop with mocked responses: baseline -> mutation -> improvement -> new best. Plateau stops early. Perfect score stops early. Budget exhausted stops mid-iteration. Security scan rejects bad mutation. Cold start seeds PromptEvolver. Empty eval suite aborts with correct StopReason. Version tracking populates best_prompt_version. |
 
-Estimated: ~30-35 new tests. Each file stays well under 1000 lines (no rustc stack overflow risk).
+Estimated: ~35-40 new tests. Each file stays well under 1000 lines (no rustc stack overflow risk).
 
 ## Design Decisions
 
