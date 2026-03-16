@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.30-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.31-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -815,7 +815,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.30 |
+| Version | 0.3.31 |
 | Crates | 21 |
 | Rust source files | 400+ |
 | Lines of Rust | 200,000+ |
@@ -847,6 +847,21 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.31
+
+**Complete Feature Wiring & Dead Code Cleanup**
+
+- **SecretScanner** wired into chat pipeline — warns on detected API keys/tokens before sending
+- **CostTracker** budget enforcement — blocks API calls when daily/monthly limits exceeded
+- **ThinkingIndicator** renders during AI streaming before content arrives
+- **Toast notifications** from NotificationService displayed as overlays
+- **DisclosureLevel** click handlers for progressive message detail (Summary/Steps/Raw)
+- **CapabilityRouter** wired into AiService for intelligent model selection
+- **LocalSearch** (SearXNG) added as MCP tool for privacy-respecting web search
+- **QuickIndex** runs automatically on project directory change
+- **Google/Microsoft OAuth** connection buttons added to settings
+- **Dead code removed**: ClawdTalk phone bridge, unused UI components (SplitPane, ContextAttachment), cloud provider stubs (Cloudflare, Supabase, Vercel) — 1,444 lines deleted
 
 ### v0.3.30
 
