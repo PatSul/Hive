@@ -43,7 +43,7 @@ pub use hive_ui_core::{
     ClearChat, NewConversation,
     SwitchToChat, SwitchToQuickStart, SwitchToHistory, SwitchToFiles, SwitchToCodeMap,
     SwitchToPromptLibrary, SwitchToKanban, SwitchToMonitor,
-    SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
+    SwitchToActivity, SwitchToLogs, SwitchToCosts, SwitchToReview, SwitchToSkills, SwitchToRouting,
     SwitchToModels, SwitchToTokenLaunch, SwitchToSpecs, SwitchToAgents, SwitchToLearning,
     SwitchToShield, SwitchToAssistant, SwitchToSettings, SwitchToNetwork, SwitchToTerminal, SwitchToHelp,
     OpenWorkspaceDirectory,
@@ -264,6 +264,7 @@ pub struct HiveWorkspace {
     token_launch_inputs: TokenLaunchInputs,
     specs_data: SpecPanelData,
     agents_data: AgentsPanelData,
+    activity_data: hive_ui_panels::panels::activity::ActivityData,
     shield_data: ShieldPanelData,
     learning_data: LearningPanelData,
     assistant_data: AssistantPanelData,
@@ -839,6 +840,7 @@ impl HiveWorkspace {
             token_launch_inputs,
             specs_data,
             agents_data,
+            activity_data: Default::default(),
             shield_data,
             learning_data,
             assistant_data,
@@ -3475,6 +3477,10 @@ impl HiveWorkspace {
             }
             Panel::Kanban => KanbanPanel::render(&self.kanban_data, theme).into_any_element(),
             Panel::Monitor => MonitorPanel::render(&self.monitor_data, theme).into_any_element(),
+            Panel::Activity => {
+                hive_ui_panels::panels::activity::ActivityPanel::render(&self.activity_data, theme)
+                    .into_any_element()
+            }
             Panel::Logs => LogsPanel::render(&self.logs_data, theme).into_any_element(),
             Panel::Costs => CostsPanel::render(&self.cost_data, theme).into_any_element(),
             Panel::Review => ReviewPanel::render(&self.review_data, theme).into_any_element(),
@@ -4105,6 +4111,15 @@ impl HiveWorkspace {
         cx: &mut Context<Self>,
     ) {
         self.switch_to_panel(Panel::Monitor, cx);
+    }
+
+    fn handle_switch_to_activity(
+        &mut self,
+        _action: &SwitchToActivity,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.switch_to_panel(Panel::Activity, cx);
     }
 
     fn handle_switch_to_logs(
@@ -11292,6 +11307,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_switch_to_files))
             .on_action(cx.listener(Self::handle_switch_to_kanban))
             .on_action(cx.listener(Self::handle_switch_to_monitor))
+            .on_action(cx.listener(Self::handle_switch_to_activity))
             .on_action(cx.listener(Self::handle_switch_to_logs))
             .on_action(cx.listener(Self::handle_switch_to_costs))
             .on_action(cx.listener(Self::handle_switch_to_review))
@@ -11609,7 +11625,7 @@ impl HiveWorkspace {
                     ))
                     .child(render_sidebar_section(
                         "Observe",
-                        &[Panel::Monitor, Panel::Logs, Panel::Terminal, Panel::Costs, Panel::Shield, Panel::Network],
+                        &[Panel::Monitor, Panel::Activity, Panel::Logs, Panel::Terminal, Panel::Costs, Panel::Shield, Panel::Network],
                         active,
                         theme,
                         cx,
