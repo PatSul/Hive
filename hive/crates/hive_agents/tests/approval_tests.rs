@@ -137,3 +137,39 @@ async fn approval_gate_respond_deny() {
     gate.respond(&pending.unwrap().id, ApprovalDecision::Denied { reason: Some("nope".into()) });
     assert_eq!(gate.pending_count(), 0);
 }
+
+use hive_agents::activity::notification::{NotificationService, NotificationKind};
+
+#[test]
+fn notification_service_push_and_read() {
+    let svc = NotificationService::new();
+    svc.push(NotificationKind::AgentCompleted, "Agent finished task");
+    assert_eq!(svc.unread_count(), 1);
+
+    let items = svc.all();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].summary, "Agent finished task");
+}
+
+#[test]
+fn notification_mark_read() {
+    let svc = NotificationService::new();
+    svc.push(NotificationKind::BudgetWarning, "Budget at 80%");
+    assert_eq!(svc.unread_count(), 1);
+
+    let items = svc.all();
+    svc.mark_read(&items[0].id);
+    assert_eq!(svc.unread_count(), 0);
+}
+
+#[test]
+fn notification_dismiss() {
+    let svc = NotificationService::new();
+    svc.push(NotificationKind::AgentCompleted, "Done");
+    svc.push(NotificationKind::BudgetWarning, "Warning");
+    assert_eq!(svc.all().len(), 2);
+
+    let id = svc.all()[0].id.clone();
+    svc.dismiss(&id);
+    assert_eq!(svc.all().len(), 1);
+}

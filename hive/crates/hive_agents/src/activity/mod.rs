@@ -1,6 +1,7 @@
 pub mod approval;
 pub mod budget;
 pub mod log;
+pub mod notification;
 pub mod rules;
 pub mod types;
 
