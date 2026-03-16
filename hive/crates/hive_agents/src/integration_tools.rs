@@ -169,6 +169,8 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
         (webhook_register_tool(), stub("Webhook registry available — register webhooks via this tool")),
         (webhook_list_tool(), stub("Webhook registry available — list registered webhooks")),
         (webhook_fire_tool(), stub("Webhook registry available — fire events to subscribed webhooks")),
+        // --- Local Search (SearXNG) ---
+        (local_search_tool(), Box::new(handle_local_search) as ToolHandler),
     ]
 }
 
@@ -2683,6 +2685,74 @@ fn webhook_fire_tool() -> McpTool {
             "required": ["event"]
         }),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Local Search (SearXNG) tool definition
+// ---------------------------------------------------------------------------
+
+fn local_search_tool() -> McpTool {
+    McpTool {
+        name: "local_search".into(),
+        description: "Search the web privately using a local SearXNG instance. Returns web results without sending queries to third-party APIs.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Search query" },
+                "max_results": { "type": "integer", "description": "Maximum number of results to return (default 10)" }
+            },
+            "required": ["query"]
+        }),
+    }
+}
+
+fn handle_local_search(args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let query = args["query"]
+        .as_str()
+        .ok_or("query is required")?;
+
+    if query.trim().is_empty() {
+        return Err("query must not be empty".into());
+    }
+
+    let max_results = args["max_results"]
+        .as_u64()
+        .unwrap_or(10) as usize;
+
+    let config = hive_ai::LocalSearchConfig {
+        max_results,
+        ..Default::default()
+    };
+    let svc = hive_ai::LocalSearchService::new(config);
+
+    if !svc.is_available() {
+        return Err(
+            "SearXNG is not running. Start a SearXNG instance (e.g. \
+             `docker run -d -p 8888:8080 searxng/searxng:latest`) \
+             and try again."
+                .into(),
+        );
+    }
+
+    let results = svc.search(query, &[])?;
+
+    let items: Vec<serde_json::Value> = results
+        .iter()
+        .map(|r| {
+            json!({
+                "title": r.title,
+                "url": r.url,
+                "snippet": r.snippet,
+                "engine": r.engine
+            })
+        })
+        .collect();
+
+    Ok(json!({
+        "query": query,
+        "count": items.len(),
+        "results": items
+    }))
 }
 
 // ---------------------------------------------------------------------------
