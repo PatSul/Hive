@@ -94,5 +94,12 @@ pub use tool_use::builtin_registry_with_sandbox;
 pub use worktree::{MergeBranchResult, TeamWorktree, WorktreeManager};
 pub use prompt_template::PromptTemplate;
 pub use response_parser::{ParsedEdit, parse_edits};
-pub use activity::{ActivityEvent, FileOp, OperationType, PauseReason};
+pub use activity::{
+    ActivityEvent, ActivityService, FileOp, OperationType, PauseReason,
+    ActivityLog, ActivityEntry, ActivityFilter, CostSummary,
+    BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction,
+    ApprovalGate, ApprovalDecision, ApprovalRequest,
+    NotificationService, NotificationKind, Notification,
+    ApprovalRule, RuleTrigger,
+};
 pub use heartbeat_scheduler::{HeartbeatMode, HeartbeatScheduler, HeartbeatTask};

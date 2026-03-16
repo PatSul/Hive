@@ -8,6 +8,11 @@ pub mod types;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 pub use types::{ActivityEvent, FileOp, OperationType, PauseReason};
+pub use log::{ActivityLog, ActivityEntry, ActivityFilter, CostSummary};
+pub use budget::{BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction};
+pub use approval::{ApprovalGate, ApprovalDecision, ApprovalRequest};
+pub use notification::{NotificationService, NotificationKind, Notification};
+pub use rules::{ApprovalRule, RuleTrigger};
 
 use crate::coordinator::TaskEvent;
 
