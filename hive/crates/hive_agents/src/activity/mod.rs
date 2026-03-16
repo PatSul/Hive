@@ -1,3 +1,4 @@
+pub mod log;
 pub mod types;
 
 use tokio::sync::broadcast;

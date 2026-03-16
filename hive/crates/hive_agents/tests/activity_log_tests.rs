@@ -1,4 +1,5 @@
 use hive_agents::activity::{ActivityEvent, ActivityService, PauseReason, FileOp};
+use hive_agents::activity::log::{ActivityLog, ActivityFilter};
 
 #[test]
 fn activity_event_serializes_to_json() {
@@ -79,4 +80,63 @@ async fn activity_service_multiple_subscribers() {
     let e2 = rx2.recv().await.unwrap();
     assert_eq!(e1.event_type(), "cost_incurred");
     assert_eq!(e2.event_type(), "cost_incurred");
+}
+
+#[test]
+fn activity_log_insert_and_query() {
+    let log = ActivityLog::open_in_memory().unwrap();
+
+    let event = ActivityEvent::CostIncurred {
+        agent_id: "agent-1".into(),
+        model: "claude-sonnet-4-20250514".into(),
+        input_tokens: 1000,
+        output_tokens: 500,
+        cost_usd: 0.015,
+    };
+    log.record(&event).unwrap();
+
+    let entries = log.query(&ActivityFilter::default()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].event_type, "cost_incurred");
+    assert!((entries[0].cost_usd - 0.015).abs() < 0.001);
+    assert!(entries[0].summary.contains("agent-1"));
+}
+
+#[test]
+fn activity_log_filter_by_category() {
+    let log = ActivityLog::open_in_memory().unwrap();
+
+    log.record(&ActivityEvent::AgentStarted {
+        agent_id: "a".into(), role: "Coder".into(), task_id: None,
+    }).unwrap();
+    log.record(&ActivityEvent::CostIncurred {
+        agent_id: "a".into(), model: "m".into(),
+        input_tokens: 100, output_tokens: 50, cost_usd: 0.01,
+    }).unwrap();
+
+    let filter = ActivityFilter {
+        categories: Some(vec!["cost".into()]),
+        ..Default::default()
+    };
+    let entries = log.query(&filter).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].category, "cost");
+}
+
+#[test]
+fn activity_log_cost_summary() {
+    let log = ActivityLog::open_in_memory().unwrap();
+
+    for i in 0..5 {
+        log.record(&ActivityEvent::CostIncurred {
+            agent_id: if i < 3 { "a".into() } else { "b".into() },
+            model: "claude-sonnet-4-20250514".into(),
+            input_tokens: 1000, output_tokens: 500, cost_usd: 1.0,
+        }).unwrap();
+    }
+
+    let summary = log.cost_summary(None, chrono::Utc::now() - chrono::Duration::hours(1)).unwrap();
+    assert!((summary.total_usd - 5.0).abs() < 0.01);
+    assert_eq!(summary.request_count, 5);
+    assert_eq!(summary.by_agent.len(), 2);
 }
