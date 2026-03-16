@@ -5,6 +5,7 @@ pub mod context_attachment;
 pub mod diff_viewer;
 pub mod message_bubble;
 pub mod model_selector;
+pub mod notification_tray;
 pub mod split_pane;
 pub mod task_tree;
 pub mod thinking_indicator;
