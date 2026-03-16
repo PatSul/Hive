@@ -7,6 +7,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use hive_ui_core::HiveTheme;
 use hive_ui_core::ChatReadAloud;
 use crate::components::markdown::render_markdown;
+use crate::components::thinking_indicator::{ThinkingPhase, render_thinking_indicator};
 use hive_ui_core::WelcomeScreen;
 use hive_ai::MessageRole;
 
@@ -510,6 +511,15 @@ impl ChatPanel {
 
         // Render streaming bubble
         if self.is_streaming {
+            // Show thinking indicator when waiting for content
+            if self.streaming_content.is_empty() {
+                let phase = if self.streaming_thinking.is_some() {
+                    ThinkingPhase::Thinking
+                } else {
+                    ThinkingPhase::Planning
+                };
+                content = content.child(render_thinking_indicator(phase, theme));
+            }
             content = content.child(render_streaming_bubble(
                 &self.streaming_content,
                 self.streaming_thinking.as_deref(),
@@ -572,6 +582,10 @@ impl ChatPanel {
 
         // Streaming bubble (always re-rendered since content changes per frame)
         if is_streaming {
+            // Show thinking indicator when waiting for content
+            if streaming_content.is_empty() {
+                content = content.child(render_thinking_indicator(ThinkingPhase::Thinking, theme));
+            }
             content = content.child(render_streaming_bubble_cached(
                 streaming_content,
                 None,
