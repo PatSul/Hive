@@ -545,6 +545,28 @@ impl ChatService {
         // Clear previous error.
         self.error = None;
 
+        // Budget enforcement: block the send when daily or monthly cost limit
+        // is exceeded. The CostTracker lives inside AppAiService (a GPUI Global).
+        if cx.has_global::<crate::AppAiService>() {
+            let tracker = cx.global::<crate::AppAiService>().0.cost_tracker();
+            if tracker.is_daily_budget_exceeded() {
+                warn!("ChatService: daily cost budget exceeded — blocking send");
+                self.set_error(
+                    "Daily cost budget exceeded. Adjust your limit in Settings \u{2192} Costs.",
+                    cx,
+                );
+                return;
+            }
+            if tracker.is_monthly_budget_exceeded() {
+                warn!("ChatService: monthly cost budget exceeded — blocking send");
+                self.set_error(
+                    "Monthly cost budget exceeded. Adjust your limit in Settings \u{2192} Costs.",
+                    cx,
+                );
+                return;
+            }
+        }
+
         // Shield: scan outgoing message for secrets/credentials.
         let shield_enabled = if cx.has_global::<crate::AppConfig>() {
             cx.global::<crate::AppConfig>().0.get().shield_enabled
