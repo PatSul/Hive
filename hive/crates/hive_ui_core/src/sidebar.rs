@@ -1,6 +1,6 @@
 use gpui_component::IconName;
 
-/// The 26 navigable panels in the application.
+/// The 27 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
@@ -15,6 +15,7 @@ pub enum Panel {
     Channels,
     Kanban,
     Monitor,
+    Activity,
     Logs,
     Costs,
     Review,
@@ -32,7 +33,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 26] = [
+    pub const ALL: [Panel; 27] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
@@ -44,6 +45,7 @@ impl Panel {
         Panel::Channels,
         Panel::Kanban,
         Panel::Monitor,
+        Panel::Activity,
         Panel::Logs,
         Panel::Costs,
         Panel::Review,
@@ -75,6 +77,7 @@ impl Panel {
             Self::Channels => "Channels",
             Self::Kanban => "Kanban",
             Self::Monitor => "Monitor",
+            Self::Activity => "Activity",
             Self::Logs => "Logs",
             Self::Costs => "Costs",
             Self::Review => "Git Ops",
@@ -116,6 +119,7 @@ impl Panel {
             Self::Channels => IconName::Inbox,
             Self::Kanban => IconName::LayoutDashboard,
             Self::Monitor => IconName::Loader,
+            Self::Activity => IconName::Inbox,
             Self::Logs => IconName::File,
             Self::Costs => IconName::ChartPie,
             Self::Review => IconName::Eye,
@@ -151,6 +155,7 @@ impl Panel {
             "Channels" => Self::Channels,
             "Kanban" => Self::Kanban,
             "Monitor" => Self::Monitor,
+            "Activity" => Self::Activity,
             "Logs" => Self::Logs,
             "Costs" => Self::Costs,
             "Review" | "GitOps" => Self::Review,
@@ -184,6 +189,7 @@ impl Panel {
             Self::Channels => "Channels",
             Self::Kanban => "Kanban",
             Self::Monitor => "Monitor",
+            Self::Activity => "Activity",
             Self::Logs => "Logs",
             Self::Costs => "Costs",
             Self::Review => "Review",
@@ -202,7 +208,7 @@ impl Panel {
     }
 }
 
-/// Sidebar component with 25 navigation icon buttons.
+/// Sidebar component with 26 navigation icon buttons.
 pub struct Sidebar {
     pub active_panel: Panel,
 }
