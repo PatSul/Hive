@@ -74,6 +74,8 @@ pub use hive_ui_core::{
     TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSetStep,
     TokenLaunchSelectChain, TokenLaunchSelectWallet,
     SettingsSave, ExportConfig, ImportConfig,
+    ActivityRefresh, ActivityExportCsv, ActivityApprove, ActivityDeny,
+    ActivityExpandEvent, ActivitySetFilter,
     MonitorRefresh, NetworkRefresh,
     TerminalClear, TerminalSubmitCommand, TerminalKill, TerminalRestart,
     ToolApprove, ToolReject,
@@ -6306,6 +6308,84 @@ impl HiveWorkspace {
         cx.notify();
     }
 
+    // -- Activity panel handlers ----------------------------------------------
+
+    fn handle_activity_refresh(
+        &mut self,
+        _action: &ActivityRefresh,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Activity refresh requested");
+        cx.notify();
+    }
+
+    fn handle_activity_approve(
+        &mut self,
+        action: &ActivityApprove,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Activity: approve request_id={}", action.request_id);
+        cx.notify();
+    }
+
+    fn handle_activity_deny(
+        &mut self,
+        action: &ActivityDeny,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        info!("Activity: deny request_id={} reason={}", action.request_id, action.reason);
+        cx.notify();
+    }
+
+    fn handle_activity_expand_event(
+        &mut self,
+        action: &ActivityExpandEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Ok(id) = action.event_id.parse::<i64>() {
+            if !self.activity_data.expanded_events.remove(&id) {
+                self.activity_data.expanded_events.insert(id);
+            }
+            cx.notify();
+        } else {
+            warn!("Activity: invalid event_id '{}'", action.event_id);
+        }
+    }
+
+    fn handle_activity_export_csv(
+        &mut self,
+        _action: &ActivityExportCsv,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        info!("Activity: CSV export requested");
+    }
+
+    fn handle_activity_set_filter(
+        &mut self,
+        action: &ActivitySetFilter,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let categories: Vec<String> = action
+            .categories
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        info!("Activity: set filter categories={:?}", categories);
+        self.activity_data.filter.categories = if categories.is_empty() {
+            None
+        } else {
+            Some(categories)
+        };
+        cx.notify();
+    }
+
     // -- Costs panel handlers ------------------------------------------------
 
     fn handle_costs_export_csv(
@@ -11369,6 +11449,13 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(Self::handle_logs_clear))
             .on_action(cx.listener(Self::handle_logs_set_filter))
             .on_action(cx.listener(Self::handle_logs_toggle_auto_scroll))
+            // Activity
+            .on_action(cx.listener(Self::handle_activity_refresh))
+            .on_action(cx.listener(Self::handle_activity_approve))
+            .on_action(cx.listener(Self::handle_activity_deny))
+            .on_action(cx.listener(Self::handle_activity_expand_event))
+            .on_action(cx.listener(Self::handle_activity_export_csv))
+            .on_action(cx.listener(Self::handle_activity_set_filter))
             // Terminal
             .on_action(cx.listener(Self::handle_terminal_clear))
             .on_action(cx.listener(Self::handle_terminal_submit))
