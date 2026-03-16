@@ -88,3 +88,52 @@ fn rules_sorted_by_priority_descending() {
     assert_eq!(rules[1].name, "mid");
     assert_eq!(rules[2].name, "low");
 }
+
+use hive_agents::activity::approval::{ApprovalGate, ApprovalDecision};
+
+#[tokio::test]
+async fn approval_gate_no_rules_match_proceeds() {
+    let gate = ApprovalGate::new(vec![]);
+    let result = gate.check_with_channel("agent-1", &OperationType::ShellCommand("ls".into()));
+    assert!(result.is_none()); // None = no approval needed
+}
+
+#[tokio::test]
+async fn approval_gate_rule_match_creates_request() {
+    let rules = vec![
+        ApprovalRule {
+            name: "always".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 100,
+        },
+    ];
+    let gate = ApprovalGate::new(rules);
+
+    let pending = gate.check_sync("agent-1", &OperationType::ShellCommand("test".into()));
+    assert!(pending.is_some());
+    let request = pending.unwrap();
+    assert_eq!(request.matched_rule, "always");
+
+    gate.respond(&request.id, ApprovalDecision::Approved);
+    assert_eq!(gate.pending_count(), 0);
+}
+
+#[tokio::test]
+async fn approval_gate_respond_deny() {
+    let rules = vec![
+        ApprovalRule {
+            name: "always".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 100,
+        },
+    ];
+    let gate = ApprovalGate::new(rules);
+
+    let pending = gate.check_sync("agent-1", &OperationType::ShellCommand("test".into()));
+    assert!(pending.is_some());
+
+    gate.respond(&pending.unwrap().id, ApprovalDecision::Denied { reason: Some("nope".into()) });
+    assert_eq!(gate.pending_count(), 0);
+}

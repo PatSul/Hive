@@ -1,3 +1,4 @@
+pub mod approval;
 pub mod budget;
 pub mod log;
 pub mod rules;
