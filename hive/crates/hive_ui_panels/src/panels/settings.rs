@@ -2075,20 +2075,180 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// Build an OAuth authorization URL for a given platform and scopes.
+    ///
+    /// Returns the URL string if a client ID is configured, or `None` if
+    /// the client ID is missing/empty.
+    fn build_oauth_url(
+        client_id: &str,
+        auth_url: &str,
+        token_url: &str,
+        scopes: &[&str],
+    ) -> Option<String> {
+        if client_id.is_empty() {
+            return None;
+        }
+        let config = hive_integrations::OAuthConfig {
+            client_id: client_id.to_string(),
+            client_secret: None,
+            auth_url: auth_url.to_string(),
+            token_url: token_url.to_string(),
+            redirect_uri: "http://127.0.0.1:8742/callback".to_string(),
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+        };
+        let client = hive_integrations::OAuthClient::new(config);
+        let (url, _state) = client.authorization_url();
+        Some(url)
+    }
+
     fn render_connected_accounts_section(&self, cx: &Context<Self>) -> AnyElement {
         use hive_core::config::AccountPlatform;
         let theme = &self.theme;
 
         // Read connected accounts from config
-        let connected = if cx.has_global::<AppConfig>() {
-            cx.global::<AppConfig>()
-                .0
-                .get()
-                .connected_accounts
-                .clone()
+        let cfg = if cx.has_global::<AppConfig>() {
+            cx.global::<AppConfig>().0.get()
         } else {
-            Vec::new()
+            hive_core::HiveConfig::default()
         };
+        let connected = cfg.connected_accounts.clone();
+
+        // --- Quick-connect buttons for Google and Microsoft OAuth ---------
+        let google_connected = connected
+            .iter()
+            .any(|a| a.platform == AccountPlatform::Google);
+        let microsoft_connected = connected
+            .iter()
+            .any(|a| a.platform == AccountPlatform::Microsoft);
+
+        let google_client_id = AccountPlatform::Google
+            .client_id_from_config(&cfg)
+            .unwrap_or_default();
+        let microsoft_client_id = AccountPlatform::Microsoft
+            .client_id_from_config(&cfg)
+            .unwrap_or_default();
+
+        // Pre-build authorization URLs so the on_click closure is cheap
+        let google_auth_url = Self::build_oauth_url(
+            &google_client_id,
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            "https://oauth2.googleapis.com/token",
+            &[
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/calendar.readonly",
+                "https://www.googleapis.com/auth/drive.readonly",
+            ],
+        );
+        let microsoft_auth_url = Self::build_oauth_url(
+            &microsoft_client_id,
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            &["Mail.Read", "Calendars.Read"],
+        );
+
+        let quick_connect_row = {
+            let t = theme.clone();
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(t.space_3)
+                .py(t.space_2)
+                // -- Connect Google Account button --
+                .child({
+                    let has_url = google_auth_url.is_some();
+                    let url = google_auth_url.clone();
+                    let is_connected = google_connected;
+                    div()
+                        .id("oauth-quick-google")
+                        .flex()
+                        .items_center()
+                        .gap(t.space_2)
+                        .px(t.space_3)
+                        .py(t.space_2)
+                        .rounded(t.radius_md)
+                        .bg(if is_connected {
+                            t.bg_tertiary
+                        } else if has_url {
+                            t.accent_cyan
+                        } else {
+                            t.bg_secondary
+                        })
+                        .text_size(t.font_size_sm)
+                        .text_color(if is_connected {
+                            t.accent_green
+                        } else if has_url {
+                            t.bg_primary
+                        } else {
+                            t.text_muted
+                        })
+                        .font_weight(FontWeight::BOLD)
+                        .when(!is_connected && has_url, |el| {
+                            el.cursor_pointer()
+                                .hover(|s| s.opacity(0.85))
+                        })
+                        .on_click(move |_ev, _window, cx| {
+                            if let Some(ref auth_url) = url {
+                                cx.open_url(auth_url);
+                            }
+                        })
+                        .child(if is_connected {
+                            "\u{2705} Google Connected"
+                        } else if has_url {
+                            "\u{1F4E7} Connect Google Account"
+                        } else {
+                            "\u{1F4E7} Google (set Client ID first)"
+                        })
+                })
+                // -- Connect Microsoft Account button --
+                .child({
+                    let has_url = microsoft_auth_url.is_some();
+                    let url = microsoft_auth_url.clone();
+                    let is_connected = microsoft_connected;
+                    div()
+                        .id("oauth-quick-microsoft")
+                        .flex()
+                        .items_center()
+                        .gap(t.space_2)
+                        .px(t.space_3)
+                        .py(t.space_2)
+                        .rounded(t.radius_md)
+                        .bg(if is_connected {
+                            t.bg_tertiary
+                        } else if has_url {
+                            t.accent_cyan
+                        } else {
+                            t.bg_secondary
+                        })
+                        .text_size(t.font_size_sm)
+                        .text_color(if is_connected {
+                            t.accent_green
+                        } else if has_url {
+                            t.bg_primary
+                        } else {
+                            t.text_muted
+                        })
+                        .font_weight(FontWeight::BOLD)
+                        .when(!is_connected && has_url, |el| {
+                            el.cursor_pointer()
+                                .hover(|s| s.opacity(0.85))
+                        })
+                        .on_click(move |_ev, _window, cx| {
+                            if let Some(ref auth_url) = url {
+                                cx.open_url(auth_url);
+                            }
+                        })
+                        .child(if is_connected {
+                            "\u{2705} Microsoft Connected"
+                        } else if has_url {
+                            "\u{1F4AC} Connect Microsoft Account"
+                        } else {
+                            "\u{1F4AC} Microsoft (set Client ID first)"
+                        })
+                })
+                .into_any_element()
+        };
+        // --- End quick-connect buttons -----------------------------------
 
         let platforms = AccountPlatform::ALL;
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -2267,6 +2427,8 @@ impl SettingsView {
                 "Link external services for calendar, email, repos, and messaging integration. Provide your own OAuth Client ID for each platform.",
                 theme,
             ))
+            .child(separator(theme))
+            .child(quick_connect_row)
             .child(separator(theme))
             .children(rows)
             .into_any_element()
