@@ -33,6 +33,16 @@ pub struct ApprovalGate {
     response_channels: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
 }
 
+impl std::fmt::Debug for ApprovalGate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let pending_count = self.pending.lock().map(|p| p.len()).unwrap_or(0);
+        f.debug_struct("ApprovalGate")
+            .field("rules", &self.rules.len())
+            .field("pending", &pending_count)
+            .finish()
+    }
+}
+
 impl ApprovalGate {
     pub fn new(mut rules: Vec<ApprovalRule>) -> Self {
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));

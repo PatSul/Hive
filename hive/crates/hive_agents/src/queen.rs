@@ -13,7 +13,9 @@ use std::time::Instant;
 
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelTier};
 
+use crate::activity::approval::ApprovalGate;
 use crate::activity::budget::BudgetEnforcer;
+use crate::activity::notification::{NotificationKind, NotificationService};
 use crate::activity::ActivityService;
 use crate::collective_memory::{CollectiveMemory, MemoryCategory, MemoryEntry};
 use crate::coordinator::{Coordinator, CoordinatorConfig, CoordinatorResult};
@@ -61,6 +63,10 @@ pub struct Queen<E: AiExecutor> {
     activity: Option<Arc<ActivityService>>,
     /// Optional budget enforcer for pre-flight cost checks (propagated to Coordinator).
     budget: Option<Arc<BudgetEnforcer>>,
+    /// Optional notification service for pushing user-visible alerts on key events.
+    notifications: Option<Arc<NotificationService>>,
+    /// Optional approval gate for high-risk task gating (propagated to Coordinator).
+    approval: Option<Arc<ApprovalGate>>,
     /// Accumulated cost stored as the bit-pattern of an f64 so we can use
     /// atomic operations without a mutex.
     accumulated_cost: AtomicU64,
@@ -77,6 +83,8 @@ impl<E: AiExecutor + 'static> Queen<E> {
             rag: None,
             activity: None,
             budget: None,
+            notifications: None,
+            approval: None,
             accumulated_cost: AtomicU64::new(0f64.to_bits()),
         }
     }
@@ -108,6 +116,18 @@ impl<E: AiExecutor + 'static> Queen<E> {
     /// Attach a budget enforcer for pre-flight cost checks in Coordinator teams.
     pub fn with_budget(mut self, budget: Arc<BudgetEnforcer>) -> Self {
         self.budget = Some(budget);
+        self
+    }
+
+    /// Attach a notification service for pushing user-visible alerts on key events.
+    pub fn with_notifications(mut self, notifications: Arc<NotificationService>) -> Self {
+        self.notifications = Some(notifications);
+        self
+    }
+
+    /// Attach an approval gate for high-risk task gating in Coordinator teams.
+    pub fn with_approval(mut self, approval: Arc<ApprovalGate>) -> Self {
+        self.approval = Some(approval);
         self
     }
 
@@ -307,6 +327,34 @@ impl<E: AiExecutor + 'static> Queen<E> {
 
         self.emit_status(status, "Swarm execution finished");
 
+        // Push a summary notification for the overall swarm result.
+        match status {
+            SwarmStatus::Complete => {
+                self.notify(
+                    NotificationKind::AgentCompleted,
+                    &format!(
+                        "Swarm completed: {} teams succeeded (${:.4}, {:.1}s)",
+                        completed, total_cost, total_duration_ms as f64 / 1000.0,
+                    ),
+                );
+            }
+            SwarmStatus::PartialSuccess => {
+                self.notify(
+                    NotificationKind::BudgetWarning,
+                    &format!(
+                        "Swarm partial success: {completed} completed, {failed} failed (${total_cost:.4})",
+                    ),
+                );
+            }
+            SwarmStatus::Failed => {
+                self.notify(
+                    NotificationKind::AgentFailed,
+                    &format!("Swarm failed: all {failed} teams failed (${total_cost:.4})"),
+                );
+            }
+            _ => {}
+        }
+
         Ok(SwarmResult {
             run_id,
             goal: goal.to_string(),
@@ -356,6 +404,14 @@ impl<E: AiExecutor + 'static> Queen<E> {
             // Budget enforcement.
             if self.current_cost() >= self.config.total_cost_limit_usd {
                 self.emit_status(SwarmStatus::BudgetExceeded, "Swarm budget exceeded");
+                self.notify(
+                    NotificationKind::BudgetExhausted,
+                    &format!(
+                        "Swarm budget exhausted (${:.2}/{:.2}). Remaining teams skipped.",
+                        self.current_cost(),
+                        self.config.total_cost_limit_usd,
+                    ),
+                );
                 for team in &remaining {
                     results.push(TeamResult {
                         team_id: team.id.clone(),
@@ -464,22 +520,51 @@ impl<E: AiExecutor + 'static> Queen<E> {
                             SwarmStatus::TeamCompleted,
                             &format!("Team '{}' completed", objective.name),
                         );
+                        self.notify(
+                            NotificationKind::AgentCompleted,
+                            &format!(
+                                "Team '{}' completed in {:.1}s (${:.4})",
+                                objective.name,
+                                result.duration_ms as f64 / 1000.0,
+                                result.cost,
+                            ),
+                        );
                     }
                     TeamStatus::Failed => {
                         failed_ids.insert(result.team_id.clone());
+                        let err_msg = result.error.as_deref().unwrap_or("unknown error");
                         self.emit_status(
                             SwarmStatus::TeamFailed,
-                            &format!(
-                                "Team '{}' failed: {}",
-                                objective.name,
-                                result.error.as_deref().unwrap_or("unknown error")
-                            ),
+                            &format!("Team '{}' failed: {}", objective.name, err_msg),
+                        );
+                        self.notify(
+                            NotificationKind::AgentFailed,
+                            &format!("Team '{}' failed: {}", objective.name, err_msg),
                         );
                     }
                     _ => {}
                 }
 
                 self.add_cost(result.cost);
+
+                // Emit a budget warning when cost crosses 80% of the limit.
+                let cost_now = self.current_cost();
+                let threshold = self.config.total_cost_limit_usd * 0.8;
+                if threshold > 0.0
+                    && cost_now >= threshold
+                    && (cost_now - result.cost) < threshold
+                {
+                    self.notify(
+                        NotificationKind::BudgetWarning,
+                        &format!(
+                            "Swarm budget at {:.0}% (${:.2}/{:.2})",
+                            (cost_now / self.config.total_cost_limit_usd) * 100.0,
+                            cost_now,
+                            self.config.total_cost_limit_usd,
+                        ),
+                    );
+                }
+
                 results.push(result);
             }
         }
@@ -610,6 +695,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
             pipeline: Some(crate::pipeline::PipelineConfig::default()),
             rag: self.rag.clone(),
             budget: self.budget.clone(),
+            approval: self.approval.clone(),
         };
 
         // Build a simple TaskPlan from the objective description.
@@ -963,6 +1049,13 @@ impl<E: AiExecutor + 'static> Queen<E> {
     fn emit_status(&self, status: SwarmStatus, detail: &str) {
         if let Some(ref cb) = self.status_callback {
             cb(status, detail);
+        }
+    }
+
+    /// Push a notification to the user if the notification service is attached.
+    fn notify(&self, kind: NotificationKind, summary: &str) {
+        if let Some(ref svc) = self.notifications {
+            svc.push(kind, summary);
         }
     }
 

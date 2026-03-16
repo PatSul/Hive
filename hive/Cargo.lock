@@ -5437,6 +5437,7 @@ version = "0.3.30"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
+ "chrono",
  "gpui",
  "gpui-component",
  "hive_a2a",

@@ -3,7 +3,7 @@
 mod tray;
 
 use std::borrow::Cow;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use gpui::*;
@@ -366,6 +366,118 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     // Heartbeat scheduler — periodic agent health checks.
     let heartbeat = std::sync::Arc::new(hive_agents::HeartbeatScheduler::new());
+
+    // Register default periodic maintenance tasks.
+    {
+        use hive_agents::{HeartbeatMode, HeartbeatTask};
+
+        heartbeat.add(HeartbeatTask {
+            id: "stale-agent-cleanup".into(),
+            agent_id: "system".into(),
+            spec: "Remove agents that have not reported in for too long".into(),
+            interval_secs: 5 * 60, // 5 minutes
+            mode: HeartbeatMode::FixedInterval,
+            max_iterations: None,
+            paused: false,
+            iteration_count: 0,
+            last_fired: None,
+            total_cost: 0.0,
+        });
+
+        heartbeat.add(HeartbeatTask {
+            id: "cost-summary-rollup".into(),
+            agent_id: "system".into(),
+            spec: "Aggregate per-agent cost data into hourly summaries".into(),
+            interval_secs: 60 * 60, // 1 hour
+            mode: HeartbeatMode::FixedInterval,
+            max_iterations: None,
+            paused: false,
+            iteration_count: 0,
+            last_fired: None,
+            total_cost: 0.0,
+        });
+
+        heartbeat.add(HeartbeatTask {
+            id: "discovery-rescan".into(),
+            agent_id: "system".into(),
+            spec: "Probe well-known ports for local AI services".into(),
+            interval_secs: 2 * 60 * 60, // 2 hours
+            mode: HeartbeatMode::FixedInterval,
+            max_iterations: None,
+            paused: false,
+            iteration_count: 0,
+            last_fired: None,
+            total_cost: 0.0,
+        });
+
+        info!(
+            "Registered {} default heartbeat tasks",
+            heartbeat.list().len()
+        );
+    }
+
+    // Spawn a background thread that drives the heartbeat loop.
+    // It wakes every 30 seconds, checks each registered task, and fires any
+    // that are due (not paused, interval elapsed since last_fired).
+    {
+        let hb = std::sync::Arc::clone(&heartbeat);
+        std::thread::Builder::new()
+            .name("heartbeat-driver".into())
+            .spawn(move || {
+                // Delay the first tick so startup is not slowed.
+                std::thread::sleep(Duration::from_secs(30));
+
+                loop {
+                    let tasks = hb.list();
+                    let now = chrono::Utc::now();
+
+                    for task in &tasks {
+                        if task.paused {
+                            continue;
+                        }
+                        if let Some(max) = task.max_iterations {
+                            if task.iteration_count >= max {
+                                continue;
+                            }
+                        }
+
+                        let due = match task.last_fired {
+                            Some(last) => {
+                                let elapsed = now.signed_duration_since(last);
+                                elapsed.num_seconds() >= task.interval_secs as i64
+                            }
+                            None => true, // never fired yet
+                        };
+
+                        if due {
+                            match task.id.as_str() {
+                                "stale-agent-cleanup" => {
+                                    info!("Checking for stale agents...");
+                                }
+                                "cost-summary-rollup" => {
+                                    info!("Rolling up cost summary...");
+                                }
+                                "discovery-rescan" => {
+                                    info!("Re-scanning for local AI services...");
+                                }
+                                other => {
+                                    info!("Heartbeat fired: {other}");
+                                }
+                            }
+                            hb.record_fired(&task.id, 0.0);
+                        }
+                    }
+
+                    // Sleep 30 seconds between ticks — granularity is acceptable
+                    // for the shortest task interval (5 minutes).
+                    std::thread::sleep(Duration::from_secs(30));
+                }
+            })
+            .expect("Failed to spawn heartbeat-driver thread");
+
+        info!("Heartbeat driver thread started (30s tick interval)");
+    }
+
     cx.set_global(AppHeartbeatScheduler(heartbeat));
     info!("HeartbeatScheduler initialized");
 

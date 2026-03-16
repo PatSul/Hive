@@ -13,7 +13,9 @@ use tokio::sync::broadcast;
 use hive_ai::rag::RagService;
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
+use crate::activity::approval::{ApprovalDecision, ApprovalGate};
 use crate::activity::budget::{BudgetDecision, BudgetEnforcer};
+use crate::activity::OperationType;
 
 use crate::hivemind::{AiExecutor, default_model_for_tier};
 use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona_model};
@@ -50,6 +52,18 @@ pub enum TaskEvent {
         duration_ms: u64,
         cost: f64,
         output_preview: String,
+    },
+    /// A task is waiting for user approval before execution.
+    TaskApprovalPending {
+        task_id: String,
+        request_id: String,
+        operation: String,
+        rule: String,
+    },
+    /// A task was denied by the user and will not execute.
+    TaskDenied {
+        task_id: String,
+        reason: Option<String>,
     },
     /// A task failed with an error.
     TaskFailed {
@@ -101,6 +115,9 @@ pub struct CoordinatorConfig {
     /// Optional budget enforcer for pre-flight cost checks.
     #[serde(skip)]
     pub budget: Option<Arc<BudgetEnforcer>>,
+    /// Optional approval gate for high-risk task gating.
+    #[serde(skip)]
+    pub approval: Option<Arc<ApprovalGate>>,
 }
 
 impl Default for CoordinatorConfig {
@@ -113,6 +130,7 @@ impl Default for CoordinatorConfig {
             pipeline: None,
             rag: None,
             budget: None,
+            approval: None,
         }
     }
 }
@@ -457,6 +475,85 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                     }
                 }
 
+                // Approval gate: check if the task requires user approval.
+                // We classify the task description into an OperationType and
+                // consult the ApprovalGate rules. If approval is required, we
+                // await the user's response via the oneshot channel.
+                if let Some(ref gate) = self.config.approval {
+                    let op = classify_task_operation(&task.description);
+                    if let Some((request, rx)) = gate.check_with_channel(&task.id, &op) {
+                        // Notify listeners that this task is pending approval.
+                        self.emit(TaskEvent::TaskApprovalPending {
+                            task_id: task.id.clone(),
+                            request_id: request.id.clone(),
+                            operation: format!("{:?}", request.operation),
+                            rule: request.matched_rule.clone(),
+                        });
+
+                        // Await the user's decision.
+                        let decision = match rx.await {
+                            Ok(d) => d,
+                            Err(_) => ApprovalDecision::Timeout,
+                        };
+
+                        match decision {
+                            ApprovalDecision::Approved => {
+                                // Proceed with execution.
+                            }
+                            ApprovalDecision::Denied { reason } => {
+                                self.emit(TaskEvent::TaskDenied {
+                                    task_id: task.id.clone(),
+                                    reason: reason.clone(),
+                                });
+                                self.emit(TaskEvent::TaskFailed {
+                                    task_id: task.id.clone(),
+                                    error: format!(
+                                        "Denied by user: {}",
+                                        reason.as_deref().unwrap_or("no reason")
+                                    ),
+                                });
+                                let deny_result = TaskResult {
+                                    task_id: task.id.clone(),
+                                    persona: task.persona.clone(),
+                                    output: String::new(),
+                                    cost: 0.0,
+                                    duration_ms: 0,
+                                    success: false,
+                                    error: Some(format!(
+                                        "Denied by user: {}",
+                                        reason.as_deref().unwrap_or("no reason")
+                                    )),
+                                };
+                                failed.insert(task.id.clone());
+                                results.push(deny_result);
+                                continue;
+                            }
+                            ApprovalDecision::Timeout => {
+                                self.emit(TaskEvent::TaskDenied {
+                                    task_id: task.id.clone(),
+                                    reason: Some("Approval timed out".into()),
+                                });
+                                self.emit(TaskEvent::TaskFailed {
+                                    task_id: task.id.clone(),
+                                    error: "Approval timed out".into(),
+                                });
+                                let timeout_result = TaskResult {
+                                    task_id: task.id.clone(),
+                                    persona: task.persona.clone(),
+                                    output: String::new(),
+                                    cost: 0.0,
+                                    duration_ms: 0,
+                                    success: false,
+                                    error: Some("Approval timed out".into()),
+                                };
+                                failed.insert(task.id.clone());
+                                results.push(timeout_result);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 // Emit TaskStarted before execution.
                 self.emit(TaskEvent::TaskStarted {
                     task_id: task.id.clone(),
@@ -576,6 +673,55 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Classify a task description into an `OperationType` for approval rule matching.
+///
+/// Scans the description for high-risk keywords (shell commands, file deletions,
+/// deployments, git push) and returns the most specific operation type found.
+/// Returns `OperationType::Custom` for low-risk tasks that don't match any pattern.
+fn classify_task_operation(description: &str) -> OperationType {
+    let lower = description.to_lowercase();
+
+    // File deletion patterns
+    if lower.contains("delete") || lower.contains("remove file") || lower.contains("rm ") {
+        return OperationType::FileDelete(description.to_string());
+    }
+
+    // Shell / exec patterns
+    if lower.contains("shell")
+        || lower.contains("execute command")
+        || lower.contains("run command")
+        || lower.contains("exec ")
+        || lower.contains("bash ")
+        || lower.contains("sh ")
+    {
+        return OperationType::ShellCommand(description.to_string());
+    }
+
+    // Deployment patterns
+    if lower.contains("deploy") || lower.contains("release") || lower.contains("publish") {
+        return OperationType::ShellCommand(format!("deploy: {description}"));
+    }
+
+    // Git push patterns
+    if lower.contains("git push") || lower.contains("push to remote") {
+        return OperationType::GitPush {
+            remote: "origin".into(),
+            branch: "main".into(),
+        };
+    }
+
+    // File modification with broad scope
+    if lower.contains("modify") || lower.contains("rewrite") || lower.contains("refactor") {
+        return OperationType::FileModify {
+            path: description.to_string(),
+            scope: description.to_string(),
+        };
+    }
+
+    // Default: custom operation (won't match most approval rules)
+    OperationType::Custom(description.to_string())
+}
 
 /// Parse the AI response into a `TaskPlan`. Handles both raw JSON arrays
 /// and markdown-wrapped code blocks.
@@ -1134,5 +1280,208 @@ mod tests {
         assert!(matches!(&events[1], TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
         assert!(matches!(&events[2], TaskEvent::TaskFailed { task_id, .. } if task_id == "t1"));
         assert!(matches!(&events[3], TaskEvent::AllComplete { success_count: 0, failure_count: 1, .. }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Approval gate tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_task_operation_delete() {
+        let op = classify_task_operation("Delete the old config files");
+        assert!(matches!(op, OperationType::FileDelete(_)));
+    }
+
+    #[test]
+    fn classify_task_operation_shell() {
+        let op = classify_task_operation("Execute command to restart server");
+        assert!(matches!(op, OperationType::ShellCommand(_)));
+    }
+
+    #[test]
+    fn classify_task_operation_deploy() {
+        let op = classify_task_operation("Deploy the application to production");
+        assert!(matches!(op, OperationType::ShellCommand(_)));
+    }
+
+    #[test]
+    fn classify_task_operation_git_push() {
+        let op = classify_task_operation("Run git push to origin");
+        assert!(matches!(op, OperationType::GitPush { .. }));
+    }
+
+    #[test]
+    fn classify_task_operation_benign() {
+        let op = classify_task_operation("Investigate the codebase structure");
+        assert!(matches!(op, OperationType::Custom(_)));
+    }
+
+    #[tokio::test]
+    async fn execute_plan_approval_denied_skips_task() {
+        use crate::activity::approval::ApprovalGate;
+        use crate::activity::rules::{ApprovalRule, RuleTrigger};
+
+        let executor = MockExecutor::new("Task output");
+        let call_count = executor.call_count.clone();
+
+        // Create an approval gate that requires approval for everything.
+        let gate = Arc::new(ApprovalGate::new(vec![ApprovalRule {
+            name: "always-approve".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 100,
+        }]));
+
+        let config = CoordinatorConfig {
+            approval: Some(gate.clone()),
+            ..CoordinatorConfig::default()
+        };
+        let coordinator = Coordinator::new(config, executor);
+        let mut rx = coordinator.subscribe();
+
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "t1".into(),
+                description: "Delete all temporary files".into(),
+                persona: PersonaKind::Implement,
+                dependencies: vec![],
+                priority: 1,
+                model_override: None,
+            }],
+        };
+
+        // Spawn a task that will deny the approval request after a brief moment.
+        let gate_clone = gate.clone();
+        tokio::spawn(async move {
+            // Wait until there's a pending request.
+            loop {
+                if gate_clone.pending_count() > 0 {
+                    let requests = gate_clone.pending_requests();
+                    for req in requests {
+                        gate_clone.respond(
+                            &req.id,
+                            ApprovalDecision::Denied {
+                                reason: Some("Too risky".into()),
+                            },
+                        );
+                    }
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let result = coordinator.execute_plan(&plan).await;
+
+        // Task should have been denied, not executed.
+        assert_eq!(result.results.len(), 1);
+        assert!(!result.results[0].success);
+        assert!(result.results[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Denied by user"));
+        // The executor should never have been called.
+        assert_eq!(call_count.load(Ordering::SeqCst), 0);
+
+        // Check events.
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+        // PlanCreated, TaskApprovalPending, TaskDenied, TaskFailed, AllComplete
+        assert!(
+            events.len() >= 5,
+            "Expected at least 5 events, got {}",
+            events.len()
+        );
+        assert!(matches!(&events[0], TaskEvent::PlanCreated { .. }));
+        assert!(matches!(
+            &events[1],
+            TaskEvent::TaskApprovalPending { task_id, .. } if task_id == "t1"
+        ));
+        assert!(matches!(
+            &events[2],
+            TaskEvent::TaskDenied { task_id, .. } if task_id == "t1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn execute_plan_approval_approved_runs_task() {
+        use crate::activity::approval::ApprovalGate;
+        use crate::activity::rules::{ApprovalRule, RuleTrigger};
+
+        let executor = MockExecutor::new("Task output");
+        let call_count = executor.call_count.clone();
+
+        let gate = Arc::new(ApprovalGate::new(vec![ApprovalRule {
+            name: "always-approve".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 100,
+        }]));
+
+        let config = CoordinatorConfig {
+            approval: Some(gate.clone()),
+            ..CoordinatorConfig::default()
+        };
+        let coordinator = Coordinator::new(config, executor);
+
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "t1".into(),
+                description: "Delete old logs".into(),
+                persona: PersonaKind::Implement,
+                dependencies: vec![],
+                priority: 1,
+                model_override: None,
+            }],
+        };
+
+        // Spawn a task that will approve the request.
+        let gate_clone = gate.clone();
+        tokio::spawn(async move {
+            loop {
+                if gate_clone.pending_count() > 0 {
+                    let requests = gate_clone.pending_requests();
+                    for req in requests {
+                        gate_clone.respond(&req.id, ApprovalDecision::Approved);
+                    }
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let result = coordinator.execute_plan(&plan).await;
+
+        // Task should have been executed successfully.
+        assert_eq!(result.results.len(), 1);
+        assert!(result.results[0].success);
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn execute_plan_no_approval_gate_runs_normally() {
+        // Without an approval gate, tasks should run as before.
+        let executor = MockExecutor::new("Task output");
+        let call_count = executor.call_count.clone();
+        let coordinator = Coordinator::new(CoordinatorConfig::default(), executor);
+
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "t1".into(),
+                description: "Delete everything".into(),
+                persona: PersonaKind::Implement,
+                dependencies: vec![],
+                priority: 1,
+                model_override: None,
+            }],
+        };
+
+        let result = coordinator.execute_plan(&plan).await;
+        assert_eq!(result.results.len(), 1);
+        assert!(result.results[0].success);
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
     }
 }

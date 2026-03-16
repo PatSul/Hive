@@ -99,6 +99,24 @@ fn translate_task_event(event: TaskEvent) -> Option<ActivityEvent> {
                 error,
             })
         }
+        TaskEvent::TaskApprovalPending {
+            request_id,
+            task_id,
+            operation,
+            rule,
+        } => Some(ActivityEvent::ApprovalRequested {
+            request_id,
+            agent_id: "coordinator".into(),
+            operation,
+            context: task_id,
+            rule,
+        }),
+        TaskEvent::TaskDenied { task_id, reason } => {
+            Some(ActivityEvent::ApprovalDenied {
+                request_id: task_id,
+                reason,
+            })
+        }
         _ => None,
     }
 }

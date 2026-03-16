@@ -2573,6 +2573,10 @@ impl HiveWorkspace {
             let activity_service = cx.has_global::<AppActivityService>()
                 .then(|| cx.global::<AppActivityService>().0.clone());
 
+            // Optionally attach notification service for user-visible alerts.
+            let notification_service = cx.has_global::<AppAgentNotifications>()
+                .then(|| cx.global::<AppAgentNotifications>().0.clone());
+
             // Optionally create a BudgetEnforcer from the user's config limits.
             let budget_enforcer = if cx.has_global::<AppConfig>() {
                 let cfg = cx.global::<AppConfig>().0.get();
@@ -2644,6 +2648,9 @@ impl HiveWorkspace {
                 }
                 if let Some(ref budget) = budget_enforcer {
                     queen = queen.with_budget(budget.clone());
+                }
+                if let Some(ref notifications) = notification_service {
+                    queen = queen.with_notifications(notifications.clone());
                 }
 
                 let result_text = match queen.execute(&goal).await {

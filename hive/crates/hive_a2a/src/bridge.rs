@@ -228,6 +228,28 @@ pub fn task_event_to_status_update(
                 task_id, cost, duration_ms, output_preview
             ),
         ),
+        TaskEvent::TaskApprovalPending {
+            task_id,
+            request_id,
+            operation,
+            rule,
+        } => (
+            TaskState::Working,
+            false,
+            format!(
+                "Task '{}' awaiting approval (req {}, op: {}, rule: {})",
+                task_id, request_id, operation, rule
+            ),
+        ),
+        TaskEvent::TaskDenied { task_id, reason } => (
+            TaskState::Working,
+            false,
+            format!(
+                "Task '{}' denied: {}",
+                task_id,
+                reason.as_deref().unwrap_or("no reason given")
+            ),
+        ),
         TaskEvent::TaskFailed { task_id, error } => (
             TaskState::Working,
             false,
