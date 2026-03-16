@@ -322,6 +322,10 @@ pub struct HiveWorkspace {
     toast_messages: Vec<(String, String, hive_ui_panels::components::toast::ToastKind, std::time::Instant)>,
     /// IDs of notifications already surfaced as toasts, preventing duplicates.
     seen_notification_ids: HashSet<String>,
+    /// Cached QuickIndex for the current project, available for ContextEngine.
+    quick_index: Option<Arc<hive_ai::quick_index::QuickIndex>>,
+    /// Background task rebuilding the QuickIndex after a project switch.
+    _quick_index_task: Option<Task<()>>,
 }
 
 const MAX_RECENT_WORKSPACES: usize = 8;
@@ -480,7 +484,8 @@ impl HiveWorkspace {
             quick_index.dependencies.len(),
             quick_index.indexed_at.elapsed()
         );
-        cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
+        let quick_index = std::sync::Arc::new(quick_index);
+        cx.set_global(AppQuickIndex(quick_index.clone()));
 
         // Bootstrap RAG index — index the project directory so that RAG queries
         // in the chat pipeline return relevant context.
@@ -896,6 +901,8 @@ impl HiveWorkspace {
             swarm_task_trees: Vec::new(),
             toast_messages: Vec::new(),
             seen_notification_ids: HashSet::new(),
+            quick_index: Some(quick_index),
+            _quick_index_task: None,
         }
     }
 
@@ -1152,15 +1159,45 @@ impl HiveWorkspace {
             }
             cx.set_global(AppKnowledgeFiles(knowledge_sources));
 
-            // Rebuild the fast-path project index for the new project root.
-            let quick_index = hive_ai::quick_index::QuickIndex::build(&self.current_project_root);
-            info!(
-                "QuickIndex rebuilt: {} files, {} symbols, {} deps",
-                quick_index.file_tree.total_files,
-                quick_index.key_symbols.len(),
-                quick_index.dependencies.len()
+            // Rebuild the fast-path project index in a background thread so the
+            // UI stays responsive during the <3s indexing pass.
+            self.quick_index = None;
+            let index_root = self.current_project_root.clone();
+            let result_slot: Arc<std::sync::Mutex<Option<Arc<hive_ai::quick_index::QuickIndex>>>> =
+                Arc::new(std::sync::Mutex::new(None));
+            let slot_for_thread = Arc::clone(&result_slot);
+            std::thread::spawn(move || {
+                let start = std::time::Instant::now();
+                let qi = hive_ai::quick_index::QuickIndex::build(&index_root);
+                let elapsed = start.elapsed();
+                info!(
+                    "QuickIndex rebuilt: {} files, {} symbols, {} deps in {:.2?}",
+                    qi.file_tree.total_files,
+                    qi.key_symbols.len(),
+                    qi.dependencies.len(),
+                    elapsed,
+                );
+                *slot_for_thread.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Arc::new(qi));
+            });
+            let slot_for_poll = Arc::clone(&result_slot);
+            self._quick_index_task = Some(
+                cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+                    loop {
+                        if let Some(qi) = slot_for_poll.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                            let _ = this.update(app, |this, cx| {
+                                this.quick_index = Some(qi.clone());
+                                cx.set_global(AppQuickIndex(qi));
+                                cx.notify();
+                            });
+                            break;
+                        }
+                        app.background_executor()
+                            .timer(std::time::Duration::from_millis(100))
+                            .await;
+                    }
+                }),
             );
-            cx.set_global(AppQuickIndex(std::sync::Arc::new(quick_index)));
             self.start_background_project_indexing(cx);
 
             // Start incremental file watcher for RAG indexing.
