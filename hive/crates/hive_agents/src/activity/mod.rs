@@ -1,5 +1,6 @@
 pub mod budget;
 pub mod log;
+pub mod rules;
 pub mod types;
 
 use std::sync::Arc;
