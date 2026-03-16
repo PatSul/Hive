@@ -1,6 +1,7 @@
 pub mod log;
 pub mod types;
 
+use std::sync::Arc;
 use tokio::sync::broadcast;
 pub use types::{ActivityEvent, FileOp, OperationType, PauseReason};
 
@@ -17,6 +18,24 @@ impl ActivityService {
     /// Used for testing and incremental construction.
     pub fn new_bus_only() -> Self {
         let (tx, _) = broadcast::channel(1024);
+        Self { tx }
+    }
+
+    /// Create service with an ActivityLog listener that persists all events.
+    pub fn new_with_log(log: Arc<log::ActivityLog>) -> Self {
+        let (tx, _) = broadcast::channel(1024);
+        let mut rx = tx.subscribe();
+
+        // Spawn listener task
+        let log_ref = log.clone();
+        tokio::spawn(async move {
+            while let Ok(event) = rx.recv().await {
+                if let Err(e) = log_ref.record(&event) {
+                    tracing::warn!("ActivityLog write failed: {e}");
+                }
+            }
+        });
+
         Self { tx }
     }
 

@@ -140,3 +140,22 @@ fn activity_log_cost_summary() {
     assert_eq!(summary.request_count, 5);
     assert_eq!(summary.by_agent.len(), 2);
 }
+
+#[tokio::test]
+async fn activity_service_with_log_persists_events() {
+    let log = std::sync::Arc::new(ActivityLog::open_in_memory().unwrap());
+    let service = ActivityService::new_with_log(log.clone());
+
+    service.emit(ActivityEvent::AgentStarted {
+        agent_id: "test".into(),
+        role: "Coder".into(),
+        task_id: None,
+    });
+
+    // Give the listener task a moment to process
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let entries = log.query(&ActivityFilter::default()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].event_type, "agent_started");
+}
