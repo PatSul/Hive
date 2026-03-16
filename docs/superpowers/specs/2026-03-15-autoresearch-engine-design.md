@@ -38,7 +38,7 @@ Alternatives considered:
 
 `hive_agents` already depends on `hive_learn`, so `hive_learn` cannot depend on `hive_agents` (circular dependency). This affects two items:
 
-1. **`AiExecutor` trait:** Define a local `AutoResearchExecutor` trait in `hive_learn` with the same async `execute(&ChatRequest) -> Result<ChatResponse, String>` signature. The engine is generic over this trait. Callers in `hive_agents` can provide a thin adapter that delegates to their `AiExecutor`. This is a one-method trait — the duplication is trivial.
+1. **`AiExecutor` trait:** Define a local `AutoResearchExecutor: Send + Sync` trait in `hive_learn` with the same async `execute(&self, &ChatRequest) -> Result<ChatResponse, String>` signature. The engine is generic over `E: AutoResearchExecutor + Send + Sync`. Callers in `hive_agents` can provide a thin adapter that delegates to their `AiExecutor`. This is a one-method trait — the duplication is trivial.
 
 2. **`SkillMarketplace::scan_for_injection`:** The security scan logic is pure string matching (regex patterns). Extract the scan function into `hive_learn::autoresearch::security` as a standalone `fn scan_prompt_for_injection(prompt: &str) -> Vec<SecurityIssue>`. This is ~30 lines of regex checks. `SkillMarketplace` can later call this function too (dedup), but that's a separate cleanup.
 
@@ -160,13 +160,13 @@ pub struct AutoResearchReport {
     pub final_pass_rate: f64,
     pub best_prompt_version: u32,
     pub improvement: f64,
-    pub stopped_reason: StopReason,
+    pub stopped_reason: AutoResearchStopReason,
     pub iteration_history: Vec<IterationResult>,
     pub total_cost: f64,
     pub duration_ms: u64,
 }
 
-pub enum StopReason {
+pub enum AutoResearchStopReason {
     MaxIterationsReached,
     PerfectScore,
     NoImprovementPlateau { consecutive_failures: u32 },
@@ -238,7 +238,7 @@ The engine owns the config, shares storage with `PromptEvolver` via `Arc`, and i
 
 ## Cost Accounting
 
-Cost is derived from `ChatResponse.usage.total_tokens` after each AI call, using a configurable `cost_per_token: f64` field on `AutoResearchConfig` (default: `0.000003` — roughly Claude Haiku pricing). The engine maintains a running `accumulated_cost` that is checked after every AI call (not just at iteration boundaries) to prevent budget overshoot. When `cost_budget` is `Some(budget)` and `accumulated_cost >= budget`, the loop stops immediately with `StopReason::BudgetExhausted`.
+Cost is derived from `ChatResponse.usage.total_tokens` after each AI call, using a configurable `cost_per_token: f64` field on `AutoResearchConfig` (default: `0.000003` — roughly Claude Haiku pricing). The engine maintains a running `accumulated_cost` that is checked after every AI call (not just at iteration boundaries) to prevent budget overshoot. When `cost_budget` is `Some(budget)` and `accumulated_cost >= budget`, the loop stops immediately with `AutoResearchStopReason::BudgetExhausted`.
 
 ## Partial Sample Failure Handling
 
@@ -252,7 +252,7 @@ This is the most forgiving strategy and avoids aborting the entire autoresearch 
 
 ## Empty Eval Suite Handling
 
-If a skill has no explicit `[[eval]]` questions AND the AI auto-generation call fails or returns an empty list, the engine aborts with `StopReason::EmptyEvalSuite` and `iterations_run = 0`. An autoresearch run cannot proceed without at least one eval question. The `AutoResearchReport` captures this cleanly so callers know why it stopped.
+If a skill has no explicit `[[eval]]` questions AND the AI auto-generation call fails or returns an empty list, the engine aborts with `AutoResearchStopReason::EmptyEvalSuite` and `iterations_run = 0`. An autoresearch run cannot proceed without at least one eval question. The `AutoResearchReport` captures this cleanly so callers know why it stopped.
 
 ## The Loop
 
@@ -349,7 +349,7 @@ hive_learn/src/
     eval_runner.rs   -- EvalRunner (execute + judge)
     mutator.rs       -- PromptMutator (AI-driven rewrite)
     types.rs         -- EvalResult, EvalRunResult, IterationResult,
-                        AutoResearchReport, StopReason
+                        AutoResearchReport, AutoResearchStopReason
     security.rs      -- scan_prompt_for_injection (standalone, no hive_agents dep)
     executor.rs      -- AutoResearchExecutor trait definition
 ```
@@ -387,7 +387,7 @@ Unit tests per component using `MockExecutor` (same pattern as `skill_authoring.
 | `config.rs` | Default values, serde roundtrip, cost_per_token validation |
 | `security.rs` | Injection patterns detected, clean prompts pass, matches `SkillMarketplace::scan_for_injection` behavior |
 | `executor.rs` | Trait definition compiles, mock impl works |
-| `engine.rs` | Full loop with mocked responses: baseline -> mutation -> improvement -> new best. Plateau stops early. Perfect score stops early. Budget exhausted stops mid-iteration. Security scan rejects bad mutation. Cold start seeds PromptEvolver. Empty eval suite aborts with correct StopReason. Version tracking populates best_prompt_version. |
+| `engine.rs` | Full loop with mocked responses: baseline -> mutation -> improvement -> new best. Plateau stops early. Perfect score stops early. Budget exhausted stops mid-iteration. Security scan rejects bad mutation. Cold start seeds PromptEvolver. Empty eval suite aborts with correct AutoResearchStopReason. Version tracking populates best_prompt_version. |
 
 Estimated: ~35-40 new tests. Each file stays well under 1000 lines (no rustc stack overflow risk).
 
