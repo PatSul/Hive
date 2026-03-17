@@ -100,6 +100,21 @@ pub struct MemoryStats {
 }
 
 // ---------------------------------------------------------------------------
+// MaintenanceReport
+// ---------------------------------------------------------------------------
+
+/// Report from a memory maintenance run.
+#[derive(Debug)]
+pub struct MaintenanceReport {
+    /// Number of entries whose relevance was decayed.
+    pub decayed: usize,
+    /// Number of entries pruned (below relevance threshold).
+    pub pruned: usize,
+    /// Number of duplicate entries removed.
+    pub deduplicated: usize,
+}
+
+// ---------------------------------------------------------------------------
 // CollectiveMemory
 // ---------------------------------------------------------------------------
 
@@ -398,6 +413,107 @@ impl CollectiveMemory {
 
         Ok(count)
     }
+
+    /// Remove near-duplicate entries using Jaccard word similarity.
+    ///
+    /// Groups entries by category, compares content tokenized into words,
+    /// and removes entries with similarity above `threshold` (0.0-1.0),
+    /// keeping the entry with the higher relevance score.
+    pub fn deduplicate(&self, threshold: f64) -> Result<usize, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {e}"))?;
+
+        // Load all entries grouped by category.
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, category, content, tags, source_run_id, source_team_id,
+                        relevance_score, created_at, last_accessed, access_count
+                 FROM memories ORDER BY category, relevance_score DESC",
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+
+        let entries: Vec<MemoryEntry> = stmt
+            .query_map([], Self::row_to_entry)
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Group by category.
+        let mut by_category: HashMap<String, Vec<&MemoryEntry>> = HashMap::new();
+        for entry in &entries {
+            by_category
+                .entry(entry.category.as_str().to_string())
+                .or_default()
+                .push(entry);
+        }
+
+        let mut to_delete: Vec<i64> = Vec::new();
+
+        for (_cat, group) in &by_category {
+            // Tokenize each entry's content into word sets.
+            let tokenized: Vec<std::collections::HashSet<String>> = group
+                .iter()
+                .map(|e| {
+                    e.content
+                        .split_whitespace()
+                        .map(|w| w.to_lowercase())
+                        .collect()
+                })
+                .collect();
+
+            for i in 0..group.len() {
+                if to_delete.contains(&group[i].id) {
+                    continue;
+                }
+                for j in (i + 1)..group.len() {
+                    if to_delete.contains(&group[j].id) {
+                        continue;
+                    }
+                    // Jaccard similarity.
+                    let intersection = tokenized[i].intersection(&tokenized[j]).count();
+                    let union = tokenized[i].union(&tokenized[j]).count();
+                    if union == 0 {
+                        continue;
+                    }
+                    let similarity = intersection as f64 / union as f64;
+                    if similarity >= threshold {
+                        // Keep the one with higher relevance (group is sorted desc).
+                        to_delete.push(group[j].id);
+                    }
+                }
+            }
+        }
+
+        // Delete duplicates.
+        let count = to_delete.len();
+        for id in &to_delete {
+            conn.execute("DELETE FROM memories WHERE id = ?1", params![id])
+                .map_err(|e| format!("Delete error: {e}"))?;
+        }
+
+        Ok(count)
+    }
+
+    /// Run full memory maintenance: decay, prune, then deduplicate.
+    ///
+    /// - `decay_factor`: multiplier for relevance scores (e.g. 0.98 for 2% daily decay)
+    /// - `min_relevance`: entries below this threshold are pruned
+    /// - `similarity_threshold`: entries above this Jaccard similarity are deduplicated
+    pub fn maintenance(
+        &self,
+        decay_factor: f64,
+        min_relevance: f64,
+        similarity_threshold: f64,
+    ) -> Result<MaintenanceReport, String> {
+        let decayed = self.decay_scores(decay_factor)?;
+        let pruned = self.prune(min_relevance)?;
+        let deduplicated = self.deduplicate(similarity_threshold)?;
+
+        Ok(MaintenanceReport {
+            decayed,
+            pruned,
+            deduplicated,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -630,5 +746,46 @@ mod tests {
         }
         // Unknown string falls back to General.
         assert_eq!(MemoryCategory::parse_str("bogus"), MemoryCategory::General);
+    }
+
+    #[test]
+    fn deduplicate_removes_near_duplicates() {
+        let mem = CollectiveMemory::in_memory().unwrap();
+        mem.remember(&make_entry(
+            MemoryCategory::CodePattern,
+            "use iterators for performance in rust code",
+        ))
+        .unwrap();
+        mem.remember(&make_entry(
+            MemoryCategory::CodePattern,
+            "use iterators for performance in rust programs",
+        ))
+        .unwrap();
+        mem.remember(&make_entry(
+            MemoryCategory::CodePattern,
+            "completely different content about databases",
+        ))
+        .unwrap();
+
+        let removed = mem.deduplicate(0.7).unwrap();
+        assert_eq!(removed, 1, "One near-duplicate should be removed");
+        assert_eq!(mem.entry_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn maintenance_runs_all_three_operations() {
+        let mem = CollectiveMemory::in_memory().unwrap();
+        // Insert entries that will be affected by maintenance.
+        mem.remember(&make_entry(MemoryCategory::General, "entry alpha"))
+            .unwrap();
+        mem.remember(&make_entry(MemoryCategory::General, "entry beta"))
+            .unwrap();
+
+        let report = mem.maintenance(0.98, 0.01, 0.85).unwrap();
+        assert_eq!(report.decayed, 2);
+        // Nothing pruned (0.98 * 1.0 = 0.98 > 0.01 threshold)
+        assert_eq!(report.pruned, 0);
+        // Nothing deduplicated (different content)
+        assert_eq!(report.deduplicated, 0);
     }
 }

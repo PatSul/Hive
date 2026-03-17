@@ -105,6 +105,90 @@ pub struct ContextStats {
 }
 
 // ---------------------------------------------------------------------------
+// Context Tiers (intent-based retrieval gating)
+// ---------------------------------------------------------------------------
+
+/// Context loading tier based on user intent classification.
+///
+/// L0 = lightweight (chat, translation) — only preferences + knowledge files.
+/// L1 = project-aware (creative, data analysis) — L0 + project structure.
+/// L2 = full retrieval (coding, reasoning, agentic) — L1 + RAG + semantic search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextTier {
+    L0,
+    L1,
+    L2,
+}
+
+impl ContextTier {
+    /// Classify a context tier from a task-type keyword string.
+    ///
+    /// Maps the task types used by `CapabilityRouter::detect_task_type()` to
+    /// the appropriate retrieval tier.
+    pub fn from_task_keyword(task_type: &str) -> Self {
+        match task_type.to_lowercase().as_str() {
+            "general_chat" | "translation" | "summarization" => Self::L0,
+            "creative_writing" | "instruction_following" | "data_analysis" => Self::L1,
+            _ => Self::L2, // coding, reasoning, math, tool_use, agentic, vision
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fact Extraction (from compaction summaries)
+// ---------------------------------------------------------------------------
+
+/// Category of an extracted fact from a compacted conversation summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactCategory {
+    Preference,
+    Decision,
+    CodePattern,
+    Fact,
+}
+
+/// A fact extracted from a compaction summary.
+#[derive(Debug, Clone)]
+pub struct ExtractedFact {
+    pub category: FactCategory,
+    pub content: String,
+}
+
+/// Parse structured facts from a compaction summary.
+///
+/// The summarization prompt is engineered to output lines prefixed with
+/// `Preference:`, `Decision:`, `Pattern:`, or `Fact:`. This function
+/// extracts those into typed `ExtractedFact` values.
+pub fn extract_facts(summary: &str) -> Vec<ExtractedFact> {
+    let mut facts = Vec::new();
+    for line in summary.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Preference:") {
+            let content = rest.trim().to_string();
+            if !content.is_empty() {
+                facts.push(ExtractedFact { category: FactCategory::Preference, content });
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("Decision:") {
+            let content = rest.trim().to_string();
+            if !content.is_empty() {
+                facts.push(ExtractedFact { category: FactCategory::Decision, content });
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("Pattern:") {
+            let content = rest.trim().to_string();
+            if !content.is_empty() {
+                facts.push(ExtractedFact { category: FactCategory::CodePattern, content });
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("Fact:") {
+            let content = rest.trim().to_string();
+            if !content.is_empty() {
+                facts.push(ExtractedFact { category: FactCategory::Fact, content });
+            }
+        }
+    }
+    facts
+}
+
+// ---------------------------------------------------------------------------
 // Keyword / tokenization helpers
 // ---------------------------------------------------------------------------
 
@@ -206,6 +290,21 @@ impl ContextEngine {
             source_type: SourceType::ProjectKnowledge,
             last_modified: Utc::now(),
         });
+    }
+
+    /// Remove all ephemeral context sources, keeping only durable ones
+    /// (ProjectKnowledge and LearnedPreference). Resets the IDF cache.
+    ///
+    /// Call this at the start of each message's context assembly to prevent
+    /// stale file/symbol sources from accumulating across messages.
+    pub fn clear_ephemeral(&mut self) {
+        self.sources.retain(|s| {
+            matches!(
+                s.source_type,
+                SourceType::ProjectKnowledge | SourceType::LearnedPreference
+            )
+        });
+        self.idf_cache.clear();
     }
 
     /// Recursively walk `dir_path`, read text files, and add them as
@@ -909,5 +1008,66 @@ mod tests {
             infer_source_type(Path::new("src/main.rs")),
             SourceType::File
         );
+    }
+
+    // -- Context tier tests ------------------------------------------------
+
+    #[test]
+    fn test_context_tier_classification() {
+        assert_eq!(ContextTier::from_task_keyword("general_chat"), ContextTier::L0);
+        assert_eq!(ContextTier::from_task_keyword("translation"), ContextTier::L0);
+        assert_eq!(ContextTier::from_task_keyword("summarization"), ContextTier::L0);
+        assert_eq!(ContextTier::from_task_keyword("creative_writing"), ContextTier::L1);
+        assert_eq!(ContextTier::from_task_keyword("data_analysis"), ContextTier::L1);
+        assert_eq!(ContextTier::from_task_keyword("coding"), ContextTier::L2);
+        assert_eq!(ContextTier::from_task_keyword("reasoning"), ContextTier::L2);
+        assert_eq!(ContextTier::from_task_keyword("tool_use"), ContextTier::L2);
+        assert_eq!(ContextTier::from_task_keyword("unknown"), ContextTier::L2);
+    }
+
+    #[test]
+    fn test_clear_ephemeral_keeps_durable_sources() {
+        let mut engine = ContextEngine::new();
+        engine.add_file("temp.rs", "fn temp() {}");
+        engine.add_symbol("MyStruct", "struct MyStruct {}");
+        engine.add_project_knowledge("README", "# Project");
+        engine.add_learned_preferences("Prefers concise code");
+
+        assert_eq!(engine.summary_stats().total_sources, 4);
+
+        engine.clear_ephemeral();
+
+        let stats = engine.summary_stats();
+        assert_eq!(stats.total_sources, 2);
+        assert_eq!(stats.by_type.get(&SourceType::ProjectKnowledge).copied().unwrap_or(0), 1);
+        assert_eq!(stats.by_type.get(&SourceType::LearnedPreference).copied().unwrap_or(0), 1);
+        assert_eq!(stats.by_type.get(&SourceType::File).copied().unwrap_or(0), 0);
+    }
+
+    // -- Fact extraction tests ---------------------------------------------
+
+    #[test]
+    fn test_extract_facts_parses_structured_lines() {
+        let summary = "Preference: User prefers Rust over Python\n\
+                       Decision: Use SQLite for persistence\n\
+                       Pattern: Always use Result<T> for error handling\n\
+                       Fact: Project has 21 crates\n\
+                       This is just a regular summary line.";
+
+        let facts = extract_facts(summary);
+        assert_eq!(facts.len(), 4);
+        assert_eq!(facts[0].category, FactCategory::Preference);
+        assert_eq!(facts[0].content, "User prefers Rust over Python");
+        assert_eq!(facts[1].category, FactCategory::Decision);
+        assert_eq!(facts[2].category, FactCategory::CodePattern);
+        assert_eq!(facts[3].category, FactCategory::Fact);
+    }
+
+    #[test]
+    fn test_extract_facts_empty_content_skipped() {
+        let summary = "Preference:\nFact: Something real";
+        let facts = extract_facts(summary);
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].category, FactCategory::Fact);
     }
 }

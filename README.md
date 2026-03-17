@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.31-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.32-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
   <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
@@ -50,6 +50,9 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - Git worktree isolation per team
 - Full Git Ops (commits, PRs, branches, gitflow, LFS)
 - Context engine (TF-IDF scoring + RAG + vector search)
+- **Tiered context loading** (L0/L1/L2 intent-based retrieval gating)
+- **Session compression** with automatic fact extraction
+- **Memory lifecycle** (decay, prune, deduplicate)
 - **TOON encoding** — token-efficient prompt compression (~30-40% savings)
 - Cost tracking & budget enforcement
 - Code review & testing automation
@@ -66,7 +69,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - **Tool approval gate** with diff preview (approve/reject file writes)
 - **Built-in terminal** (interactive shell with streaming output)
 - **Built-in code viewer** (syntax-highlighted file browser)
-- MCP client + server (19 tools)
+- MCP client + server (22 tools)
 - P2P federation across instances
 - **Remote control** (WebSocket relay, QR pairing, web UI)
 - **Terminal CLI client** (chat, sync, config, models)
@@ -219,6 +222,57 @@ On every message send:
 1. **Code chunks** from the indexed workspace are injected into `# Retrieved Context` (curated by ContextEngine)
 2. **Recalled memories** from previous conversations are injected as a separate `# Recalled Memories` system message with importance scores and categories
 3. Both are available to the AI alongside the conversation history
+
+---
+
+## Context Management
+
+Hive uses a **tiered context pipeline** inspired by production retrieval systems. Instead of naively including everything in every request, it classifies user intent and loads only what's needed — saving tokens, reducing latency, and keeping conversations coherent over long sessions.
+
+### Tiered Context Loading (L0 / L1 / L2)
+
+Every incoming message is classified by intent before context assembly:
+
+| Tier | When | What's Loaded |
+|---|---|---|
+| **L0** (Lightweight) | General chat, translation, summarization | Knowledge files + learned preferences only |
+| **L1** (Project-aware) | Creative writing, data analysis | L0 + QuickIndex project structure + open files |
+| **L2** (Full retrieval) | Coding, reasoning, tool use, agentic tasks | L1 + RAG query + SemanticSearch + HiveMemory recall |
+
+Classification uses `CapabilityRouter::detect_task_type()` — the same keyword classifier that drives model routing — so there's zero additional latency. The context budget scales dynamically based on model context size (25% of the model's window for retrieved content).
+
+### Session Compression
+
+Conversations grow unbounded without management. Hive tracks token usage in a `ContextWindow` and triggers automatic compaction when usage hits **80% capacity**:
+
+1. The oldest non-pinned messages are selected for compaction
+2. A budget-tier AI model summarizes them into structured facts
+3. The summary replaces the original messages in the conversation
+4. Extracted facts (preferences, decisions, code patterns) are persisted to CollectiveMemory and LearningService
+
+This means Hive can maintain coherent conversations of arbitrary length without losing important context.
+
+### Memory Lifecycle
+
+Persistent memory grows stale without maintenance. Hive runs automatic lifecycle management:
+
+| Operation | Behavior |
+|---|---|
+| **Decay** | 2% daily relevance decay on all memory entries |
+| **Prune** | Remove entries below 10% relevance threshold |
+| **Deduplicate** | Jaccard word similarity — entries with >85% overlap are merged |
+
+Maintenance runs on workspace initialization (if >24h since last run) and logs a report of entries decayed, pruned, and deduplicated.
+
+### MCP Context Tools
+
+Three memory tools are exposed via the MCP server for external agent access:
+
+| Tool | Purpose |
+|---|---|
+| `query_memory` | Search collective memory by relevance with optional category filter |
+| `search_context` | Run the full ContextEngine curation pipeline against a query |
+| `list_memories` | List stored memories by category with configurable limits |
 
 ---
 
@@ -510,7 +564,7 @@ All integrations make **real API calls** to their respective services. Blockchai
 <tr><td><strong>Smart Home</strong></td><td>Philips Hue</td></tr>
 <tr><td><strong>Voice</strong></td><td>ClawdTalk (voice-over-phone via Telnyx)</td></tr>
 <tr><td><strong>Browser</strong></td><td>Headless Chrome automation (navigation, screenshots, JS evaluation, DOM interaction)</td></tr>
-<tr><td><strong>Protocol</strong></td><td>MCP client + server (19 tools), OAuth2 (PKCE), Webhooks, P2P federation</td></tr>
+<tr><td><strong>Protocol</strong></td><td>MCP client + server (22 tools), OAuth2 (PKCE), Webhooks, P2P federation</td></tr>
 </table>
 
 ---
@@ -568,7 +622,7 @@ hive/crates/
 ├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine,
 │                      RAG, embeddings (OpenAI + Ollama), LanceDB memory, background indexer, TOON encoding
 │                      50+ files · 22,000+ lines
-├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (19 tools),
+├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (22 tools),
 │                      Universal Skills (SkillLoader + SkillExecutor, TOML persistence),
 │                      personas, knowledge acquisition, competence detection, skill authoring
 │                      28+ files · 23,000+ lines
@@ -815,7 +869,7 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.31 |
+| Version | 0.3.32 |
 | Crates | 21 |
 | Rust source files | 400+ |
 | Lines of Rust | 200,000+ |
@@ -847,6 +901,18 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.32
+
+**Intelligent Context Management**
+
+- **Session Compression** — ContextWindow tracks token usage per conversation; auto-compacts oldest messages at 80% capacity via budget-tier AI summarization
+- **Tiered Context Loading** — L0/L1/L2 intent classification gates retrieval: simple chat skips RAG entirely, code tasks get full vector search + semantic recall
+- **Memory Lifecycle** — Automatic `decay_scores()` + `prune()` + `deduplicate()` maintenance with Jaccard similarity on collective memory entries
+- **MCP Context Tools** — 3 new tools (`query_memory`, `search_context`, `list_memories`) wired into MCP server for external agent access (19 → 22 tools)
+- **HiveMemory Wiring** — Top 50 key project files indexed into LanceDB vector memory after QuickIndex builds; conversation summaries stored via `HiveMemory::remember()`
+- **Fact Extraction** — Compaction summaries parsed for structured `Preference:/Decision:/Pattern:/Fact:` markers, persisted to LearningService and CollectiveMemory
+- **ContextEngine Enhancements** — `clear_ephemeral()` resets per-message sources; `ContextTier` enum with `from_task_keyword()` classifier; dynamic budget by model context size
 
 ### v0.3.31
 

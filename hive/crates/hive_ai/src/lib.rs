@@ -20,8 +20,8 @@ pub mod types;
 
 // Re-export core types at crate root for convenience.
 pub use context_engine::{
-    ContextBudget, ContextEngine, ContextSource, ContextStats, CuratedContext, RelevanceScore,
-    SourceType,
+    ContextBudget, ContextEngine, ContextSource, ContextStats, ContextTier, CuratedContext,
+    ExtractedFact, FactCategory, RelevanceScore, SourceType, extract_facts,
 };
 pub use cost::{BudgetLimits, CostBreakdown, CostTracker};
 pub use discovery::{DiscoveredProvider, DiscoveryState, LocalDiscovery};
