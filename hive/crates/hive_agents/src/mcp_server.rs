@@ -70,6 +70,158 @@ impl McpServer {
         }
     }
 
+    /// Wire memory and context tools into the MCP server.
+    ///
+    /// Registers 3 tools that expose Hive's memory subsystem to external
+    /// MCP clients: `query_memory`, `list_memories`, and `search_context`.
+    pub fn wire_memory_tools(
+        &mut self,
+        collective_memory: Arc<crate::collective_memory::CollectiveMemory>,
+        context_engine: Arc<std::sync::Mutex<hive_ai::ContextEngine>>,
+    ) {
+        use crate::collective_memory::MemoryCategory;
+        use crate::mcp_client::McpTool;
+
+        // -- query_memory ---------------------------------------------------
+        let mem_query = collective_memory.clone();
+        self.register(
+            McpTool {
+                name: "query_memory".into(),
+                description: "Search Hive's collective memory by relevance. Returns matching memory entries."
+                        .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query" },
+                        "category": { "type": "string", "description": "Optional category filter" },
+                        "limit": { "type": "integer", "description": "Max results (default 10)" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            Box::new(move |args| {
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let category = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .map(MemoryCategory::parse_str);
+                let limit = args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10) as usize;
+
+                let entries = mem_query
+                    .recall(query, category, None, limit)
+                    .map_err(|e| format!("query_memory failed: {e}"))?;
+
+                Ok(json!({
+                    "entries": entries.iter().map(|e| json!({
+                        "id": e.id,
+                        "category": e.category.as_str(),
+                        "content": e.content,
+                        "relevance": e.relevance_score,
+                    })).collect::<Vec<_>>()
+                }))
+            }),
+        );
+
+        // -- list_memories --------------------------------------------------
+        let mem_list = collective_memory.clone();
+        self.register(
+            McpTool {
+                name: "list_memories".into(),
+                description: "List stored memories, optionally filtered by category.".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "category": { "type": "string", "description": "Optional category filter" },
+                        "limit": { "type": "integer", "description": "Max results (default 20)" }
+                    }
+                }),
+            },
+            Box::new(move |args| {
+                let category = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .map(MemoryCategory::parse_str);
+                let limit = args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(20) as usize;
+
+                let entries = mem_list
+                    .recall("", category, None, limit)
+                    .map_err(|e| format!("list_memories failed: {e}"))?;
+
+                Ok(json!({
+                    "count": entries.len(),
+                    "entries": entries.iter().map(|e| json!({
+                        "id": e.id,
+                        "category": e.category.as_str(),
+                        "content": e.content,
+                        "relevance": e.relevance_score,
+                        "created_at": e.created_at,
+                    })).collect::<Vec<_>>()
+                }))
+            }),
+        );
+
+        // -- search_context -------------------------------------------------
+        let ctx_engine = context_engine;
+        self.register(
+            McpTool {
+                name: "search_context".into(),
+                description: "Run the ContextEngine curation pipeline against a query. \
+                     Returns the most relevant context sources."
+                        .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query" },
+                        "max_results": { "type": "integer", "description": "Max sources (default 10)" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            Box::new(move |args| {
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let max_results = args
+                    .get("max_results")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10) as usize;
+
+                let budget = hive_ai::ContextBudget {
+                    max_tokens: 8000,
+                    max_sources: max_results,
+                    reserved_tokens: 0,
+                };
+
+                let mut engine = ctx_engine
+                    .lock()
+                    .map_err(|e| format!("Lock error: {e}"))?;
+
+                let curated = engine.curate(query, &budget);
+
+                Ok(json!({
+                    "total_sources": curated.original_count,
+                    "selected": curated.selected_count,
+                    "total_tokens": curated.total_tokens,
+                    "sources": curated.sources.iter().zip(curated.scores.iter()).map(|(s, score)| json!({
+                        "path": s.path,
+                        "type": format!("{:?}", s.source_type),
+                        "score": score.score,
+                    })).collect::<Vec<_>>()
+                }))
+            }),
+        );
+    }
+
     /// List all available tools.
     pub fn list_tools(&self) -> Vec<&McpTool> {
         let mut tools: Vec<_> = self.tools.values().map(|(def, _)| def).collect();

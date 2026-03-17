@@ -5433,7 +5433,7 @@ dependencies = [
 
 [[package]]
 name = "hive_app"
-version = "0.3.30"
+version = "0.3.31"
 dependencies = [
  "anyhow",
  "axum 0.8.8",

@@ -403,8 +403,82 @@ impl HiveWorkspace {
                     );
                 }
             }
+
+            // Phase 1: trigger context compaction if needed.
+            if svc.read(cx).needs_compaction() {
+                let msgs = svc.read(cx).messages_for_compaction();
+                let summary = msgs.iter()
+                    .map(|m| format!("[{}] {}", m.role, m.content))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let summary = format!(
+                    "Previous conversation summary ({} messages):\n{}",
+                    msgs.len(),
+                    if summary.len() > 2000 { &summary[..2000] } else { &summary }
+                );
+
+                // Capture for fact extraction.
+                let learning_for_facts = cx.has_global::<AppLearning>()
+                    .then(|| Arc::clone(&cx.global::<AppLearning>().0));
+                let memory_for_facts = cx.has_global::<hive_ui_core::AppCollectiveMemory>()
+                    .then(|| Arc::clone(&cx.global::<hive_ui_core::AppCollectiveMemory>().0));
+
+                svc.update(cx, |svc, _cx| {
+                    svc.apply_compaction(summary.clone());
+                });
+
+                // Phase 6: Extract facts (works best with AI-generated summaries,
+                // but also catches any structured lines in the conversation).
+                let facts = hive_ai::extract_facts(&summary);
+                for fact in &facts {
+                    match fact.category {
+                        hive_ai::FactCategory::Preference => {
+                            if let Some(ref learning) = learning_for_facts {
+                                learning.preference_model.observe("preference", &fact.content, 0.8).ok();
+                            }
+                        }
+                        hive_ai::FactCategory::CodePattern => {
+                            if let Some(ref mem) = memory_for_facts {
+                                let entry = hive_agents::collective_memory::MemoryEntry::new(
+                                    hive_agents::collective_memory::MemoryCategory::CodePattern,
+                                    &fact.content,
+                                );
+                                let _ = mem.remember(&entry);
+                            }
+                        }
+                        hive_ai::FactCategory::Decision | hive_ai::FactCategory::Fact => {
+                            if let Some(ref mem) = memory_for_facts {
+                                let entry = hive_agents::collective_memory::MemoryEntry::new(
+                                    hive_agents::collective_memory::MemoryCategory::General,
+                                    &fact.content,
+                                );
+                                let _ = mem.remember(&entry);
+                            }
+                        }
+                    }
+                }
+                if !facts.is_empty() {
+                    tracing::info!("Extracted {} facts from compaction summary", facts.len());
+                }
+            }
         })
         .detach();
+
+        // Phase 3: Run memory maintenance on workspace startup.
+        if cx.has_global::<hive_ui_core::AppCollectiveMemory>() {
+            let mem = &cx.global::<hive_ui_core::AppCollectiveMemory>().0;
+            match mem.maintenance(0.98, 0.1, 0.85) {
+                Ok(report) => {
+                    if report.decayed > 0 || report.pruned > 0 || report.deduplicated > 0 {
+                        tracing::info!(
+                            "Memory maintenance: {} decayed, {} pruned, {} deduplicated",
+                            report.decayed, report.pruned, report.deduplicated
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!("Memory maintenance failed: {e}"),
+            }
+        }
 
         // Build initial status bar from config + providers.
         let mut status_bar = StatusBar::new();
@@ -2804,75 +2878,91 @@ impl HiveWorkspace {
         // 2. Build the AI wire-format messages.
         let ai_messages = self.chat_service.read(cx).build_ai_messages();
 
+        // Classify user intent to determine context loading tier.
+        let context_tier = {
+            let task_type = hive_ai::routing::capability_router::classify_task(&ai_messages);
+            hive_ai::ContextTier::from_task_keyword(&task_type.to_string().replace(' ', "_"))
+        };
+
         // 2b. Query RAG and SemanticSearch for relevant context and compile via ContextEngine
         let ai_messages = {
             let mut all_context = String::new();
 
-            // Pull from RAG document chunks
-            if cx.has_global::<AppRagService>() {
-                if let Ok(rag_svc) = cx.global::<AppRagService>().0.lock() {
-                    let rag_query = hive_ai::RagQuery {
-                        query: user_query_text.clone(),
-                        max_results: 10,
-                        min_similarity: 0.1,
-                    };
-                    if let Ok(result) = rag_svc.query(&rag_query) {
-                        if !result.context.is_empty() {
-                            all_context.push_str(&result.context);
-                            all_context.push_str("\n\n");
-                        }
-                    }
+            // Clear ephemeral sources from prior messages before rebuilding.
+            if cx.has_global::<AppContextEngine>() {
+                if let Ok(mut ctx_engine) = cx.global::<AppContextEngine>().0.lock() {
+                    ctx_engine.clear_ephemeral();
                 }
             }
 
-            if cx.has_global::<AppSemanticSearch>() {
-                let mut candidate_paths = Vec::new();
-
-                if cx.has_global::<AppQuickIndex>() {
-                    let quick_index = &cx.global::<AppQuickIndex>().0;
-                    let mut seen = std::collections::HashSet::new();
-                    for symbol in quick_index.key_symbols.iter().take(32) {
-                        let path = quick_index.project_root.join(&symbol.file);
-                        if seen.insert(path.clone()) {
-                            candidate_paths.push(path);
+            // L2 only: full RAG + semantic search retrieval.
+            if context_tier == hive_ai::ContextTier::L2 {
+                // Pull from RAG document chunks
+                if cx.has_global::<AppRagService>() {
+                    if let Ok(rag_svc) = cx.global::<AppRagService>().0.lock() {
+                        let rag_query = hive_ai::RagQuery {
+                            query: user_query_text.clone(),
+                            max_results: 10,
+                            min_similarity: 0.1,
+                        };
+                        if let Ok(result) = rag_svc.query(&rag_query) {
+                            if !result.context.is_empty() {
+                                all_context.push_str(&result.context);
+                                all_context.push_str("\n\n");
+                            }
                         }
                     }
                 }
 
-                if candidate_paths.is_empty() {
-                    candidate_paths.push(self.current_project_root.clone());
-                }
+                if cx.has_global::<AppSemanticSearch>() {
+                    let mut candidate_paths = Vec::new();
 
-                let candidate_refs: Vec<&std::path::Path> =
-                    candidate_paths.iter().map(|path| path.as_path()).collect();
+                    if cx.has_global::<AppQuickIndex>() {
+                        let quick_index = &cx.global::<AppQuickIndex>().0;
+                        let mut seen = std::collections::HashSet::new();
+                        for symbol in quick_index.key_symbols.iter().take(32) {
+                            let path = quick_index.project_root.join(&symbol.file);
+                            if seen.insert(path.clone()) {
+                                candidate_paths.push(path);
+                            }
+                        }
+                    }
 
-                if let Ok(mut semantic_search) = cx.global::<AppSemanticSearch>().0.lock() {
-                    let results = semantic_search.search_with_context(
-                        &user_query_text,
-                        &candidate_refs,
-                        5,
-                        1,
-                    );
+                    if candidate_paths.is_empty() {
+                        candidate_paths.push(self.current_project_root.clone());
+                    }
 
-                    if !results.is_empty() {
-                        let semantic_context = results
-                            .iter()
-                            .map(|result| {
-                                format!(
-                                    "--- {}:{} ---\n{}\n{}\n{}",
-                                    result.file_path,
-                                    result.line_number,
-                                    result.context_before,
-                                    result.content,
-                                    result.context_after
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n\n");
+                    let candidate_refs: Vec<&std::path::Path> =
+                        candidate_paths.iter().map(|path| path.as_path()).collect();
 
-                        all_context.push_str("## Semantic Search Matches\n\n");
-                        all_context.push_str(&semantic_context);
-                        all_context.push_str("\n\n");
+                    if let Ok(mut semantic_search) = cx.global::<AppSemanticSearch>().0.lock() {
+                        let results = semantic_search.search_with_context(
+                            &user_query_text,
+                            &candidate_refs,
+                            5,
+                            1,
+                        );
+
+                        if !results.is_empty() {
+                            let semantic_context = results
+                                .iter()
+                                .map(|result| {
+                                    format!(
+                                        "--- {}:{} ---\n{}\n{}\n{}",
+                                        result.file_path,
+                                        result.line_number,
+                                        result.context_before,
+                                        result.content,
+                                        result.context_after
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n\n");
+
+                            all_context.push_str("## Semantic Search Matches\n\n");
+                            all_context.push_str(&semantic_context);
+                            all_context.push_str("\n\n");
+                        }
                     }
                 }
             }
@@ -2904,8 +2994,13 @@ impl HiveWorkspace {
 
                     // Also attempt to add semantic search history? Or use it directly.
                     // For the sake of the wiring task, we use ContextEngine to curate.
+                    let budget_tokens = match context_tier {
+                        hive_ai::ContextTier::L0 => 1000,
+                        hive_ai::ContextTier::L1 => 2000,
+                        hive_ai::ContextTier::L2 => 4000,
+                    };
                     let budget = hive_ai::context_engine::ContextBudget {
-                        max_tokens: 4000,
+                        max_tokens: budget_tokens,
                         max_sources: 10,
                         reserved_tokens: 0,
                     };
@@ -10403,6 +10498,13 @@ impl HiveWorkspace {
             )),
         };
         cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
+
+        // Wire memory + context MCP tools.
+        if cx.has_global::<hive_ui_core::AppCollectiveMemory>() && cx.has_global::<AppContextEngine>() {
+            let collective_memory = Arc::clone(&cx.global::<hive_ui_core::AppCollectiveMemory>().0);
+            let context_engine = Arc::clone(&cx.global::<AppContextEngine>().0);
+            cx.global_mut::<AppMcpServer>().0.wire_memory_tools(collective_memory, context_engine);
+        }
     }
 
     fn handle_settings_save_from_view(&mut self, cx: &mut Context<Self>) {

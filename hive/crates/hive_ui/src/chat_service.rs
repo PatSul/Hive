@@ -18,6 +18,7 @@ use hive_ai::types::{
     ChatMessage as AiChatMessage, ChatRequest, MessageRole as AiMessageRole, StopReason,
     StreamChunk, TokenUsage, ToolCall as AiToolCall,
 };
+use hive_core::context::{ContextMessage, ContextWindow};
 use hive_core::conversations::{
     Conversation, ConversationStore, ConversationSummary, StoredMessage, generate_title,
 };
@@ -274,6 +275,8 @@ pub struct ChatService {
     pub pending_approval: Option<PendingToolApproval>,
     /// Sender to resume the tool loop after approval/rejection.
     approval_tx: Option<oneshot::Sender<bool>>,
+    /// Token-budget context window for session compression.
+    context_window: ContextWindow,
 }
 
 /// Route any "Unknown tool" results through the MCP integration server.
@@ -330,6 +333,7 @@ impl ChatService {
             generation: 0,
             pending_approval: None,
             approval_tx: None,
+            context_window: ContextWindow::new(128_000),
         }
     }
 
@@ -380,6 +384,7 @@ impl ChatService {
         self._stream_task = None;
         self.pending_approval = None;
         self.approval_tx = None;
+        self.context_window = ContextWindow::new(self.context_window.max_tokens());
         self.generation += 1;
     }
 
@@ -503,6 +508,13 @@ impl ChatService {
         self._stream_task = None;
         self.generation += 1;
 
+        // Rebuild the context window from the loaded messages.
+        self.context_window = ContextWindow::new(self.context_window.max_tokens());
+        for msg in &self.messages {
+            let role = msg.role.to_stored();
+            self.context_window.push(ContextMessage::new(role, &msg.content));
+        }
+
         info!(
             "ChatService: loaded conversation {} ({} messages)",
             id,
@@ -522,6 +534,36 @@ impl ChatService {
     pub fn delete_conversation(id: &str) -> anyhow::Result<()> {
         let store = ConversationStore::new()?;
         store.delete(id)
+    }
+
+    // -- Context Window -----------------------------------------------------
+
+    /// Returns true when the conversation has grown enough to need compaction.
+    pub fn needs_compaction(&self) -> bool {
+        self.context_window.needs_compaction()
+    }
+
+    /// Returns the oldest non-pinned messages for compaction summarization.
+    pub fn messages_for_compaction(&self) -> Vec<ContextMessage> {
+        self.context_window
+            .messages()
+            .iter()
+            .filter(|m| !m.pinned && !m.is_compacted)
+            .take(self.context_window.message_count() / 2)
+            .cloned()
+            .collect()
+    }
+
+    /// Apply a compaction summary, replacing old messages with a single summary.
+    pub fn apply_compaction(&mut self, summary: String) {
+        let result = self.context_window.compact(|_| Ok(summary.clone()));
+        if let Some(Ok(report)) = result {
+            tracing::info!(
+                "Context compacted: {} messages → summary ({} tokens freed)",
+                report.messages_compacted,
+                report.tokens_freed
+            );
+        }
     }
 
     // -- Sending ------------------------------------------------------------
@@ -605,6 +647,7 @@ impl ChatService {
         // 1. Record the user message.
         let user_msg = ChatMessage::user(&content);
         self.messages.push(user_msg);
+        self.context_window.push(ContextMessage::new("user", &content));
 
         // 2. Prepare streaming state.
         self.is_streaming = true;
@@ -1160,6 +1203,7 @@ impl ChatService {
         self.is_streaming = false;
         self._stream_task = None;
         self.generation += 1;
+        self.context_window.push(ContextMessage::new("assistant", content));
 
         info!(
             "ChatService: stream finalized ({} messages, model={})",
