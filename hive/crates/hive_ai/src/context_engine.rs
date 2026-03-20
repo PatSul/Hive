@@ -104,6 +104,87 @@ pub struct ContextStats {
     pub by_type: HashMap<SourceType, usize>,
 }
 
+/// Context loading tier inspired by OpenViking's L0/L1/L2 architecture.
+///
+/// - **L0**: Always loaded — system prompt, preferences, knowledge files
+/// - **L1**: On-demand — project structure, open files, quick index
+/// - **L2**: Retrieved — RAG, semantic search, HiveMemory recall
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContextTier {
+    /// Minimal context (chat, translation, summarization).
+    L0,
+    /// Moderate context (creative writing, data analysis).
+    L1,
+    /// Full retrieval (coding, reasoning, math, tool use).
+    L2,
+}
+
+impl ContextTier {
+    /// Map an AI task type to the appropriate context loading tier.
+    pub fn from_task_keyword(task: &str) -> Self {
+        let lower = task.to_lowercase();
+        match lower.as_str() {
+            "generalchat" | "general_chat" | "translation" | "summarization" => Self::L0,
+            "creativewriting"
+            | "creative_writing"
+            | "instructionfollowing"
+            | "instruction_following"
+            | "dataanalysis"
+            | "data_analysis" => Self::L1,
+            _ => Self::L2, // coding, reasoning, math, tool_use, agentic, vision, etc.
+        }
+    }
+}
+
+/// Category of a fact extracted from a conversation summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactCategory {
+    Preference,
+    Decision,
+    CodePattern,
+    Fact,
+}
+
+/// A durable fact extracted from a compacted conversation summary.
+#[derive(Debug, Clone)]
+pub struct ExtractedFact {
+    pub category: FactCategory,
+    pub content: String,
+}
+
+/// Extract structured facts from a compaction summary.
+///
+/// The summarization prompt is expected to prefix durable facts with one of:
+/// `Preference:`, `Decision:`, `Pattern:`, `Fact:`.
+pub fn extract_facts(summary: &str) -> Vec<ExtractedFact> {
+    let mut facts = Vec::new();
+    for line in summary.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Preference:") {
+            facts.push(ExtractedFact {
+                category: FactCategory::Preference,
+                content: rest.trim().to_string(),
+            });
+        } else if let Some(rest) = trimmed.strip_prefix("Decision:") {
+            facts.push(ExtractedFact {
+                category: FactCategory::Decision,
+                content: rest.trim().to_string(),
+            });
+        } else if let Some(rest) = trimmed.strip_prefix("Pattern:") {
+            facts.push(ExtractedFact {
+                category: FactCategory::CodePattern,
+                content: rest.trim().to_string(),
+            });
+        } else if let Some(rest) = trimmed.strip_prefix("Fact:") {
+            facts.push(ExtractedFact {
+                category: FactCategory::Fact,
+                content: rest.trim().to_string(),
+            });
+        }
+    }
+    facts
+}
+
 // ---------------------------------------------------------------------------
 // Keyword / tokenization helpers
 // ---------------------------------------------------------------------------
@@ -193,6 +274,19 @@ impl ContextEngine {
             source_type: SourceType::LearnedPreference,
             last_modified: Utc::now(),
         });
+    }
+
+    /// Remove all ephemeral sources (File, Symbol, Test, etc.) while keeping
+    /// persistent ones (ProjectKnowledge, LearnedPreference). Call this at the
+    /// start of each message's context assembly to avoid TF-IDF index bloat.
+    pub fn clear_ephemeral(&mut self) {
+        self.sources.retain(|s| {
+            matches!(
+                s.source_type,
+                SourceType::ProjectKnowledge | SourceType::LearnedPreference
+            )
+        });
+        self.idf_cache.clear();
     }
 
     /// Add a project knowledge file (HIVE.md, README.md, etc.) as a context source.

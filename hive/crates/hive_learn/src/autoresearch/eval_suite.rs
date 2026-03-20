@@ -116,8 +116,7 @@ pub fn parse_eval_questions_from_toml(toml_str: &str) -> Result<Vec<EvalQuestion
         #[serde(default)]
         eval: Vec<EvalQuestion>,
     }
-    let root: TomlRoot =
-        toml::from_str(toml_str).map_err(|e| format!("TOML parse error: {e}"))?;
+    let root: TomlRoot = toml::from_str(toml_str).map_err(|e| format!("TOML parse error: {e}"))?;
     Ok(root.eval)
 }
 
@@ -198,8 +197,16 @@ mod tests {
     #[test]
     fn test_eval_suite_from_explicit() {
         let questions = vec![
-            EvalQuestion { id: "a".into(), question: "Q1?".into(), weight: 1.0 },
-            EvalQuestion { id: "b".into(), question: "Q2?".into(), weight: 2.0 },
+            EvalQuestion {
+                id: "a".into(),
+                question: "Q1?".into(),
+                weight: 1.0,
+            },
+            EvalQuestion {
+                id: "b".into(),
+                question: "Q2?".into(),
+                weight: 2.0,
+            },
         ];
         let suite = EvalSuite::from_explicit("my-skill".into(), questions);
         assert_eq!(suite.skill_name, "my-skill");
@@ -209,14 +216,33 @@ mod tests {
 
     #[test]
     fn test_eval_suite_weighted_pass_rate() {
-        let suite = EvalSuite::from_explicit("test".into(), vec![
-            EvalQuestion { id: "a".into(), question: "Q1?".into(), weight: 2.0 },
-            EvalQuestion { id: "b".into(), question: "Q2?".into(), weight: 1.0 },
-        ]);
+        let suite = EvalSuite::from_explicit(
+            "test".into(),
+            vec![
+                EvalQuestion {
+                    id: "a".into(),
+                    question: "Q1?".into(),
+                    weight: 2.0,
+                },
+                EvalQuestion {
+                    id: "b".into(),
+                    question: "Q2?".into(),
+                    weight: 1.0,
+                },
+            ],
+        );
         use crate::autoresearch::types::EvalResult;
         let results = vec![
-            EvalResult { question_id: "a".into(), passed: true, reasoning: "ok".into() },
-            EvalResult { question_id: "b".into(), passed: false, reasoning: "bad".into() },
+            EvalResult {
+                question_id: "a".into(),
+                passed: true,
+                reasoning: "ok".into(),
+            },
+            EvalResult {
+                question_id: "b".into(),
+                passed: false,
+                reasoning: "bad".into(),
+            },
         ];
         // weighted: (2.0 * 1 + 1.0 * 0) / (2.0 + 1.0) = 0.6667
         let rate = suite.weighted_pass_rate(&results);
@@ -225,14 +251,33 @@ mod tests {
 
     #[test]
     fn test_eval_suite_weighted_pass_rate_all_pass() {
-        let suite = EvalSuite::from_explicit("test".into(), vec![
-            EvalQuestion { id: "a".into(), question: "Q1?".into(), weight: 1.0 },
-            EvalQuestion { id: "b".into(), question: "Q2?".into(), weight: 1.0 },
-        ]);
+        let suite = EvalSuite::from_explicit(
+            "test".into(),
+            vec![
+                EvalQuestion {
+                    id: "a".into(),
+                    question: "Q1?".into(),
+                    weight: 1.0,
+                },
+                EvalQuestion {
+                    id: "b".into(),
+                    question: "Q2?".into(),
+                    weight: 1.0,
+                },
+            ],
+        );
         use crate::autoresearch::types::EvalResult;
         let results = vec![
-            EvalResult { question_id: "a".into(), passed: true, reasoning: "ok".into() },
-            EvalResult { question_id: "b".into(), passed: true, reasoning: "ok".into() },
+            EvalResult {
+                question_id: "a".into(),
+                passed: true,
+                reasoning: "ok".into(),
+            },
+            EvalResult {
+                question_id: "b".into(),
+                passed: true,
+                reasoning: "ok".into(),
+            },
         ];
         let rate = suite.weighted_pass_rate(&results);
         assert!((rate - 1.0).abs() < f64::EPSILON);
@@ -240,9 +285,14 @@ mod tests {
 
     #[test]
     fn test_eval_suite_weighted_pass_rate_empty_results() {
-        let suite = EvalSuite::from_explicit("test".into(), vec![
-            EvalQuestion { id: "a".into(), question: "Q1?".into(), weight: 1.0 },
-        ]);
+        let suite = EvalSuite::from_explicit(
+            "test".into(),
+            vec![EvalQuestion {
+                id: "a".into(),
+                question: "Q1?".into(),
+                weight: 1.0,
+            }],
+        );
         use crate::autoresearch::types::EvalResult;
         let results: Vec<EvalResult> = vec![];
         let rate = suite.weighted_pass_rate(&results);
@@ -277,9 +327,14 @@ mod tests {
 
     #[test]
     fn test_eval_suite_serde_roundtrip() {
-        let suite = EvalSuite::from_explicit("test".into(), vec![
-            EvalQuestion { id: "a".into(), question: "Q?".into(), weight: 1.0 },
-        ]);
+        let suite = EvalSuite::from_explicit(
+            "test".into(),
+            vec![EvalQuestion {
+                id: "a".into(),
+                question: "Q?".into(),
+                weight: 1.0,
+            }],
+        );
         let json = serde_json::to_string(&suite).unwrap();
         let parsed: EvalSuite = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.skill_name, "test");

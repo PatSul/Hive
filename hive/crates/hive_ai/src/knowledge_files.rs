@@ -212,7 +212,9 @@ impl KnowledgeFileScanner {
         sources: &mut Vec<KnowledgeSource>,
     ) {
         // Security: ensure the file is within the project root.
-        let canonical_root = project_root.canonicalize().unwrap_or_else(|_| project_root.to_path_buf());
+        let canonical_root = project_root
+            .canonicalize()
+            .unwrap_or_else(|_| project_root.to_path_buf());
         let canonical_file = file_path.canonicalize();
         if let Ok(ref canon) = canonical_file {
             if !canon.starts_with(&canonical_root) {
@@ -280,12 +282,19 @@ mod tests {
     #[test]
     fn test_scan_finds_hive_md() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("HIVE.md"), "# Project Instructions\nUse Rust.").unwrap();
+        std::fs::write(
+            dir.path().join("HIVE.md"),
+            "# Project Instructions\nUse Rust.",
+        )
+        .unwrap();
 
         let sources = KnowledgeFileScanner::scan(dir.path());
 
         assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].source_type, KnowledgeSourceType::HiveInstructions);
+        assert_eq!(
+            sources[0].source_type,
+            KnowledgeSourceType::HiveInstructions
+        );
         assert_eq!(sources[0].priority, 1.0);
         assert!(sources[0].content.contains("Use Rust"));
     }
@@ -308,7 +317,10 @@ mod tests {
 
         let sources = KnowledgeFileScanner::scan(dir.path());
 
-        assert!(sources.is_empty(), "Files exceeding size cap should be skipped");
+        assert!(
+            sources.is_empty(),
+            "Files exceeding size cap should be skipped"
+        );
     }
 
     #[test]
@@ -367,7 +379,10 @@ mod tests {
 
         let sources = KnowledgeFileScanner::scan(dir.path());
 
-        assert!(sources.is_empty(), "Empty/whitespace-only files should be skipped");
+        assert!(
+            sources.is_empty(),
+            "Empty/whitespace-only files should be skipped"
+        );
     }
 
     #[test]
@@ -413,7 +428,10 @@ mod tests {
         let sources = KnowledgeFileScanner::scan(dir.path());
 
         assert_eq!(sources.len(), 3);
-        assert_eq!(sources[0].source_type, KnowledgeSourceType::HiveInstructions);
+        assert_eq!(
+            sources[0].source_type,
+            KnowledgeSourceType::HiveInstructions
+        );
         assert_eq!(sources[1].source_type, KnowledgeSourceType::Readme);
         assert_eq!(sources[2].source_type, KnowledgeSourceType::Contributing);
     }

@@ -144,13 +144,10 @@ impl SyncClient {
             return Err(SyncError::Server { status, message });
         }
 
-        let manifest: ManifestResponse = resp
-            .json()
-            .await
-            .map_err(|e| SyncError::Server {
-                status: 0,
-                message: format!("Failed to parse manifest: {e}"),
-            })?;
+        let manifest: ManifestResponse = resp.json().await.map_err(|e| SyncError::Server {
+            status: 0,
+            message: format!("Failed to parse manifest: {e}"),
+        })?;
 
         Ok(manifest)
     }

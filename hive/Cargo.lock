@@ -5433,7 +5433,7 @@ dependencies = [
 
 [[package]]
 name = "hive_app"
-version = "0.3.30"
+version = "0.3.31"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -5699,8 +5699,11 @@ dependencies = [
  "hex",
  "hive_agents",
  "hive_ai",
+ "hive_assistant",
  "hive_core",
+ "hive_fs",
  "hive_network",
+ "hive_terminal",
  "hkdf",
  "http 1.4.0",
  "http-body-util",

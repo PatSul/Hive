@@ -5,31 +5,35 @@ fn test_from_index_valid() {
     assert_eq!(Panel::from_index(0), Some(Panel::Chat));
     assert_eq!(Panel::from_index(1), Some(Panel::History));
     assert_eq!(Panel::from_index(2), Some(Panel::Files));
-    assert_eq!(Panel::from_index(3), Some(Panel::Specs));
-    assert_eq!(Panel::from_index(4), Some(Panel::Agents));
-    assert_eq!(Panel::from_index(5), Some(Panel::Workflows));
-    assert_eq!(Panel::from_index(6), Some(Panel::Channels));
-    assert_eq!(Panel::from_index(7), Some(Panel::Kanban));
-    assert_eq!(Panel::from_index(8), Some(Panel::Monitor));
-    assert_eq!(Panel::from_index(9), Some(Panel::Logs));
-    assert_eq!(Panel::from_index(10), Some(Panel::Costs));
-    assert_eq!(Panel::from_index(11), Some(Panel::Review));
-    assert_eq!(Panel::from_index(12), Some(Panel::Skills));
-    assert_eq!(Panel::from_index(13), Some(Panel::Routing));
-    assert_eq!(Panel::from_index(14), Some(Panel::Models));
-    assert_eq!(Panel::from_index(15), Some(Panel::Learning));
-    assert_eq!(Panel::from_index(16), Some(Panel::Shield));
-    assert_eq!(Panel::from_index(17), Some(Panel::Assistant));
-    assert_eq!(Panel::from_index(18), Some(Panel::TokenLaunch));
-    assert_eq!(Panel::from_index(19), Some(Panel::Network));
-    assert_eq!(Panel::from_index(20), Some(Panel::Settings));
-    assert_eq!(Panel::from_index(21), Some(Panel::Help));
-    assert_eq!(Panel::from_index(22), Some(Panel::QuickStart));
+    assert_eq!(Panel::from_index(3), Some(Panel::CodeMap));
+    assert_eq!(Panel::from_index(4), Some(Panel::PromptLibrary));
+    assert_eq!(Panel::from_index(5), Some(Panel::Specs));
+    assert_eq!(Panel::from_index(6), Some(Panel::Agents));
+    assert_eq!(Panel::from_index(7), Some(Panel::Workflows));
+    assert_eq!(Panel::from_index(8), Some(Panel::Channels));
+    assert_eq!(Panel::from_index(9), Some(Panel::Kanban));
+    assert_eq!(Panel::from_index(10), Some(Panel::Monitor));
+    assert_eq!(Panel::from_index(11), Some(Panel::Activity));
+    assert_eq!(Panel::from_index(12), Some(Panel::Logs));
+    assert_eq!(Panel::from_index(13), Some(Panel::Costs));
+    assert_eq!(Panel::from_index(14), Some(Panel::Review));
+    assert_eq!(Panel::from_index(15), Some(Panel::Skills));
+    assert_eq!(Panel::from_index(16), Some(Panel::Routing));
+    assert_eq!(Panel::from_index(17), Some(Panel::Models));
+    assert_eq!(Panel::from_index(18), Some(Panel::Learning));
+    assert_eq!(Panel::from_index(19), Some(Panel::Shield));
+    assert_eq!(Panel::from_index(20), Some(Panel::Assistant));
+    assert_eq!(Panel::from_index(21), Some(Panel::TokenLaunch));
+    assert_eq!(Panel::from_index(22), Some(Panel::Network));
+    assert_eq!(Panel::from_index(23), Some(Panel::Terminal));
+    assert_eq!(Panel::from_index(24), Some(Panel::Settings));
+    assert_eq!(Panel::from_index(25), Some(Panel::Help));
+    assert_eq!(Panel::from_index(26), Some(Panel::QuickStart));
 }
 
 #[test]
 fn test_from_index_out_of_bounds() {
-    assert_eq!(Panel::from_index(23), None);
+    assert_eq!(Panel::from_index(27), None);
     assert_eq!(Panel::from_index(100), None);
     assert_eq!(Panel::from_index(usize::MAX), None);
 }
@@ -45,11 +49,12 @@ fn test_from_index_matches_all_array() {
 fn test_sidebar_default_panel_is_chat() {
     let sidebar = Sidebar::new();
     assert_eq!(sidebar.active_panel, Panel::Chat);
+    assert_eq!(sidebar.active_destination, ShellDestination::Build);
 }
 
 #[test]
 fn test_panel_all_count() {
-    assert_eq!(Panel::ALL.len(), 23);
+    assert_eq!(Panel::ALL.len(), 27);
 }
 
 // -- Panel stored round-trip tests --------------------------------------

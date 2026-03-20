@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::rules::ApprovalRule;
 use super::OperationType;
+use super::rules::ApprovalRule;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalRequest {
@@ -76,14 +76,21 @@ impl ApprovalGate {
 
         let (tx, rx) = oneshot::channel();
 
-        self.pending.lock().unwrap().insert(request.id.clone(), request.clone());
-        self.response_channels.lock().unwrap().insert(request.id.clone(), tx);
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(request.id.clone(), request.clone());
+        self.response_channels
+            .lock()
+            .unwrap()
+            .insert(request.id.clone(), tx);
 
         Some((request, rx))
     }
 
     pub fn check_sync(&self, agent_id: &str, operation: &OperationType) -> Option<ApprovalRequest> {
-        self.check_with_channel(agent_id, operation).map(|(req, _rx)| req)
+        self.check_with_channel(agent_id, operation)
+            .map(|(req, _rx)| req)
     }
 
     pub fn respond(&self, request_id: &str, decision: ApprovalDecision) {

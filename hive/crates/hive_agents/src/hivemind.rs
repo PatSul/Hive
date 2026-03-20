@@ -634,10 +634,8 @@ impl<E: AiExecutor> HiveMind<E> {
                 if let Ok(mut q) = queue.lock() {
                     let steering = q.drain_steering();
                     for msg in &steering {
-                        enriched_task = format!(
-                            "{}\n\n[User steering]: {}",
-                            enriched_task, msg.content
-                        );
+                        enriched_task =
+                            format!("{}\n\n[User steering]: {}", enriched_task, msg.content);
                     }
                 }
             }
@@ -900,9 +898,9 @@ mod tests {
                     prompt_tokens: 100,
                     completion_tokens: 200,
                     total_tokens: 300,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,
@@ -1633,9 +1631,9 @@ mod tests {
             prompt_tokens: 1_000_000,
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            };
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        };
         // Opus: $15 input + $75 output = $90
         let opus_cost = estimate_cost_from_usage("claude-opus-4", &usage);
         assert!((opus_cost - 90.0).abs() < 0.01);
@@ -1663,9 +1661,9 @@ mod tests {
                         prompt_tokens: 10,
                         completion_tokens: 10,
                         total_tokens: 20,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+                        cache_creation_input_tokens: None,
+                        cache_read_input_tokens: None,
+                    },
                     finish_reason: FinishReason::Stop,
                     thinking: None,
                     tool_calls: None,

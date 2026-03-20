@@ -752,26 +752,14 @@ mod tests {
                 ModelTier::Mid,
                 TypesProviderType::Anthropic,
             ),
-            make_model(
-                "gpt-4o",
-                ModelTier::Premium,
-                TypesProviderType::OpenAI,
-            ),
-            make_model(
-                "gpt-4o-mini",
-                ModelTier::Mid,
-                TypesProviderType::OpenAI,
-            ),
+            make_model("gpt-4o", ModelTier::Premium, TypesProviderType::OpenAI),
+            make_model("gpt-4o-mini", ModelTier::Mid, TypesProviderType::OpenAI),
             make_model(
                 "deepseek/deepseek-chat",
                 ModelTier::Budget,
                 TypesProviderType::OpenRouter,
             ),
-            make_model(
-                "o3",
-                ModelTier::Premium,
-                TypesProviderType::OpenAI,
-            ),
+            make_model("o3", ModelTier::Premium, TypesProviderType::OpenAI),
         ]
     }
 
@@ -829,12 +817,8 @@ mod tests {
     fn route_with_capabilities_empty_models_falls_back() {
         let router = setup_router();
 
-        let decision = router.route_with_capabilities(
-            &[user_msg("What is Rust?")],
-            &[],
-            None,
-            None,
-        );
+        let decision =
+            router.route_with_capabilities(&[user_msg("What is Rust?")], &[], None, None);
 
         // With empty models, should fall back to standard route() behaviour
         // which classifies "What is Rust?" as Budget tier.

@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use a2a_rs::{Message, MessageSendParams, Task, TaskState, TaskStatusUpdateEvent};
 use axum::extract::{Path, State};
+use axum::http::HeaderName;
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json};
@@ -27,7 +28,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, Mutex, Semaphore};
-use axum::http::HeaderName;
 use tower_http::cors::{Any, CorsLayer};
 
 use hive_agents::hivemind::AiExecutor;
@@ -290,11 +290,15 @@ async fn send_message_handler(
                         .await
                         .ok();
                     });
-                    rpc_success(rpc_request.id, serde_json::to_value(task).unwrap_or_default())
+                    rpc_success(
+                        rpc_request.id,
+                        serde_json::to_value(task).unwrap_or_default(),
+                    )
                 }
-                Ok(Ok(task)) => {
-                    rpc_success(rpc_request.id, serde_json::to_value(task).unwrap_or_default())
-                }
+                Ok(Ok(task)) => rpc_success(
+                    rpc_request.id,
+                    serde_json::to_value(task).unwrap_or_default(),
+                ),
                 Ok(Err(error)) => {
                     let (status, code) = match error {
                         A2aError::TaskNotFound(_) => (StatusCode::NOT_FOUND, -32004),
@@ -343,7 +347,10 @@ async fn get_task_handler(
     };
 
     match tokio::task::spawn_blocking(move || task_handler.get_task_blocking(&task_id)).await {
-        Ok(Ok(task)) => (StatusCode::OK, Json(serde_json::to_value(task).unwrap_or_default())),
+        Ok(Ok(task)) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(task).unwrap_or_default()),
+        ),
         Ok(Err(A2aError::TaskNotFound(message))) => json_error(StatusCode::NOT_FOUND, message),
         Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         Err(e) => json_error(
@@ -396,8 +403,7 @@ async fn task_events_handler(
     };
 
     if task_is_final(&task.status.state) {
-        let snapshot =
-            serde_json::to_string(&status_update_from_task(&task)).unwrap_or_default();
+        let snapshot = serde_json::to_string(&status_update_from_task(&task)).unwrap_or_default();
         let stream = stream::once(async move {
             Ok::<Event, Infallible>(Event::default().event("status").data(snapshot))
         })

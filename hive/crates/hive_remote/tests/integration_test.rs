@@ -3,7 +3,7 @@
 
 use hive_remote::pairing::{PairingKeypair, SessionKeys};
 use hive_remote::protocol::DaemonEvent;
-use hive_remote::qr::{generate_pairing_qr, PairingQrPayload};
+use hive_remote::qr::{PairingQrPayload, generate_pairing_qr};
 use hive_remote::relay::EncryptedEnvelope;
 
 // ---------------------------------------------------------------------------
@@ -81,6 +81,7 @@ async fn test_daemon_journal_survives_restart() {
 
     let dir = tempfile::tempdir().unwrap();
     let config = DaemonConfig {
+        config_root: Some(dir.path().join("config")),
         data_dir: dir.path().to_path_buf(),
         ..DaemonConfig::default()
     };
@@ -102,16 +103,12 @@ async fn test_daemon_journal_survives_restart() {
             .await;
 
         daemon
-            .handle_event(DaemonEvent::SendMessage {
-                conversation_id: "conv-42".into(),
-                content: "hello".into(),
-                model: "test".into(),
-            })
-            .await;
+            .begin_send_message("conv-42".into(), "hello".into(), "test".into())
+            .unwrap();
 
         // Verify in-memory state before drop
         let snap = daemon.get_snapshot();
-        assert_eq!(snap.active_panel, "monitor");
+        assert_eq!(snap.active_panel, "chat");
         assert_eq!(snap.active_conversation, Some("conv-42".into()));
     }
 
@@ -119,13 +116,13 @@ async fn test_daemon_journal_survives_restart() {
     {
         let mut daemon = HiveDaemon::new(config).unwrap();
 
-        // Before replay, state should be at defaults
+        // New daemon instances replay their journal during construction.
         let snap_before = daemon.get_snapshot();
-        assert_eq!(snap_before.active_panel, "chat");
-        assert_eq!(snap_before.active_conversation, None);
+        assert_eq!(snap_before.active_panel, "monitor");
+        assert_eq!(snap_before.active_conversation, Some("conv-42".into()));
 
-        // Replay journal
-        daemon.replay_journal().await.unwrap();
+        // Replay is idempotent if run again manually.
+        daemon.replay_journal().unwrap();
 
         // After replay, state should match end of first session
         let snap_after = daemon.get_snapshot();

@@ -238,23 +238,24 @@ impl AiProvider for GenericLocalProvider {
     async fn get_models(&self) -> Vec<ModelInfo> {
         // Try the remote endpoint first.
         if let Some(entries) = self.fetch_remote_models().await
-            && !entries.is_empty() {
-                return entries
-                    .into_iter()
-                    .map(|m| ModelInfo {
-                        id: m.id.clone(),
-                        name: m.id,
-                        provider: "generic_local".into(),
-                        provider_type: ProviderType::GenericLocal,
-                        tier: ModelTier::Free,
-                        context_window: 8192,
-                        input_price_per_mtok: 0.0,
-                        output_price_per_mtok: 0.0,
-                        capabilities: Default::default(),
-                        release_date: None,
-                    })
-                    .collect();
-            }
+            && !entries.is_empty()
+        {
+            return entries
+                .into_iter()
+                .map(|m| ModelInfo {
+                    id: m.id.clone(),
+                    name: m.id,
+                    provider: "generic_local".into(),
+                    provider_type: ProviderType::GenericLocal,
+                    tier: ModelTier::Free,
+                    context_window: 8192,
+                    input_price_per_mtok: 0.0,
+                    output_price_per_mtok: 0.0,
+                    capabilities: Default::default(),
+                    release_date: None,
+                })
+                .collect();
+        }
 
         // Fall back to default_model if configured.
         match &self.default_model {
@@ -306,9 +307,9 @@ impl AiProvider for GenericLocalProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }
             })
             .unwrap_or_default();
 

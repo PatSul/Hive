@@ -234,9 +234,9 @@ impl AiProvider for GroqProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }
             })
             .unwrap_or_default();
 

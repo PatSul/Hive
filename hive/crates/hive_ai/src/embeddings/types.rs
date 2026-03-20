@@ -16,7 +16,10 @@ pub enum EmbeddingError {
     /// Network error
     Network(String),
     /// Input too long for model
-    InputTooLong { max_tokens: usize, actual_tokens: usize },
+    InputTooLong {
+        max_tokens: usize,
+        actual_tokens: usize,
+    },
     /// Other errors
     Other(String),
 }
@@ -28,8 +31,14 @@ impl fmt::Display for EmbeddingError {
             Self::AuthError(msg) => write!(f, "Authentication error: {msg}"),
             Self::RateLimit => write!(f, "Rate limit exceeded"),
             Self::Network(msg) => write!(f, "Network error: {msg}"),
-            Self::InputTooLong { max_tokens, actual_tokens } => {
-                write!(f, "Input too long: {actual_tokens} tokens (max {max_tokens})")
+            Self::InputTooLong {
+                max_tokens,
+                actual_tokens,
+            } => {
+                write!(
+                    f,
+                    "Input too long: {actual_tokens} tokens (max {max_tokens})"
+                )
             }
             Self::Other(msg) => write!(f, "Embedding error: {msg}"),
         }
@@ -72,7 +81,9 @@ impl EmbeddingProvider for MockEmbeddingProvider {
             .iter()
             .map(|text| {
                 // Deterministic: hash-based so same text = same embedding
-                let seed = text.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+                let seed = text
+                    .bytes()
+                    .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
                 (0..self.dims)
                     .map(|i| {
                         let val = ((seed.wrapping_mul(i as u32 + 1)) % 1000) as f32 / 1000.0;

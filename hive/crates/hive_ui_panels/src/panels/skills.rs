@@ -1,16 +1,14 @@
-use gpui::*;
 use gpui::prelude::FluentBuilder;
+use gpui::*;
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
-    PluginImportOpen, PluginImportCancel, PluginImportConfirm,
-    PluginImportFromGitHub, PluginImportFromUrl, PluginImportFromLocal,
-    PluginImportToggleSkill, PluginRemove, PluginUpdate, PluginToggleExpand,
-    PluginToggleSkill,
-    SkillsAddSource, SkillsClearSearch, SkillsCreate, SkillsInstall, SkillsRefresh,
-    SkillsRemove, SkillsRemoveSource, SkillsSetCategory, SkillsSetTab,
-    SkillsToggle,
+    PluginImportCancel, PluginImportConfirm, PluginImportFromGitHub, PluginImportFromLocal,
+    PluginImportFromUrl, PluginImportOpen, PluginImportToggleSkill, PluginRemove,
+    PluginToggleExpand, PluginToggleSkill, PluginUpdate, SkillsAddSource, SkillsClearSearch,
+    SkillsCreate, SkillsInstall, SkillsRefresh, SkillsRemove, SkillsRemoveSource,
+    SkillsSetCategory, SkillsSetTab, SkillsToggle,
 };
 
 // ---------------------------------------------------------------------------
@@ -257,9 +255,10 @@ impl SkillsData {
             .filter(|s| {
                 // Category filter
                 if let Some(cat) = self.selected_category
-                    && s.category != cat {
-                        return false;
-                    }
+                    && s.category != cat
+                {
+                    return false;
+                }
                 // Text search filter
                 if self.search_query.is_empty() {
                     return true;
@@ -782,18 +781,14 @@ fn render_installed_tab(
                 .items_center()
                 .gap(theme.space_2)
                 .py(theme.space_2)
-                .child(
-                    div().flex_1().h(px(1.0)).bg(theme.border),
-                )
+                .child(div().flex_1().h(px(1.0)).bg(theme.border))
                 .child(
                     div()
                         .text_size(theme.font_size_xs)
                         .text_color(theme.text_muted)
                         .child("Individual Skills"),
                 )
-                .child(
-                    div().flex_1().h(px(1.0)).bg(theme.border),
-                ),
+                .child(div().flex_1().h(px(1.0)).bg(theme.border)),
         );
     }
 
@@ -1560,10 +1555,7 @@ fn source_count_badge(source: &SkillSource, theme: &HiveTheme) -> Div {
 fn source_remove_button(source: &SkillSource, theme: &HiveTheme) -> Stateful<Div> {
     let remove_url = source.url.clone();
     div()
-        .id(SharedString::from(format!(
-            "remove-source-{}",
-            source.name
-        )))
+        .id(SharedString::from(format!("remove-source-{}", source.name)))
         .px(theme.space_2)
         .py(px(2.0))
         .rounded(theme.radius_sm)
@@ -1615,17 +1607,45 @@ fn render_import_method_dropdown(theme: &HiveTheme) -> AnyElement {
                 .border_1()
                 .border_color(theme.border)
                 .overflow_hidden()
-                .child(import_method_row("import-from-github", "From GitHub...", theme, |_event, window, cx| {
-                    window.dispatch_action(Box::new(PluginImportFromGitHub { owner_repo: String::new() }), cx);
-                }))
+                .child(import_method_row(
+                    "import-from-github",
+                    "From GitHub...",
+                    theme,
+                    |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(PluginImportFromGitHub {
+                                owner_repo: String::new(),
+                            }),
+                            cx,
+                        );
+                    },
+                ))
                 .child(separator(theme))
-                .child(import_method_row("import-from-url", "From URL...", theme, |_event, window, cx| {
-                    window.dispatch_action(Box::new(PluginImportFromUrl { url: String::new() }), cx);
-                }))
+                .child(import_method_row(
+                    "import-from-url",
+                    "From URL...",
+                    theme,
+                    |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(PluginImportFromUrl { url: String::new() }),
+                            cx,
+                        );
+                    },
+                ))
                 .child(separator(theme))
-                .child(import_method_row("import-from-local", "From Local File...", theme, |_event, window, cx| {
-                    window.dispatch_action(Box::new(PluginImportFromLocal { path: String::new() }), cx);
-                })),
+                .child(import_method_row(
+                    "import-from-local",
+                    "From Local File...",
+                    theme,
+                    |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(PluginImportFromLocal {
+                                path: String::new(),
+                            }),
+                            cx,
+                        );
+                    },
+                )),
         )
         .child(import_cancel_button(theme))
         .into_any_element()
@@ -1683,12 +1703,7 @@ fn render_import_input_url(text: &str, theme: &HiveTheme) -> AnyElement {
         "import-url-fetch",
         theme,
         move |_event, window, cx| {
-            window.dispatch_action(
-                Box::new(PluginImportFromUrl {
-                    url: url.clone(),
-                }),
-                cx,
-            );
+            window.dispatch_action(Box::new(PluginImportFromUrl { url: url.clone() }), cx);
         },
     )
 }
@@ -2052,10 +2067,7 @@ fn import_preview_checkbox_row(
         .cursor_pointer()
         .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-            window.dispatch_action(
-                Box::new(PluginImportToggleSkill { index }),
-                cx,
-            );
+            window.dispatch_action(Box::new(PluginImportToggleSkill { index }), cx);
         })
         .child(
             div()
@@ -2100,11 +2112,7 @@ fn render_import_done(msg: &str, success: bool, theme: &HiveTheme) -> AnyElement
         .flex_1()
         .gap(theme.space_3)
         .p(theme.space_8)
-        .child(
-            div()
-                .text_size(px(32.0))
-                .child(icon),
-        )
+        .child(div().text_size(px(32.0)).child(icon))
         .child(
             div()
                 .text_size(theme.font_size_base)
@@ -2164,7 +2172,11 @@ fn import_cancel_button(theme: &HiveTheme) -> AnyElement {
 // ---------------------------------------------------------------------------
 
 fn render_plugin_group(plugin: &UiInstalledPlugin, theme: &HiveTheme) -> AnyElement {
-    let expand_icon = if plugin.expanded { "\u{25BC}" } else { "\u{25B6}" };
+    let expand_icon = if plugin.expanded {
+        "\u{25BC}"
+    } else {
+        "\u{25B6}"
+    };
     let plugin_id = plugin.id.clone();
     let plugin_id_remove = plugin.id.clone();
 
@@ -2275,11 +2287,7 @@ fn render_plugin_group(plugin: &UiInstalledPlugin, theme: &HiveTheme) -> AnyElem
             .gap(theme.space_1);
 
         for skill in &plugin.skills {
-            skills_list = skills_list.child(render_plugin_skill_row(
-                &plugin.id,
-                skill,
-                theme,
-            ));
+            skills_list = skills_list.child(render_plugin_skill_row(&plugin.id, skill, theme));
         }
 
         card = card.child(skills_list);

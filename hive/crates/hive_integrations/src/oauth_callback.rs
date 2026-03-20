@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tracing::{debug, info, warn};
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -187,12 +187,13 @@ impl OAuthCallbackServer {
 
         for pair in query_string.split('&') {
             if let Some((key, value)) = pair.split_once('=')
-                && key == "code" {
-                    let decoded = Self::percent_decode(value);
-                    if !decoded.is_empty() {
-                        return Some(decoded);
-                    }
+                && key == "code"
+            {
+                let decoded = Self::percent_decode(value);
+                if !decoded.is_empty() {
+                    return Some(decoded);
                 }
+            }
         }
 
         None
@@ -207,10 +208,11 @@ impl OAuthCallbackServer {
             if c == '%' {
                 let hex: String = chars.by_ref().take(2).collect();
                 if hex.len() == 2
-                    && let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                        output.push(byte as char);
-                        continue;
-                    }
+                    && let Ok(byte) = u8::from_str_radix(&hex, 16)
+                {
+                    output.push(byte as char);
+                    continue;
+                }
                 // If decoding failed, keep the original characters.
                 output.push('%');
                 output.push_str(&hex);

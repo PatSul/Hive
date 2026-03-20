@@ -398,6 +398,98 @@ impl CollectiveMemory {
 
         Ok(count)
     }
+
+    /// Remove duplicate entries within each category using Jaccard word
+    /// similarity. Entries with similarity above `threshold` (0.0-1.0) are
+    /// considered duplicates; the one with the lower relevance score is deleted.
+    /// Returns the number of entries removed.
+    pub fn deduplicate(&self, threshold: f64) -> Result<usize, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {e}"))?;
+
+        // Fetch all entries grouped by category.
+        let mut stmt = conn
+            .prepare("SELECT id, category, content, relevance_score FROM memories ORDER BY category, relevance_score DESC")
+            .map_err(|e| format!("Prepare error: {e}"))?;
+
+        let entries: Vec<(i64, String, String, f64)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // Group by category and find duplicates via Jaccard similarity.
+        let mut to_delete: Vec<i64> = Vec::new();
+        let mut kept: Vec<(i64, &str, std::collections::HashSet<&str>)> = Vec::new();
+
+        let mut current_category = String::new();
+        for (id, cat, content, _score) in &entries {
+            if *cat != current_category {
+                current_category = cat.clone();
+                kept.clear();
+            }
+
+            let words: std::collections::HashSet<&str> = content.split_whitespace().collect();
+
+            let is_dup = kept.iter().any(|(_kid, _kcat, kwords)| {
+                if words.is_empty() && kwords.is_empty() {
+                    return true;
+                }
+                let intersection = words.intersection(kwords).count();
+                let union = words.union(kwords).count();
+                if union == 0 {
+                    return true;
+                }
+                (intersection as f64 / union as f64) >= threshold
+            });
+
+            if is_dup {
+                to_delete.push(*id);
+            } else {
+                kept.push((*id, cat, words));
+            }
+        }
+
+        // Delete duplicates.
+        for id in &to_delete {
+            conn.execute("DELETE FROM memories WHERE id = ?1", params![id])
+                .map_err(|e| format!("Delete error: {e}"))?;
+        }
+
+        Ok(to_delete.len())
+    }
+
+    /// Run all lifecycle maintenance operations in one call:
+    /// 1. Decay all relevance scores by `decay_factor`
+    /// 2. Prune entries below `min_relevance`
+    /// 3. Deduplicate entries above `similarity_threshold`
+    pub fn maintenance(
+        &self,
+        decay_factor: f64,
+        min_relevance: f64,
+        similarity_threshold: f64,
+    ) -> Result<MaintenanceReport, String> {
+        let decayed = self.decay_scores(decay_factor)?;
+        let pruned = self.prune(min_relevance)?;
+        let deduplicated = self.deduplicate(similarity_threshold)?;
+        Ok(MaintenanceReport {
+            decayed,
+            pruned,
+            deduplicated,
+        })
+    }
+}
+
+/// Report from a [`CollectiveMemory::maintenance`] run.
+#[derive(Debug)]
+pub struct MaintenanceReport {
+    /// Number of entries whose relevance was decayed.
+    pub decayed: usize,
+    /// Number of entries pruned for low relevance.
+    pub pruned: usize,
+    /// Number of duplicate entries removed.
+    pub deduplicated: usize,
 }
 
 // ---------------------------------------------------------------------------

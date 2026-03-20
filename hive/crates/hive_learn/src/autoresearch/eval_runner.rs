@@ -53,7 +53,8 @@ impl EvalRunner {
 
             let skill_response = match executor.execute(&skill_request).await {
                 Ok(resp) => {
-                    self.accumulated_tokens.fetch_add(resp.usage.total_tokens as u64, Ordering::Relaxed);
+                    self.accumulated_tokens
+                        .fetch_add(resp.usage.total_tokens as u64, Ordering::Relaxed);
                     resp
                 }
                 Err(e) => {
@@ -76,9 +77,7 @@ impl EvalRunner {
             let judge_request = ChatRequest {
                 messages: vec![ChatMessage::text(
                     MessageRole::User,
-                    format!(
-                        "Skill output:\n{skill_output}\n\nEval questions:\n{questions_text}"
-                    ),
+                    format!("Skill output:\n{skill_output}\n\nEval questions:\n{questions_text}"),
                 )],
                 model: self.eval_model.clone(),
                 max_tokens: 1024,
@@ -95,10 +94,8 @@ impl EvalRunner {
 
             match executor.execute(&judge_request).await {
                 Ok(judge_response) => {
-                    self.accumulated_tokens.fetch_add(
-                        judge_response.usage.total_tokens as u64,
-                        Ordering::Relaxed,
-                    );
+                    self.accumulated_tokens
+                        .fetch_add(judge_response.usage.total_tokens as u64, Ordering::Relaxed);
                     match parse_judgment(&judge_response.content) {
                         Ok(results) => {
                             let pass_rate = suite.weighted_pass_rate(&results);
@@ -203,7 +200,9 @@ mod tests {
 
     impl MockExecutor {
         fn new(responses: Vec<String>) -> Self {
-            Self { responses: Mutex::new(responses) }
+            Self {
+                responses: Mutex::new(responses),
+            }
         }
     }
 
@@ -233,40 +232,56 @@ mod tests {
     }
 
     fn make_suite() -> EvalSuite {
-        EvalSuite::from_explicit("test-skill".into(), vec![
-            EvalQuestion { id: "q1".into(), question: "Is it correct?".into(), weight: 1.0 },
-            EvalQuestion { id: "q2".into(), question: "Is it safe?".into(), weight: 1.0 },
-        ])
+        EvalSuite::from_explicit(
+            "test-skill".into(),
+            vec![
+                EvalQuestion {
+                    id: "q1".into(),
+                    question: "Is it correct?".into(),
+                    weight: 1.0,
+                },
+                EvalQuestion {
+                    id: "q2".into(),
+                    question: "Is it safe?".into(),
+                    weight: 1.0,
+                },
+            ],
+        )
     }
 
     fn good_judgment_json() -> String {
         serde_json::json!([
             {"id": "q1", "passed": true, "reasoning": "Looks correct"},
             {"id": "q2", "passed": true, "reasoning": "No safety issues"}
-        ]).to_string()
+        ])
+        .to_string()
     }
 
     fn mixed_judgment_json() -> String {
         serde_json::json!([
             {"id": "q1", "passed": true, "reasoning": "Correct"},
             {"id": "q2", "passed": false, "reasoning": "Not safe"}
-        ]).to_string()
+        ])
+        .to_string()
     }
 
     #[tokio::test]
     async fn test_run_eval_all_pass() {
         let executor = MockExecutor::new(vec![
-            "skill output 1".into(), good_judgment_json(),  // sample 1
-            "skill output 2".into(), good_judgment_json(),  // sample 2
-            "skill output 3".into(), good_judgment_json(),  // sample 3
+            "skill output 1".into(),
+            good_judgment_json(), // sample 1
+            "skill output 2".into(),
+            good_judgment_json(), // sample 2
+            "skill output 3".into(),
+            good_judgment_json(), // sample 3
         ]);
         let config = AutoResearchConfig::default();
         let runner = EvalRunner::new(&config);
         let suite = make_suite();
 
-        let result = runner.run_eval(
-            &executor, &suite, "You are a coder.", "Write hello world",
-        ).await;
+        let result = runner
+            .run_eval(&executor, &suite, "You are a coder.", "Write hello world")
+            .await;
         assert!(result.is_ok());
         let run = result.unwrap();
         assert!((run.pass_rate - 1.0).abs() < f64::EPSILON);
@@ -276,17 +291,20 @@ mod tests {
     #[tokio::test]
     async fn test_run_eval_mixed_results() {
         let executor = MockExecutor::new(vec![
-            "output 1".into(), mixed_judgment_json(),  // sample 1
-            "output 2".into(), mixed_judgment_json(),  // sample 2
-            "output 3".into(), mixed_judgment_json(),  // sample 3
+            "output 1".into(),
+            mixed_judgment_json(), // sample 1
+            "output 2".into(),
+            mixed_judgment_json(), // sample 2
+            "output 3".into(),
+            mixed_judgment_json(), // sample 3
         ]);
         let config = AutoResearchConfig::default();
         let runner = EvalRunner::new(&config);
         let suite = make_suite();
 
-        let result = runner.run_eval(
-            &executor, &suite, "You are a coder.", "Write hello world",
-        ).await;
+        let result = runner
+            .run_eval(&executor, &suite, "You are a coder.", "Write hello world")
+            .await;
         assert!(result.is_ok());
         let run = result.unwrap();
         assert!((run.pass_rate - 0.5).abs() < 0.01);
@@ -295,17 +313,21 @@ mod tests {
     #[tokio::test]
     async fn test_run_eval_returns_cost() {
         let executor = MockExecutor::new(vec![
-            "output".into(), good_judgment_json(),
-            "output".into(), good_judgment_json(),
-            "output".into(), good_judgment_json(),
+            "output".into(),
+            good_judgment_json(),
+            "output".into(),
+            good_judgment_json(),
+            "output".into(),
+            good_judgment_json(),
         ]);
         let config = AutoResearchConfig::default();
         let runner = EvalRunner::new(&config);
         let suite = make_suite();
 
-        let result = runner.run_eval(
-            &executor, &suite, "prompt", "input",
-        ).await.unwrap();
+        let result = runner
+            .run_eval(&executor, &suite, "prompt", "input")
+            .await
+            .unwrap();
         let _ = result;
         // Each call uses 30 tokens, 6 calls total = 180 tokens
         // 180 * 0.000003 = 0.00054
@@ -316,34 +338,42 @@ mod tests {
     async fn test_parse_judgment_from_markdown_fences() {
         let fenced = format!("```json\n{}\n```", good_judgment_json());
         let executor = MockExecutor::new(vec![
-            "output".into(), fenced.clone(),
-            "output".into(), fenced.clone(),
-            "output".into(), fenced,
+            "output".into(),
+            fenced.clone(),
+            "output".into(),
+            fenced.clone(),
+            "output".into(),
+            fenced,
         ]);
         let config = AutoResearchConfig::default();
         let runner = EvalRunner::new(&config);
         let suite = make_suite();
 
-        let result = runner.run_eval(
-            &executor, &suite, "prompt", "input",
-        ).await.unwrap();
+        let result = runner
+            .run_eval(&executor, &suite, "prompt", "input")
+            .await
+            .unwrap();
         assert!((result.pass_rate - 1.0).abs() < f64::EPSILON);
     }
 
     #[tokio::test]
     async fn test_malformed_judgment_treated_as_failure() {
         let executor = MockExecutor::new(vec![
-            "output".into(), "not valid json".into(),
-            "output".into(), "also bad".into(),
-            "output".into(), "still bad".into(),
+            "output".into(),
+            "not valid json".into(),
+            "output".into(),
+            "also bad".into(),
+            "output".into(),
+            "still bad".into(),
         ]);
         let config = AutoResearchConfig::default();
         let runner = EvalRunner::new(&config);
         let suite = make_suite();
 
-        let result = runner.run_eval(
-            &executor, &suite, "prompt", "input",
-        ).await.unwrap();
+        let result = runner
+            .run_eval(&executor, &suite, "prompt", "input")
+            .await
+            .unwrap();
         // All samples fail to parse -> pass_rate = 0.0
         assert!((result.pass_rate - 0.0).abs() < f64::EPSILON);
     }

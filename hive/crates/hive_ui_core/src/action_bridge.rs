@@ -6,7 +6,7 @@
 //! main-thread polling loop dispatches them as GPUI actions.
 
 use hive_agents::mcp_client::McpTool;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
 // Channel message
@@ -188,6 +188,7 @@ register_ui_actions! {
 
     // Files panel
     "open_workspace_directory" => OpenWorkspaceDirectory, "Open the workspace directory in the OS file manager";
+    "toggle_command_palette" => ToggleCommandPalette, "Toggle the global command palette";
     "files_navigate_back"   => FilesNavigateBack,   "Navigate back in the Files panel";
     "files_refresh"         => FilesRefresh,         "Refresh the Files panel";
     "files_new_file"        => FilesNewFile,         "Create a new file";

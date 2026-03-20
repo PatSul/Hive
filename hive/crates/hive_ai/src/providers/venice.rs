@@ -135,30 +135,31 @@ impl VeniceProvider {
             }
 
             if m.role == crate::types::MessageRole::Assistant
-                && let Some(ref calls) = m.tool_calls {
-                    let tc_msgs: Vec<VeniceToolCallMsg> = calls
-                        .iter()
-                        .map(|c| VeniceToolCallMsg {
-                            id: c.id.clone(),
-                            call_type: "function".into(),
-                            function: VeniceFunctionCall {
-                                name: c.name.clone(),
-                                arguments: serde_json::to_string(&c.input).unwrap_or_default(),
-                            },
-                        })
-                        .collect();
-                    out.push(VeniceMessage {
-                        role: role.into(),
-                        content: if m.content.is_empty() {
-                            None
-                        } else {
-                            Some(serde_json::Value::String(m.content.clone()))
+                && let Some(ref calls) = m.tool_calls
+            {
+                let tc_msgs: Vec<VeniceToolCallMsg> = calls
+                    .iter()
+                    .map(|c| VeniceToolCallMsg {
+                        id: c.id.clone(),
+                        call_type: "function".into(),
+                        function: VeniceFunctionCall {
+                            name: c.name.clone(),
+                            arguments: serde_json::to_string(&c.input).unwrap_or_default(),
                         },
-                        tool_call_id: None,
-                        tool_calls: Some(tc_msgs),
-                    });
-                    continue;
-                }
+                    })
+                    .collect();
+                out.push(VeniceMessage {
+                    role: role.into(),
+                    content: if m.content.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::String(m.content.clone()))
+                    },
+                    tool_call_id: None,
+                    tool_calls: Some(tc_msgs),
+                });
+                continue;
+            }
 
             out.push(VeniceMessage {
                 role: role.into(),

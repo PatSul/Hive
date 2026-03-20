@@ -190,11 +190,7 @@ impl PromptEvolver {
     ///
     /// Call this after sending the `AiRefinementRequest` to an AI and receiving
     /// the improved prompt text back.
-    pub fn apply_ai_refinement(
-        &self,
-        persona: &str,
-        ai_response: &str,
-    ) -> Result<u32, String> {
+    pub fn apply_ai_refinement(&self, persona: &str, ai_response: &str) -> Result<u32, String> {
         let trimmed = ai_response.trim();
         if trimmed.is_empty() {
             return Err("AI returned empty refinement".into());
@@ -619,10 +615,7 @@ mod tests {
             .unwrap();
 
         let log = storage.get_learning_log(20).unwrap();
-        assert!(
-            log.iter()
-                .any(|e| e.event_type == "ai_refinement_applied")
-        );
+        assert!(log.iter().any(|e| e.event_type == "ai_refinement_applied"));
     }
 
     // ── multi-persona isolation ──────────────────────────────────────

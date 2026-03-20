@@ -144,7 +144,16 @@ fn http_get(url: &str, timeout_secs: u64) -> Result<String, String> {
 /// Check if a URL is reachable (returns 2xx).
 fn is_url_reachable(url: &str) -> bool {
     let output = std::process::Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3", url])
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--max-time",
+            "3",
+            url,
+        ])
         .output();
 
     match output {

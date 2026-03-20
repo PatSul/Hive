@@ -263,8 +263,14 @@ mod tests {
     #[test]
     fn classify_steering_prefix() {
         assert_eq!(classify_input("!stop"), MessagePriority::Steering);
-        assert_eq!(classify_input("! change direction"), MessagePriority::Steering);
-        assert_eq!(classify_input("/steer focus on X"), MessagePriority::Steering);
+        assert_eq!(
+            classify_input("! change direction"),
+            MessagePriority::Steering
+        );
+        assert_eq!(
+            classify_input("/steer focus on X"),
+            MessagePriority::Steering
+        );
         assert_eq!(classify_input("  !urgent"), MessagePriority::Steering);
     }
 

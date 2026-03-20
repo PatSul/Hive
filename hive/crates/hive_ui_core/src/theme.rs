@@ -396,10 +396,7 @@ mod tests {
         for hex in test_cases {
             let hsla_val = parse_hex_color(hex);
             let back = hsla_to_hex(hsla_val);
-            assert_eq!(
-                hex, back,
-                "Roundtrip failed for {hex}: got {back}"
-            );
+            assert_eq!(hex, back, "Roundtrip failed for {hex}: got {back}");
         }
     }
 
@@ -415,7 +412,10 @@ mod tests {
     fn light_theme_constructs() {
         let t = HiveTheme::light();
         assert!(t.bg_primary.l > 0.9, "light bg should be very light");
-        assert!(t.text_on_accent.l > 0.9, "text_on_accent should be light in light theme");
+        assert!(
+            t.text_on_accent.l > 0.9,
+            "text_on_accent should be light in light theme"
+        );
     }
 
     #[test]

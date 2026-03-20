@@ -9,10 +9,11 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tracing::{debug, warn};
 use uuid::Uuid;
-use std::time::Duration;
 
+use hive_core::SecurityGateway;
 use hive_core::channels::{ChannelMessage, MessageAuthor};
 use hive_core::config::HiveConfig;
 use hive_core::kanban::{KanbanBoard, Priority};
@@ -297,7 +298,9 @@ impl AutomationService {
 
         // -- Additional built-in workflow templates --
 
-        self.ensure_template("builtin:build-test-v1", "Build & Test",
+        self.ensure_template(
+            "builtin:build-test-v1",
+            "Build & Test",
             "Full build + test pipeline: cargo check, build release, run all tests, notify.",
             vec![
                 ("Check", "cargo check --quiet"),
@@ -306,7 +309,9 @@ impl AutomationService {
             ],
         );
 
-        self.ensure_template("builtin:code-review-v1", "Code Review",
+        self.ensure_template(
+            "builtin:code-review-v1",
+            "Code Review",
             "AI-powered code review: investigate changes, critique code, notify results.",
             vec![
                 ("Investigate changes", "git diff --stat"),
@@ -315,7 +320,9 @@ impl AutomationService {
             ],
         );
 
-        self.ensure_template("builtin:debug-issue-v1", "Debug Issue",
+        self.ensure_template(
+            "builtin:debug-issue-v1",
+            "Debug Issue",
             "Debug workflow: reproduce issue, investigate root cause, implement fix, verify.",
             vec![
                 ("Reproduce", "cargo test --quiet 2>&1 || true"),
@@ -324,7 +331,9 @@ impl AutomationService {
             ],
         );
 
-        self.ensure_template("builtin:deploy-v1", "Deploy",
+        self.ensure_template(
+            "builtin:deploy-v1",
+            "Deploy",
             "Deploy pipeline: test, build release, deploy, notify team.",
             vec![
                 ("Test", "cargo test --quiet"),
@@ -333,7 +342,9 @@ impl AutomationService {
             ],
         );
 
-        self.ensure_template("builtin:research-impl-v1", "Research & Implement",
+        self.ensure_template(
+            "builtin:research-impl-v1",
+            "Research & Implement",
             "Research-first workflow: investigate approaches, implement solution, verify, review.",
             vec![
                 ("Investigate", "git log --oneline -20"),
@@ -343,7 +354,9 @@ impl AutomationService {
             ],
         );
 
-        self.ensure_template("builtin:full-pipeline-v1", "Full Pipeline",
+        self.ensure_template(
+            "builtin:full-pipeline-v1",
+            "Full Pipeline",
             "End-to-end pipeline: investigate, implement, verify, critique, debug, notify.",
             vec![
                 ("Investigate", "git status --short"),
@@ -410,9 +423,10 @@ impl AutomationService {
             Ok(entries) => entries,
             Err(e) => {
                 report.failed += 1;
-                report
-                    .errors
-                    .push(format!("{}: failed to read directory: {e}", source_dir.display()));
+                report.errors.push(format!(
+                    "{}: failed to read directory: {e}",
+                    source_dir.display()
+                ));
                 return report;
             }
         };
@@ -695,10 +709,7 @@ impl AutomationService {
                         Ok(output) => {
                             let stderr = output.stderr.trim();
                             Err(if stderr.is_empty() {
-                                format!(
-                                    "Command failed (exit={}): {}",
-                                    output.exit_code, command
-                                )
+                                format!("Command failed (exit={}): {}", output.exit_code, command)
                             } else {
                                 format!(
                                     "Command failed (exit={}): {}\n{}",
@@ -710,37 +721,24 @@ impl AutomationService {
                     }
                 }
 
-                ActionType::SendMessage {
-                    channel,
-                    content,
-                } => {
+                ActionType::SendMessage { channel, content } => {
                     Self::execute_send_message(channel, content)
                 }
 
-                ActionType::CallApi {
-                    url,
-                    method,
-                } => {
+                ActionType::CallApi { url, method } => {
                     rt.block_on(Self::execute_call_api(url, method))
                 }
 
-                ActionType::CreateTask { title } => {
-                    Self::execute_create_task(title)
-                }
+                ActionType::CreateTask { title } => Self::execute_create_task(title),
 
-                ActionType::SendNotification {
-                    title,
-                    body,
-                } => {
+                ActionType::SendNotification { title, body } => {
                     Self::execute_send_notification(title, body)
                 }
 
                 ActionType::ExecuteSkill {
                     skill_trigger,
                     input,
-                } => {
-                    Self::execute_skill(skill_trigger, input)
-                }
+                } => Self::execute_skill(skill_trigger, input),
             };
 
             match step_result {
@@ -783,6 +781,25 @@ impl AutomationService {
     // Action handlers (private)
     // -----------------------------------------------------------------------
 
+    /// Sanitize a channel name to prevent path traversal.
+    /// Only allows alphanumeric characters, hyphens, and underscores.
+    fn sanitize_channel_name(channel: &str) -> std::result::Result<String, String> {
+        let sanitized: String = channel
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if sanitized.is_empty() {
+            return Err("Channel name is empty after sanitization".into());
+        }
+        if sanitized != channel {
+            return Err(format!(
+                "Channel name '{}' contains invalid characters (only alphanumeric, hyphens, underscores allowed)",
+                channel
+            ));
+        }
+        Ok(sanitized)
+    }
+
     /// Send a message to a channel by writing to `~/.hive/channels/{channel}.json`.
     fn execute_send_message(channel: &str, content: &str) -> std::result::Result<(), String> {
         let base_dir = match HiveConfig::base_dir() {
@@ -798,7 +815,8 @@ impl AutomationService {
 
         // Try to find the channel file by name. Channel IDs can be the name
         // itself (e.g. "general") or a UUID. We search for a matching file.
-        let channel_file = channels_dir.join(format!("{channel}.json"));
+        let safe_channel = Self::sanitize_channel_name(channel)?;
+        let channel_file = channels_dir.join(format!("{safe_channel}.json"));
 
         let message = ChannelMessage {
             id: Uuid::new_v4().to_string(),
@@ -814,7 +832,9 @@ impl AutomationService {
             // Load existing channel, append message, save back
             match std::fs::read_to_string(&channel_file) {
                 Ok(json) => {
-                    if let Ok(mut ch) = serde_json::from_str::<hive_core::channels::AgentChannel>(&json) {
+                    if let Ok(mut ch) =
+                        serde_json::from_str::<hive_core::channels::AgentChannel>(&json)
+                    {
                         ch.messages.push(message);
                         ch.updated_at = Utc::now();
                         let updated = serde_json::to_string_pretty(&ch)
@@ -835,7 +855,7 @@ impl AutomationService {
                 .map_err(|e| format!("Failed to serialize message: {e}"))?;
             let pending_dir = channels_dir.join("pending");
             let _ = std::fs::create_dir_all(&pending_dir);
-            let pending_file = pending_dir.join(format!("{channel}_{}.json", Uuid::new_v4()));
+            let pending_file = pending_dir.join(format!("{safe_channel}_{}.json", Uuid::new_v4()));
             std::fs::write(&pending_file, msg_json)
                 .map_err(|e| format!("Failed to write pending message: {e}"))?;
         }
@@ -846,6 +866,12 @@ impl AutomationService {
 
     /// Make an HTTP request via reqwest (async, called within the runtime).
     async fn execute_call_api(url: &str, method: &str) -> std::result::Result<(), String> {
+        // Validate URL through SecurityGateway before making the request
+        let gateway = SecurityGateway::new();
+        gateway
+            .check_url(url)
+            .map_err(|e| format!("URL blocked by security policy: {e}"))?;
+
         let client = reqwest::Client::new();
 
         let request = match method.to_uppercase().as_str() {
@@ -868,9 +894,7 @@ impl AutomationService {
                     Ok(())
                 }
             }
-            Err(e) => {
-                Err(format!("HTTP request to {url} failed: {e}"))
-            }
+            Err(e) => Err(format!("HTTP request to {url} failed: {e}")),
         }
     }
 
@@ -885,8 +909,8 @@ impl AutomationService {
         };
 
         let kanban_path = base_dir.join("kanban.json");
-        let mut board = KanbanBoard::load_from_file(&kanban_path)
-            .unwrap_or_else(|_| KanbanBoard::new());
+        let mut board =
+            KanbanBoard::load_from_file(&kanban_path).unwrap_or_else(|_| KanbanBoard::new());
 
         board.add_task(title, None, Priority::Medium);
 
@@ -912,8 +936,7 @@ impl AutomationService {
         let notifications_dir = base_dir.join("notifications");
         let _ = std::fs::create_dir_all(&notifications_dir);
 
-        let notification = AppNotification::new(NotificationType::Info, body)
-            .with_title(title);
+        let notification = AppNotification::new(NotificationType::Info, body).with_title(title);
         let json = serde_json::to_string_pretty(&notification)
             .map_err(|e| format!("Failed to serialize notification: {e}"))?;
         let file_path = notifications_dir.join(format!("{}.json", notification.id));
@@ -924,40 +947,18 @@ impl AutomationService {
         Ok(())
     }
 
-    /// Execute a skill by storing a pending request under `~/.hive/pending_skills/`.
-    ///
-    /// Since `SkillsRegistry` may not be accessible in this blocking context,
-    /// we write the request as a JSON file that can be picked up by the main
-    /// application loop.
     fn execute_skill(skill_trigger: &str, input: &str) -> std::result::Result<(), String> {
-        let base_dir = match HiveConfig::base_dir() {
-            Ok(d) => d,
-            Err(e) => {
-                warn!("Cannot resolve ~/.hive directory for ExecuteSkill: {e}");
-                return Ok(()); // fire-and-forget
-            }
-        };
-
-        let pending_dir = base_dir.join("pending_skills");
-        let _ = std::fs::create_dir_all(&pending_dir);
-
-        let request_id = Uuid::new_v4().to_string();
-        let request = serde_json::json!({
-            "id": request_id,
-            "skill_trigger": skill_trigger,
-            "input": input,
-            "created_at": Utc::now().to_rfc3339(),
-            "status": "pending"
-        });
-
-        let json = serde_json::to_string_pretty(&request)
-            .map_err(|e| format!("Failed to serialize skill request: {e}"))?;
-        let file_path = pending_dir.join(format!("{request_id}.json"));
-        std::fs::write(&file_path, json)
-            .map_err(|e| format!("Failed to write pending skill file: {e}"))?;
-
-        debug!(skill_trigger, "ExecuteSkill action queued for pickup");
-        Ok(())
+        // ExecuteSkill is not yet wired end-to-end. The pending_skills/ directory
+        // had no consumer. Return an error instead of silently dead-lettering.
+        warn!(
+            skill_trigger,
+            input_len = input.len(),
+            "ExecuteSkill action is not yet implemented — no consumer for pending skills"
+        );
+        Err(
+            "ExecuteSkill is not yet wired — skill execution from workflows is not supported"
+                .into(),
+        )
     }
 
     /// Return the total number of workflows.
@@ -1056,6 +1057,16 @@ impl AutomationService {
                     if channel.trim().is_empty() {
                         bail!("step '{}' has an empty channel", step.name);
                     }
+                    if !channel
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                    {
+                        bail!(
+                            "step '{}' has invalid channel name '{}' (only alphanumeric, hyphens, underscores allowed)",
+                            step.name,
+                            channel
+                        );
+                    }
                     if content.trim().is_empty() {
                         bail!("step '{}' has empty message content", step.name);
                     }
@@ -1064,11 +1075,17 @@ impl AutomationService {
                     if url.trim().is_empty() {
                         bail!("step '{}' has an empty URL", step.name);
                     }
+                    // Validate URL against security policy at load time
+                    let gateway = SecurityGateway::new();
+                    if let Err(e) = gateway.check_url(url) {
+                        bail!("step '{}' has a blocked URL: {e}", step.name);
+                    }
                     let valid_methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
                     if !valid_methods.contains(&method.to_uppercase().as_str()) {
                         bail!(
                             "step '{}' has unsupported HTTP method: {}",
-                            step.name, method
+                            step.name,
+                            method
                         );
                     }
                 }
@@ -1089,6 +1106,10 @@ impl AutomationService {
                     if skill_trigger.trim().is_empty() {
                         bail!("step '{}' has an empty skill trigger", step.name);
                     }
+                    bail!(
+                        "step '{}' uses execute_skill, which is not yet supported in workflow execution",
+                        step.name
+                    );
                 }
             }
         }
@@ -1825,5 +1846,120 @@ mod tests {
         let path = std::env::temp_dir().join("nonexistent-hive-automation.json");
         let svc = AutomationService::load_from_file(&path).unwrap();
         assert_eq!(svc.workflow_count(), 0);
+    }
+
+    #[test]
+    fn sanitize_channel_rejects_path_traversal() {
+        assert!(AutomationService::sanitize_channel_name("../../etc/cron").is_err());
+        assert!(AutomationService::sanitize_channel_name("..\\windows\\system32").is_err());
+        assert!(AutomationService::sanitize_channel_name("general/../../evil").is_err());
+        assert!(AutomationService::sanitize_channel_name("chan nel").is_err());
+    }
+
+    #[test]
+    fn sanitize_channel_allows_valid_names() {
+        assert_eq!(
+            AutomationService::sanitize_channel_name("general").unwrap(),
+            "general"
+        );
+        assert_eq!(
+            AutomationService::sanitize_channel_name("my-channel_01").unwrap(),
+            "my-channel_01"
+        );
+        assert_eq!(
+            AutomationService::sanitize_channel_name("ABC123").unwrap(),
+            "ABC123"
+        );
+    }
+
+    // -- SSRF validation ----------------------------------------------------
+
+    #[test]
+    fn validate_rejects_private_ip_url() {
+        let template = WorkflowTemplate {
+            name: "SSRF Test".into(),
+            description: "test".into(),
+            trigger: Some(TriggerType::ManualTrigger),
+            enabled: true,
+            steps: vec![WorkflowStepTemplate {
+                name: "Evil".into(),
+                action: ActionType::CallApi {
+                    url: "http://169.254.169.254/metadata".into(),
+                    method: "GET".into(),
+                },
+                conditions: vec![],
+                timeout_secs: None,
+                retry_count: 0,
+            }],
+        };
+        assert!(AutomationService::validate_workflow_template(&template).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_localhost_url() {
+        let template = WorkflowTemplate {
+            name: "SSRF Test".into(),
+            description: "test".into(),
+            trigger: Some(TriggerType::ManualTrigger),
+            enabled: true,
+            steps: vec![WorkflowStepTemplate {
+                name: "Evil".into(),
+                action: ActionType::CallApi {
+                    url: "https://localhost/admin".into(),
+                    method: "GET".into(),
+                },
+                conditions: vec![],
+                timeout_secs: None,
+                retry_count: 0,
+            }],
+        };
+        assert!(AutomationService::validate_workflow_template(&template).is_err());
+    }
+
+    #[test]
+    fn validate_allows_safe_api_url() {
+        let template = WorkflowTemplate {
+            name: "Safe API".into(),
+            description: "test".into(),
+            trigger: Some(TriggerType::ManualTrigger),
+            enabled: true,
+            steps: vec![WorkflowStepTemplate {
+                name: "GitHub".into(),
+                action: ActionType::CallApi {
+                    url: "https://api.github.com/repos/test/test".into(),
+                    method: "GET".into(),
+                },
+                conditions: vec![],
+                timeout_secs: None,
+                retry_count: 0,
+            }],
+        };
+        assert!(AutomationService::validate_workflow_template(&template).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_execute_skill_action() {
+        let template = WorkflowTemplate {
+            name: "Skill Action".into(),
+            description: "test".into(),
+            trigger: Some(TriggerType::ManualTrigger),
+            enabled: true,
+            steps: vec![WorkflowStepTemplate {
+                name: "Run skill".into(),
+                action: ActionType::ExecuteSkill {
+                    skill_trigger: "/review".into(),
+                    input: "review the last commit".into(),
+                },
+                conditions: vec![],
+                timeout_secs: None,
+                retry_count: 0,
+            }],
+        };
+
+        let err = AutomationService::validate_workflow_template(&template).unwrap_err();
+        assert!(
+            err.to_string().contains("not yet supported"),
+            "unexpected validation error: {err}"
+        );
     }
 }

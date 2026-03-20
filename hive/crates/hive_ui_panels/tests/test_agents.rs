@@ -93,5 +93,8 @@ fn agents_panel_data_sample() {
     assert_eq!(data.active_runs.len(), 1);
     assert_eq!(data.run_history.len(), 1);
     assert_eq!(data.remote_run_history.len(), 1);
-    assert_eq!(data.selected_remote_agent.as_deref(), Some("Remote Builder"));
+    assert_eq!(
+        data.selected_remote_agent.as_deref(),
+        Some("Remote Builder")
+    );
 }

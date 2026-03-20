@@ -2,8 +2,7 @@ pub mod compose_agent;
 pub mod inbox_agent;
 
 use hive_integrations::{
-    GmailClient, OutlookEmailClient,
-    EmailClassifier, ClassificationResult, EmailCategory,
+    ClassificationResult, EmailCategory, EmailClassifier, GmailClient, OutlookEmailClient,
 };
 use hive_shield::HiveShield;
 use serde::{Deserialize, Serialize};
@@ -110,7 +109,6 @@ impl EmailService {
 
         // Use tokio Handle to run async code from sync context.
         let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
-        
 
         handle.block_on(async {
             let client = GmailClient::new(&token);
@@ -160,7 +158,6 @@ impl EmailService {
         };
 
         let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
-        
 
         handle.block_on(async {
             let client = OutlookEmailClient::new(&token);
@@ -172,10 +169,7 @@ impl EmailService {
             let emails = messages
                 .into_iter()
                 .map(|msg| {
-                    let from = msg
-                        .from
-                        .map(|a| a.address)
-                        .unwrap_or_default();
+                    let from = msg.from.map(|a| a.address).unwrap_or_default();
                     let to = msg
                         .to_recipients
                         .first()
@@ -282,8 +276,7 @@ impl EmailService {
             let token = token.clone();
             let to = to.to_string();
             let subject = subject.to_string();
-            let handle =
-                Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
+            let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
             handle.block_on(async {
                 let client = GmailClient::new(&token);
                 client
@@ -301,8 +294,7 @@ impl EmailService {
             let token = token.clone();
             let to_str = to.to_string();
             let subject = subject.to_string();
-            let handle =
-                Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
+            let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
             handle.block_on(async {
                 let client = OutlookEmailClient::new(&token);
                 client
@@ -478,7 +470,8 @@ mod tests {
         let mut email = make_email(false);
         email.from = "spammer@scam.com".to_string();
         email.subject = "You have won a million dollars!".to_string();
-        email.body = "Click here immediately to claim your prize. Wire transfer needed.".to_string();
+        email.body =
+            "Click here immediately to claim your prize. Wire transfer needed.".to_string();
         assert_eq!(service.classify(&email), EmailClassification::Spam);
     }
 

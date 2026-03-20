@@ -33,21 +33,61 @@ pub enum OperationType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActivityEvent {
     // Agent lifecycle
-    AgentStarted { agent_id: String, role: String, task_id: Option<String> },
-    AgentCompleted { agent_id: String, duration_ms: u64, cost: f64 },
-    AgentFailed { agent_id: String, error: String },
-    AgentPaused { agent_id: String, reason: PauseReason },
+    AgentStarted {
+        agent_id: String,
+        role: String,
+        task_id: Option<String>,
+    },
+    AgentCompleted {
+        agent_id: String,
+        duration_ms: u64,
+        cost: f64,
+    },
+    AgentFailed {
+        agent_id: String,
+        error: String,
+    },
+    AgentPaused {
+        agent_id: String,
+        reason: PauseReason,
+    },
 
     // Task lifecycle
-    TaskClaimed { task_id: String, agent_id: String },
-    TaskProgress { task_id: String, progress: f64, message: String },
-    TaskCompleted { task_id: String, agent_id: String, cost: f64 },
-    TaskFailed { task_id: String, error: String },
+    TaskClaimed {
+        task_id: String,
+        agent_id: String,
+    },
+    TaskProgress {
+        task_id: String,
+        progress: f64,
+        message: String,
+    },
+    TaskCompleted {
+        task_id: String,
+        agent_id: String,
+        cost: f64,
+    },
+    TaskFailed {
+        task_id: String,
+        error: String,
+    },
 
     // Tool/action execution
-    ToolCalled { agent_id: String, tool_name: String, args_summary: String },
-    FileModified { agent_id: String, path: String, op: FileOp },
-    ShellExecuted { agent_id: String, command: String, exit_code: i32 },
+    ToolCalled {
+        agent_id: String,
+        tool_name: String,
+        args_summary: String,
+    },
+    FileModified {
+        agent_id: String,
+        path: String,
+        op: FileOp,
+    },
+    ShellExecuted {
+        agent_id: String,
+        command: String,
+        exit_code: i32,
+    },
 
     // Cost events
     CostIncurred {
@@ -57,8 +97,15 @@ pub enum ActivityEvent {
         output_tokens: u32,
         cost_usd: f64,
     },
-    BudgetWarning { agent_id: String, usage_pct: f64, limit_usd: f64 },
-    BudgetExhausted { agent_id: String, limit_usd: f64 },
+    BudgetWarning {
+        agent_id: String,
+        usage_pct: f64,
+        limit_usd: f64,
+    },
+    BudgetExhausted {
+        agent_id: String,
+        limit_usd: f64,
+    },
 
     // Approval events
     ApprovalRequested {
@@ -68,13 +115,26 @@ pub enum ActivityEvent {
         context: String,
         rule: String,
     },
-    ApprovalGranted { request_id: String },
-    ApprovalDenied { request_id: String, reason: Option<String> },
+    ApprovalGranted {
+        request_id: String,
+    },
+    ApprovalDenied {
+        request_id: String,
+        reason: Option<String>,
+    },
 
     // Heartbeat events
-    HeartbeatFired { agent_id: String, task_id: String },
-    HeartbeatScheduled { agent_id: String, interval_secs: u64 },
-    HeartbeatCancelled { agent_id: String },
+    HeartbeatFired {
+        agent_id: String,
+        task_id: String,
+    },
+    HeartbeatScheduled {
+        agent_id: String,
+        interval_secs: u64,
+    },
+    HeartbeatCancelled {
+        agent_id: String,
+    },
 }
 
 impl ActivityEvent {
@@ -115,9 +175,9 @@ impl ActivityEvent {
             | Self::TaskProgress { .. }
             | Self::TaskCompleted { .. }
             | Self::TaskFailed { .. } => "task",
-            Self::ToolCalled { .. }
-            | Self::FileModified { .. }
-            | Self::ShellExecuted { .. } => "tool",
+            Self::ToolCalled { .. } | Self::FileModified { .. } | Self::ShellExecuted { .. } => {
+                "tool"
+            }
             Self::CostIncurred { .. }
             | Self::BudgetWarning { .. }
             | Self::BudgetExhausted { .. } => "cost",
@@ -133,11 +193,19 @@ impl ActivityEvent {
     /// Human-readable summary for display.
     pub fn summary(&self) -> String {
         match self {
-            Self::AgentStarted { agent_id, role, task_id } => {
+            Self::AgentStarted {
+                agent_id,
+                role,
+                task_id,
+            } => {
                 let task = task_id.as_deref().unwrap_or("no task");
                 format!("{role} agent '{agent_id}' started (task: {task})")
             }
-            Self::AgentCompleted { agent_id, duration_ms, cost } => {
+            Self::AgentCompleted {
+                agent_id,
+                duration_ms,
+                cost,
+            } => {
                 format!("Agent '{agent_id}' completed in {duration_ms}ms (${cost:.4})")
             }
             Self::AgentFailed { agent_id, error } => {
@@ -149,36 +217,72 @@ impl ActivityEvent {
             Self::TaskClaimed { task_id, agent_id } => {
                 format!("Agent '{agent_id}' claimed task '{task_id}'")
             }
-            Self::TaskProgress { task_id, progress, message } => {
+            Self::TaskProgress {
+                task_id,
+                progress,
+                message,
+            } => {
                 format!("Task '{task_id}': {:.0}% — {message}", progress * 100.0)
             }
-            Self::TaskCompleted { task_id, agent_id, cost } => {
+            Self::TaskCompleted {
+                task_id,
+                agent_id,
+                cost,
+            } => {
                 format!("Task '{task_id}' completed by '{agent_id}' (${cost:.4})")
             }
             Self::TaskFailed { task_id, error } => {
                 format!("Task '{task_id}' failed: {error}")
             }
-            Self::ToolCalled { agent_id, tool_name, .. } => {
+            Self::ToolCalled {
+                agent_id,
+                tool_name,
+                ..
+            } => {
                 format!("Agent '{agent_id}' called tool '{tool_name}'")
             }
             Self::FileModified { agent_id, path, op } => {
                 format!("Agent '{agent_id}' {op:?} '{path}'")
             }
-            Self::ShellExecuted { agent_id, command, exit_code } => {
+            Self::ShellExecuted {
+                agent_id,
+                command,
+                exit_code,
+            } => {
                 let status = if *exit_code == 0 { "ok" } else { "FAIL" };
                 format!("Agent '{agent_id}' ran `{command}` [{status}]")
             }
-            Self::CostIncurred { agent_id, model, cost_usd, input_tokens, output_tokens } => {
+            Self::CostIncurred {
+                agent_id,
+                model,
+                cost_usd,
+                input_tokens,
+                output_tokens,
+            } => {
                 let total_tok = input_tokens + output_tokens;
                 format!("Agent '{agent_id}' spent ${cost_usd:.4} on {model} ({total_tok} tokens)")
             }
-            Self::BudgetWarning { agent_id, usage_pct, limit_usd } => {
-                format!("Budget warning: '{agent_id}' at {:.0}% of ${limit_usd:.2}", usage_pct * 100.0)
+            Self::BudgetWarning {
+                agent_id,
+                usage_pct,
+                limit_usd,
+            } => {
+                format!(
+                    "Budget warning: '{agent_id}' at {:.0}% of ${limit_usd:.2}",
+                    usage_pct * 100.0
+                )
             }
-            Self::BudgetExhausted { agent_id, limit_usd } => {
+            Self::BudgetExhausted {
+                agent_id,
+                limit_usd,
+            } => {
                 format!("Budget exhausted: '{agent_id}' hit ${limit_usd:.2} limit")
             }
-            Self::ApprovalRequested { agent_id, operation, .. } => {
+            Self::ApprovalRequested {
+                agent_id,
+                operation,
+                ..
+            } => {
                 format!("Agent '{agent_id}' requests approval: {operation}")
             }
             Self::ApprovalGranted { request_id } => {
@@ -191,7 +295,10 @@ impl ActivityEvent {
             Self::HeartbeatFired { agent_id, task_id } => {
                 format!("Heartbeat fired for '{agent_id}' on task '{task_id}'")
             }
-            Self::HeartbeatScheduled { agent_id, interval_secs } => {
+            Self::HeartbeatScheduled {
+                agent_id,
+                interval_secs,
+            } => {
                 format!("Heartbeat scheduled for '{agent_id}' every {interval_secs}s")
             }
             Self::HeartbeatCancelled { agent_id } => {

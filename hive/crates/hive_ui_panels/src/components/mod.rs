@@ -1,8 +1,8 @@
 pub mod budget_gauge;
 pub mod code_block;
 pub mod connectivity_badge;
-pub mod markdown;
 pub mod diff_viewer;
+pub mod markdown;
 pub mod message_bubble;
 pub mod model_selector;
 pub mod notification_tray;
@@ -15,14 +15,14 @@ pub mod wizard_stepper;
 // Re-export key types for convenience.
 pub use budget_gauge::{BudgetGauge, BudgetGaugeData};
 pub use code_block::{render_code_block, render_code_block_with_path};
-pub use markdown::render_markdown;
 pub use connectivity_badge::{ConnectivityState, render_connectivity_badge};
 pub use diff_viewer::{DiffLine, render_diff};
+pub use markdown::render_markdown;
 pub use message_bubble::{render_ai_message, render_error_message, render_user_message};
 pub use model_selector::{ModelSelected, ModelSelectorView, render_model_badge};
 pub use notification_tray::{NotificationTray, NotificationTrayData};
+pub use task_tree::{TaskDisplay, TaskDisplayStatus, TaskTreeState, TaskTreeView};
 pub use thinking_indicator::{ThinkingPhase, render_thinking_indicator};
 pub use toast::{ToastKind, render_toast};
-pub use task_tree::{TaskDisplay, TaskDisplayStatus, TaskTreeState, TaskTreeView};
 pub use wallet_card::render_wallet_card;
 pub use wizard_stepper::render_wizard_stepper;

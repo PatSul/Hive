@@ -27,6 +27,9 @@ pub struct TickDriverConfig {
     pub assistant_db_path: String,
     /// Optional sender to forward triggered reminders to the UI layer.
     pub reminder_tx: Option<std::sync::mpsc::Sender<Vec<crate::reminders::TriggeredReminder>>>,
+    /// Optional callback to execute when a scheduled job fires.
+    /// Receives the job ID string.
+    pub job_executor: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 }
 
 impl Default for TickDriverConfig {
@@ -35,6 +38,7 @@ impl Default for TickDriverConfig {
             interval: Duration::from_secs(60),
             assistant_db_path: String::new(),
             reminder_tx: None,
+            job_executor: None,
         }
     }
 }
@@ -75,6 +79,7 @@ pub fn start_tick_driver(
                 };
                 let reminder_service = ReminderService::new(storage);
                 let reminder_tx = config.reminder_tx;
+                let job_executor = config.job_executor;
 
                 info!(
                     "Tick driver started (interval={}s)",
@@ -118,6 +123,9 @@ pub fn start_tick_driver(
                     // Log individual items at info level when something fires.
                     for job_id in &due_jobs {
                         info!("Tick driver: scheduled job due: {job_id}");
+                        if let Some(ref executor) = job_executor {
+                            executor(job_id);
+                        }
                     }
                     for reminder in &triggered_reminders {
                         info!(
@@ -125,10 +133,7 @@ pub fn start_tick_driver(
                             reminder.reminder_id, reminder.title
                         );
                         // Show OS toast notification
-                        crate::reminders::os_notifications::show_toast(
-                            "Reminder",
-                            &reminder.title,
-                        );
+                        crate::reminders::os_notifications::show_toast("Reminder", &reminder.title);
                     }
 
                     // Forward triggered reminders to the UI layer if a channel is configured.

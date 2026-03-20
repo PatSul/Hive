@@ -13,7 +13,7 @@ use tracing::warn;
 use super::{AiProvider, ProviderError};
 use crate::types::{
     ChatMessage, ChatRequest, ChatResponse, FinishReason, ModelCapabilities, ModelInfo, ModelTier,
-    ProviderType, StreamChunk, StopReason, TokenUsage,
+    ProviderType, StopReason, StreamChunk, TokenUsage,
 };
 
 // ---------------------------------------------------------------------------
@@ -144,9 +144,7 @@ impl HiveGatewayProvider {
     }
 
     fn map_error(status: reqwest::StatusCode, text: &str) -> ProviderError {
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return ProviderError::InvalidKey;
         }
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -196,10 +194,7 @@ impl AiProvider for HiveGatewayProvider {
         };
 
         if !resp.status().is_success() {
-            warn!(
-                "Hive Gateway model list returned {}",
-                resp.status()
-            );
+            warn!("Hive Gateway model list returned {}", resp.status());
             return Vec::new();
         }
 

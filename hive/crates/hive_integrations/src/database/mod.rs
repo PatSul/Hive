@@ -385,8 +385,7 @@ pub(crate) async fn run_cli_command(
         );
     }
 
-    let stdout = String::from_utf8(output.stdout)
-        .context("CLI output contained invalid UTF-8")?;
+    let stdout = String::from_utf8(output.stdout).context("CLI output contained invalid UTF-8")?;
 
     Ok(stdout)
 }
@@ -466,8 +465,14 @@ mod tests {
     fn test_database_type_serialize() {
         let json = serde_json::to_string(&DatabaseType::PostgreSQL).unwrap();
         assert_eq!(json, r#""postgresql""#);
-        assert_eq!(serde_json::to_string(&DatabaseType::MySQL).unwrap(), r#""mysql""#);
-        assert_eq!(serde_json::to_string(&DatabaseType::SQLite).unwrap(), r#""sqlite""#);
+        assert_eq!(
+            serde_json::to_string(&DatabaseType::MySQL).unwrap(),
+            r#""mysql""#
+        );
+        assert_eq!(
+            serde_json::to_string(&DatabaseType::SQLite).unwrap(),
+            r#""sqlite""#
+        );
     }
 
     #[test]
@@ -478,7 +483,11 @@ mod tests {
 
     #[test]
     fn test_database_type_roundtrip() {
-        for dt in [DatabaseType::PostgreSQL, DatabaseType::MySQL, DatabaseType::SQLite] {
+        for dt in [
+            DatabaseType::PostgreSQL,
+            DatabaseType::MySQL,
+            DatabaseType::SQLite,
+        ] {
             let json = serde_json::to_string(&dt).unwrap();
             let back: DatabaseType = serde_json::from_str(&json).unwrap();
             assert_eq!(back, dt);
@@ -776,7 +785,10 @@ mod tests {
     #[test]
     fn test_hub_register_and_get() {
         let mut hub = DatabaseHub::new();
-        hub.register("test", Box::new(sqlite::SQLiteProvider::new("/tmp/test.db")));
+        hub.register(
+            "test",
+            Box::new(sqlite::SQLiteProvider::new("/tmp/test.db")),
+        );
         assert_eq!(hub.connection_count(), 1);
         assert!(hub.get_provider("test").is_some());
         assert!(hub.get_provider("other").is_none());
@@ -802,10 +814,20 @@ mod tests {
     #[test]
     fn test_hub_list_connections() {
         let mut hub = DatabaseHub::new();
-        hub.register("pg", Box::new(postgres::PostgresProvider::new(
-            DatabaseConfig::postgres("localhost", 5432, "mydb", "user", "pass"),
-        )));
-        hub.register("lite", Box::new(sqlite::SQLiteProvider::new("/tmp/test.db")));
+        hub.register(
+            "pg",
+            Box::new(postgres::PostgresProvider::new(DatabaseConfig::postgres(
+                "localhost",
+                5432,
+                "mydb",
+                "user",
+                "pass",
+            ))),
+        );
+        hub.register(
+            "lite",
+            Box::new(sqlite::SQLiteProvider::new("/tmp/test.db")),
+        );
 
         let conns = hub.list_connections();
         assert_eq!(conns.len(), 2);

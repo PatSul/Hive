@@ -599,7 +599,13 @@ mod tests {
     fn provider_color_cycles_at_palette_length() {
         let t = theme();
         // Palette has 7 entries, so index 0 and 7 should be the same
-        assert_eq!(CostsPanel::provider_color(0, &t), CostsPanel::provider_color(7, &t));
-        assert_eq!(CostsPanel::provider_color(1, &t), CostsPanel::provider_color(8, &t));
+        assert_eq!(
+            CostsPanel::provider_color(0, &t),
+            CostsPanel::provider_color(7, &t)
+        );
+        assert_eq!(
+            CostsPanel::provider_color(1, &t),
+            CostsPanel::provider_color(8, &t)
+        );
     }
 }

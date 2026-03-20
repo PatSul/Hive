@@ -186,7 +186,12 @@ impl DocsIndexer {
 
         // Compute document frequencies.
         for page in &index.pages {
-            let tokens = tokenize(&format!("{} {} {}", page.title, page.content, page.headings.join(" ")));
+            let tokens = tokenize(&format!(
+                "{} {} {}",
+                page.title,
+                page.content,
+                page.headings.join(" ")
+            ));
             for term in &query_terms {
                 if tokens.contains(term) {
                     *doc_freq.entry(term.clone()).or_insert(0) += 1;
@@ -252,7 +257,10 @@ impl DocsIndexer {
     pub fn get_context(&self, name: &str, query: &str) -> String {
         let results = self.search(name, query, 5);
         if results.is_empty() {
-            return format!("No documentation found for '{}' in index '{}'.", query, name);
+            return format!(
+                "No documentation found for '{}' in index '{}'.",
+                query, name
+            );
         }
 
         let mut context = format!("## Documentation context for: {}\n\n", query);
@@ -320,7 +328,10 @@ impl DocsIndexer {
             anyhow::bail!("non-HTML content type: {}", content_type);
         }
 
-        response.text().await.context("failed to read response body")
+        response
+            .text()
+            .await
+            .context("failed to read response body")
     }
 
     /// Fetch and parse robots.txt for the given base URL.
@@ -329,12 +340,10 @@ impl DocsIndexer {
         debug!(url = %robots_url, "fetching robots.txt");
 
         match self.client.get(&robots_url).send().await {
-            Ok(response) if response.status().is_success() => {
-                match response.text().await {
-                    Ok(body) => parse_robots_txt(&body),
-                    Err(_) => RobotsTxt::default(),
-                }
-            }
+            Ok(response) if response.status().is_success() => match response.text().await {
+                Ok(body) => parse_robots_txt(&body),
+                Err(_) => RobotsTxt::default(),
+            },
             _ => RobotsTxt::default(),
         }
     }
@@ -372,10 +381,7 @@ fn parse_robots_txt(content: &str) -> RobotsTxt {
             let agent = lower.strip_prefix("user-agent:").unwrap_or("").trim();
             applies_to_us = agent == "*" || agent.contains("hive");
         } else if applies_to_us && lower.starts_with("disallow:") {
-            let path = line
-                .split_once(':')
-                .map(|(_, v)| v.trim())
-                .unwrap_or("");
+            let path = line.split_once(':').map(|(_, v)| v.trim()).unwrap_or("");
             if !path.is_empty() {
                 disallowed.push(path.to_string());
             }
@@ -553,7 +559,10 @@ fn generate_snippet(content: &str, query_terms: &[String], max_len: usize) -> St
     let mut pos = 0;
     while pos + window_size <= chars.len() {
         let window: String = chars[pos..pos + window_size].iter().collect();
-        let count: usize = query_terms.iter().filter(|t| window.contains(t.as_str())).count();
+        let count: usize = query_terms
+            .iter()
+            .filter(|t| window.contains(t.as_str()))
+            .count();
         if count > best_count {
             best_count = count;
             best_pos = pos;
@@ -674,13 +683,19 @@ mod tests {
     #[test]
     fn test_resolve_url_relative_path() {
         let url = resolve_url("/guide/intro", "https://docs.example.com");
-        assert_eq!(url, Some("https://docs.example.com/guide/intro".to_string()));
+        assert_eq!(
+            url,
+            Some("https://docs.example.com/guide/intro".to_string())
+        );
     }
 
     #[test]
     fn test_resolve_url_relative_segment() {
         let url = resolve_url("page2", "https://docs.example.com/guide");
-        assert_eq!(url, Some("https://docs.example.com/guide/page2".to_string()));
+        assert_eq!(
+            url,
+            Some("https://docs.example.com/guide/page2".to_string())
+        );
     }
 
     #[test]
@@ -793,7 +808,8 @@ mod tests {
                     DocPage {
                         url: "https://doc.rust-lang.org/ownership".to_string(),
                         title: "Ownership".to_string(),
-                        content: "Rust ownership is a key concept. Ownership rules govern memory.".to_string(),
+                        content: "Rust ownership is a key concept. Ownership rules govern memory."
+                            .to_string(),
                         headings: vec!["Ownership".to_string()],
                         code_blocks: vec![],
                     },
@@ -807,7 +823,8 @@ mod tests {
                     DocPage {
                         url: "https://doc.rust-lang.org/types".to_string(),
                         title: "Types".to_string(),
-                        content: "Rust has a strong type system with generics and traits.".to_string(),
+                        content: "Rust has a strong type system with generics and traits."
+                            .to_string(),
                         headings: vec!["Types".to_string()],
                         code_blocks: vec![],
                     },

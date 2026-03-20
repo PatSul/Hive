@@ -9,10 +9,10 @@ pub mod background;
 pub mod canvas;
 /// AI agent messaging channels with threaded conversations.
 pub mod channels;
-/// Code review management with comments, file changes, and review workflows.
-pub mod code_review;
 /// Client-side cloud sync (blob push/pull) for Hive Cloud subscribers.
 pub mod cloud_sync;
+/// Code review management with comments, file changes, and review workflows.
+pub mod code_review;
 /// Application configuration, API key management, and hot-reload support.
 pub mod config;
 /// Context window management for token-aware conversation pruning.
@@ -46,6 +46,7 @@ pub mod updater;
 
 pub use background::{BackgroundService, BackgroundTask, TaskStatus};
 pub use canvas::{CanvasElement, CanvasState, Connection, ElementType, LiveCanvas, Point, Size};
+pub use channels::{AgentChannel, ChannelMessage, ChannelStore, ChannelThread, MessageAuthor};
 pub use code_review::{
     ChangeType, CodeReview, CodeReviewStore, CommentStatus, FileChange, ReviewComment, ReviewStats,
     ReviewStatus,
@@ -71,6 +72,5 @@ pub use scheduler::{CronSchedule, ScheduledJob, Scheduler};
 pub use secure_storage::SecureStorage;
 pub use security::{SandboxPolicy, SecurityGateway};
 pub use session::SessionState;
-pub use channels::{AgentChannel, ChannelMessage, ChannelStore, ChannelThread, MessageAuthor};
 pub use theme_manager::{ThemeColors, ThemeDefinition, ThemeFonts, ThemeManager};
 pub use updater::{UpdateInfo, UpdateService};

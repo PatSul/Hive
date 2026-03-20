@@ -1,8 +1,8 @@
 use gpui::*;
 use gpui_component::{Icon, IconName};
 
-use hive_ui_core::HiveTheme;
 use hive_ui_core::AgentsRunWorkflow;
+use hive_ui_core::HiveTheme;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -337,10 +337,7 @@ fn spec_card_footer(spec: &SpecSummary, theme: &HiveTheme) -> Div {
     let source_id = spec.id.clone();
     let title = spec.title.clone();
     let status = spec.status.clone();
-    let summary = format!(
-        "Status: {status} • Updated {when}",
-        when = spec.updated_at
-    );
+    let summary = format!("Status: {status} • Updated {when}", when = spec.updated_at);
 
     div()
         .flex()
@@ -366,7 +363,11 @@ fn spec_card_footer(spec: &SpecSummary, theme: &HiveTheme) -> Div {
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-                    let instruction = format!("Run specification {} end-to-end: {}", title, spec_status_summary(&status));
+                    let instruction = format!(
+                        "Run specification {} end-to-end: {}",
+                        title,
+                        spec_status_summary(&status)
+                    );
                     window.dispatch_action(
                         Box::new(AgentsRunWorkflow {
                             workflow_id: "builtin:hive-dogfood-v1".into(),
@@ -535,4 +536,3 @@ fn render_empty_state(theme: &HiveTheme) -> AnyElement {
         )
         .into_any_element()
 }
-

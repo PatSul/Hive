@@ -14,8 +14,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use super::{
-    CreatePageRequest, KBPage, KBPageSummary, KBPlatform, KBSearchResult,
-    KnowledgeBaseProvider,
+    CreatePageRequest, KBPage, KBPageSummary, KBPlatform, KBSearchResult, KnowledgeBaseProvider,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.notion.com/v1";
@@ -44,14 +43,8 @@ impl NotionClient {
         let auth_value = HeaderValue::from_str(&format!("Bearer {api_key}"))
             .context("invalid characters in Notion API key")?;
         headers.insert(AUTHORIZATION, auth_value);
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        headers.insert(
-            "Notion-Version",
-            HeaderValue::from_static(NOTION_VERSION),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert("Notion-Version", HeaderValue::from_static(NOTION_VERSION));
 
         let client = Client::builder()
             .default_headers(headers)
@@ -153,7 +146,10 @@ impl NotionClient {
         let mut cursor: Option<String> = None;
 
         loop {
-            let mut url = format!("{}/blocks/{}/children?page_size=100", self.base_url, block_id);
+            let mut url = format!(
+                "{}/blocks/{}/children?page_size=100",
+                self.base_url, block_id
+            );
             if let Some(ref c) = cursor {
                 url.push_str(&format!("&start_cursor={c}"));
             }
@@ -233,10 +229,7 @@ impl NotionClient {
 
     /// Build a [`KBPage`] from a Notion page object and its block content.
     fn build_page(page: &Value, content: String) -> KBPage {
-        let id = page["id"]
-            .as_str()
-            .unwrap_or_default()
-            .replace('-', "");
+        let id = page["id"].as_str().unwrap_or_default().replace('-', "");
 
         KBPage {
             id: id.clone(),
@@ -272,19 +265,13 @@ impl KnowledgeBaseProvider for NotionClient {
 
         let data = self.post_json(&url, &payload).await?;
 
-        let results = data["results"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let results = data["results"].as_array().cloned().unwrap_or_default();
 
         let search_results: Vec<KBSearchResult> = results
             .iter()
             .enumerate()
             .map(|(i, page)| {
-                let id = page["id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .replace('-', "");
+                let id = page["id"].as_str().unwrap_or_default().replace('-', "");
                 let title = Self::extract_title(page);
                 // Notion search does not return snippets natively; use the
                 // title and any available description as a best-effort snippet.
@@ -361,10 +348,7 @@ impl KnowledgeBaseProvider for NotionClient {
 
         let data = self.post_json(&url, &payload).await?;
 
-        let results = data["results"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let results = data["results"].as_array().cloned().unwrap_or_default();
 
         let summaries = results
             .iter()
@@ -378,10 +362,7 @@ impl KnowledgeBaseProvider for NotionClient {
                 }
             })
             .map(|page| {
-                let id = page["id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .replace('-', "");
+                let id = page["id"].as_str().unwrap_or_default().replace('-', "");
 
                 KBPageSummary {
                     id,
@@ -595,9 +576,7 @@ pub fn blocks_to_markdown(blocks: &[Value]) -> String {
                     .as_array()
                     .map(|arr| rich_text_to_string(arr))
                     .unwrap_or_default();
-                let language = block["code"]["language"]
-                    .as_str()
-                    .unwrap_or("plain text");
+                let language = block["code"]["language"].as_str().unwrap_or("plain text");
                 md.push_str(&format!("```{language}\n{text}\n```\n\n"));
             }
             "quote" => {
@@ -872,8 +851,7 @@ mod tests {
 
     #[test]
     fn test_notion_client_custom_base_url() {
-        let client =
-            NotionClient::with_base_url("ntn_tok", "https://api.notion.test/v1/").unwrap();
+        let client = NotionClient::with_base_url("ntn_tok", "https://api.notion.test/v1/").unwrap();
         assert_eq!(client.base_url(), "https://api.notion.test/v1");
     }
 

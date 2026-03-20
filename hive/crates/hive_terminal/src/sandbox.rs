@@ -14,9 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 
-use crate::docker::{
-    ContainerConfig, DockerSandbox, ExecResult, ResourceLimits, VolumeMount,
-};
+use crate::docker::{ContainerConfig, DockerSandbox, ExecResult, ResourceLimits, VolumeMount};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -306,11 +304,7 @@ mod tests {
             network_enabled: true,
             ..Default::default()
         };
-        let sandbox = AgentSandbox::with_docker(
-            DockerSandbox::new_simulated(),
-            "/tmp/ws",
-            config,
-        );
+        let sandbox = AgentSandbox::with_docker(DockerSandbox::new_simulated(), "/tmp/ws", config);
         assert_eq!(sandbox.config().memory_mb, 1024);
         assert!(sandbox.config().network_enabled);
     }

@@ -23,11 +23,7 @@ pub struct PromptTemplate {
 impl PromptTemplate {
     /// Create a new template with a generated ID.
     pub fn new(name: String, description: String, instruction: String) -> Self {
-        let id = format!(
-            "{}-{}",
-            slug(&name),
-            &uuid_v4_simple()[..8]
-        );
+        let id = format!("{}-{}", slug(&name), &uuid_v4_simple()[..8]);
         Self {
             id,
             name,
@@ -128,7 +124,13 @@ fn load_template_from_path(path: &Path) -> Result<PromptTemplate> {
 
 fn slug(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_string()
@@ -161,11 +163,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_serialize() {
-        let t = PromptTemplate::new(
-            "Test".into(),
-            "desc".into(),
-            "instruction".into(),
-        );
+        let t = PromptTemplate::new("Test".into(), "desc".into(), "instruction".into());
         let json = serde_json::to_string(&t).unwrap();
         let t2: PromptTemplate = serde_json::from_str(&json).unwrap();
         assert_eq!(t.id, t2.id);

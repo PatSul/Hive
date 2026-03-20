@@ -1,4 +1,4 @@
-use hive_remote::qr::{generate_pairing_qr, PairingQrPayload};
+use hive_remote::qr::{PairingQrPayload, generate_pairing_qr};
 
 // ---------------------------------------------------------------------------
 // 1. PairingQrPayload::to_url — verify URL format
@@ -91,7 +91,10 @@ fn test_generate_qr_code_bytes() {
     let svg = generate_pairing_qr(&payload).unwrap();
 
     assert!(svg.contains("<svg"), "SVG output should contain <svg tag");
-    assert!(svg.contains("</svg>"), "SVG output should contain closing </svg> tag");
+    assert!(
+        svg.contains("</svg>"),
+        "SVG output should contain closing </svg> tag"
+    );
     // SVG should be non-trivial
     assert!(svg.len() > 100, "SVG should be reasonably sized");
 }

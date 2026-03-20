@@ -256,12 +256,7 @@ impl NetworkPanel {
             ))
     }
 
-    fn stat_card(
-        label: &str,
-        value: &str,
-        accent: Hsla,
-        theme: &HiveTheme,
-    ) -> impl IntoElement {
+    fn stat_card(label: &str, value: &str, accent: Hsla, theme: &HiveTheme) -> impl IntoElement {
         div()
             .flex()
             .flex_col()

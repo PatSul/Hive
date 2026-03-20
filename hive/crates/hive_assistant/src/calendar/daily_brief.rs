@@ -41,12 +41,13 @@ pub fn generate_briefing(
 
     // Generate action items from email digest.
     if let Some(ref digest) = email_digest
-        && digest.email_count > 0 {
-            action_items.push(format!(
-                "Review {} email(s): {}",
-                digest.email_count, digest.summary
-            ));
-        }
+        && digest.email_count > 0
+    {
+        action_items.push(format!(
+            "Review {} email(s): {}",
+            digest.email_count, digest.summary
+        ));
+    }
 
     // Generate action items from reminders.
     for reminder in &reminders {

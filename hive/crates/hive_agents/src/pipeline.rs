@@ -17,7 +17,7 @@ use hive_core::SecurityGateway;
 
 use crate::coordinator::{PlannedTask, TaskResult};
 use crate::hivemind::AiExecutor;
-use crate::personas::{execute_with_persona_model, Persona, PersonaKind};
+use crate::personas::{Persona, PersonaKind, execute_with_persona_model};
 
 // ---------------------------------------------------------------------------
 // Pipeline Stage (for observability / logging)
@@ -136,7 +136,11 @@ fn run_gate(
             let lower = output.to_lowercase();
             // Only flag if the refusal appears in the first 200 chars
             // (genuine responses may quote these phrases later).
-            let prefix = if lower.len() > 200 { &lower[..200] } else { &lower };
+            let prefix = if lower.len() > 200 {
+                &lower[..200]
+            } else {
+                &lower
+            };
             for pattern in &refusal_patterns {
                 if prefix.contains(pattern) {
                     return ValidationResult::fail(format!(
@@ -172,10 +176,7 @@ fn run_gate(
 
         ValidationGateKind::CodeBlockPresence => {
             // Only enforce for Implement and Debug personas.
-            let needs_code = matches!(
-                task.persona,
-                PersonaKind::Implement | PersonaKind::Debug
-            );
+            let needs_code = matches!(task.persona, PersonaKind::Implement | PersonaKind::Debug);
             if needs_code && !output.contains("```") {
                 ValidationResult::fail(
                     "Implement/Debug persona must produce at least one code block",
@@ -323,22 +324,21 @@ impl<E: AiExecutor> TaskPipeline<E> {
         };
         drop(rag_guard);
 
-        let enriched_description = if context.relevant_snippets.is_empty()
-            && context.prior_outputs.is_empty()
-        {
-            task.description.clone()
-        } else {
-            let mut desc = task.description.clone();
-            if !context.prior_outputs.is_empty() {
-                desc.push_str("\n\n## Prior Task Outputs\n");
-                desc.push_str(&context.prior_outputs);
-            }
-            if !context.relevant_snippets.is_empty() {
-                desc.push_str("\n\n## Relevant Context\n");
-                desc.push_str(&context.relevant_snippets);
-            }
-            desc
-        };
+        let enriched_description =
+            if context.relevant_snippets.is_empty() && context.prior_outputs.is_empty() {
+                task.description.clone()
+            } else {
+                let mut desc = task.description.clone();
+                if !context.prior_outputs.is_empty() {
+                    desc.push_str("\n\n## Prior Task Outputs\n");
+                    desc.push_str(&context.prior_outputs);
+                }
+                if !context.relevant_snippets.is_empty() {
+                    desc.push_str("\n\n## Relevant Context\n");
+                    desc.push_str(&context.relevant_snippets);
+                }
+                desc
+            };
 
         let mut retries = 0u32;
         let mut total_cost = 0.0f64;
@@ -384,8 +384,7 @@ impl<E: AiExecutor> TaskPipeline<E> {
             let mut feedback = Vec::new();
 
             for gate_kind in &self.config.validation_gates {
-                let result =
-                    run_gate(gate_kind, &output.content, task, self.security.as_deref());
+                let result = run_gate(gate_kind, &output.content, task, self.security.as_deref());
                 if !result.passed {
                     all_passed = false;
                     feedback.push(result.message);
@@ -558,8 +557,8 @@ mod tests {
     #[tokio::test]
     async fn test_pipeline_retries_then_succeeds() {
         let executor = Arc::new(MockExecutor::new(vec![
-            "".to_string(),              // attempt 1: empty
-            "got it done".to_string(),   // attempt 2: valid
+            "".to_string(),            // attempt 1: empty
+            "got it done".to_string(), // attempt 2: valid
         ]));
         let pipeline = TaskPipeline::new(
             PipelineConfig {

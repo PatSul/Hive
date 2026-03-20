@@ -126,8 +126,7 @@ impl FleetLearningService {
     /// Existing data is loaded from the database on construction. Call
     /// `persist()` to flush in-memory changes back to disk.
     pub fn with_db(path: &str) -> Result<Self, String> {
-        let conn =
-            Connection::open(path).map_err(|e| format!("Failed to open fleet DB: {e}"))?;
+        let conn = Connection::open(path).map_err(|e| format!("Failed to open fleet DB: {e}"))?;
         Self::init_fleet_tables(&conn)?;
         let mut service = Self {
             patterns: Vec::new(),

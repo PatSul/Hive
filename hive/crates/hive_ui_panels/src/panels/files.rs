@@ -193,9 +193,7 @@ impl FilesData {
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
                 let lang = extension_to_language(&ext).to_string();
-                let size = std::fs::metadata(file_path)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
                 self.viewed_file_content = Some(content);
                 self.viewed_file_path = Some(file_path.to_string_lossy().to_string());
                 self.viewed_file_language = lang;
@@ -249,10 +247,7 @@ impl FilesData {
     ///
     /// The caller (workspace) should invoke this when filename filtering
     /// returns zero results and the query is non-empty.
-    pub fn run_semantic_search(
-        &mut self,
-        semantic: &mut hive_ai::SemanticSearchService,
-    ) {
+    pub fn run_semantic_search(&mut self, semantic: &mut hive_ai::SemanticSearchService) {
         self.semantic_results.clear();
 
         let query = self.search_query.trim();
@@ -492,24 +487,23 @@ impl FilesPanel {
         // 3b. Semantic search results — shown when filename filter has no
         // matches but content-based search found relevant files.
         if show_semantic {
-            file_browser = file_browser
-                .child(Self::semantic_results_section(&data.semantic_results, theme));
+            file_browser = file_browser.child(Self::semantic_results_section(
+                &data.semantic_results,
+                theme,
+            ));
         }
 
         // 4. Action bar
         let file_browser = file_browser.child(Self::action_bar(
-                dir_count,
-                file_count,
-                data.checked_files.len(),
-                theme,
-            ));
+            dir_count,
+            file_count,
+            data.checked_files.len(),
+            theme,
+        ));
 
         // When a file is open, show split view: browser (35%) | viewer (65%)
         if let Some(ref content) = data.viewed_file_content {
-            let path_display = data
-                .viewed_file_path
-                .as_deref()
-                .unwrap_or("Unknown file");
+            let path_display = data.viewed_file_path.as_deref().unwrap_or("Unknown file");
             let lang = &data.viewed_file_language;
             let size = data.viewed_file_size;
 
@@ -522,7 +516,13 @@ impl FilesPanel {
                 .p(theme.space_4)
                 .gap(theme.space_2)
                 // Left: file browser (35%)
-                .child(div().w(relative(0.35)).flex().flex_col().child(file_browser))
+                .child(
+                    div()
+                        .w(relative(0.35))
+                        .flex()
+                        .flex_col()
+                        .child(file_browser),
+                )
                 // Right: file viewer (65%)
                 .child(
                     div()
@@ -557,12 +557,7 @@ impl FilesPanel {
     }
 
     /// Header for the file viewer pane (path, size, close button).
-    fn viewer_header(
-        path: &str,
-        lang: &str,
-        size: u64,
-        theme: &HiveTheme,
-    ) -> impl IntoElement {
+    fn viewer_header(path: &str, lang: &str, size: u64, theme: &HiveTheme) -> impl IntoElement {
         let size_str = format_size(size);
         let lang_label = if lang.is_empty() {
             String::new()
@@ -878,10 +873,7 @@ impl FilesPanel {
             let file_path = result.file_path.clone();
             list = list.child(
                 div()
-                    .id(SharedString::from(format!(
-                        "semantic-{}",
-                        result.file_path
-                    )))
+                    .id(SharedString::from(format!("semantic-{}", result.file_path)))
                     .flex()
                     .flex_col()
                     .px(theme.space_2)
@@ -912,10 +904,7 @@ impl FilesPanel {
                                 div()
                                     .text_size(theme.font_size_sm)
                                     .text_color(theme.text_primary)
-                                    .child(format!(
-                                        "{} :{}",
-                                        display_name, result.line_number
-                                    )),
+                                    .child(format!("{} :{}", display_name, result.line_number)),
                             ),
                     )
                     .child(

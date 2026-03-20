@@ -209,19 +209,20 @@ impl HiveShield {
         };
 
         if let Some(ref a) = assessment
-            && !a.safe_to_send {
-                self.threats_caught.fetch_add(1, Ordering::Relaxed);
-                return ShieldResult {
-                    action: ShieldAction::Block(format!(
-                        "Prompt blocked: threat level '{}' detected",
-                        a.threat_level
-                    )),
-                    pii_found: Vec::new(),
-                    secrets_found,
-                    assessment: Some(a.clone()),
-                    processing_time_ms: start.elapsed().as_millis() as u64,
-                };
-            }
+            && !a.safe_to_send
+        {
+            self.threats_caught.fetch_add(1, Ordering::Relaxed);
+            return ShieldResult {
+                action: ShieldAction::Block(format!(
+                    "Prompt blocked: threat level '{}' detected",
+                    a.threat_level
+                )),
+                pii_found: Vec::new(),
+                secrets_found,
+                assessment: Some(a.clone()),
+                processing_time_ms: start.elapsed().as_millis() as u64,
+            };
+        }
 
         // 3. PII detection.
         let pii_found = if self.config.enable_pii_detection {
@@ -303,9 +304,10 @@ impl HiveShield {
                 .fetch_add(pii_found.len(), Ordering::Relaxed);
         }
         if let Some(a) = &assessment
-            && !a.safe_to_send {
-                self.threats_caught.fetch_add(1, Ordering::Relaxed);
-            }
+            && !a.safe_to_send
+        {
+            self.threats_caught.fetch_add(1, Ordering::Relaxed);
+        }
 
         let mut warnings = Vec::new();
         if !secrets_found.is_empty() {
@@ -315,9 +317,10 @@ impl HiveShield {
             warnings.push("Response contains PII");
         }
         if let Some(ref a) = assessment
-            && !a.safe_to_send {
-                warnings.push("Response contains potential injection");
-            }
+            && !a.safe_to_send
+        {
+            warnings.push("Response contains potential injection");
+        }
 
         let action = if warnings.is_empty() {
             ShieldAction::Allow
@@ -503,7 +506,9 @@ mod tests {
     #[test]
     fn shield_config_serde_round_trip() {
         let mut config = test_config();
-        config.user_rules.push(UserRule::new("Test rule", r"secret\d+"));
+        config
+            .user_rules
+            .push(UserRule::new("Test rule", r"secret\d+"));
         config.enable_pii_detection = false;
 
         let json = serde_json::to_string(&config).expect("serialize");

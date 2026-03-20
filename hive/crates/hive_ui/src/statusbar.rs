@@ -1,5 +1,5 @@
-use gpui::*;
 use gpui::prelude::FluentBuilder;
+use gpui::*;
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::{HiveTheme, SwitchToSettings, TriggerAppUpdate};
@@ -203,11 +203,7 @@ impl StatusBar {
                             .bg(theme.bg_surface)
                             .text_size(theme.font_size_xs)
                             .child(Icon::new(privacy_icon).size_3p5())
-                            .child(
-                                div()
-                                    .text_size(theme.font_size_xs)
-                                    .child(privacy),
-                            ),
+                            .child(div().text_size(theme.font_size_xs).child(privacy)),
                     )
                     .child(
                         div()

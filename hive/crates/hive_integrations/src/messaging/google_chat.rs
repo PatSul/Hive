@@ -136,10 +136,7 @@ impl GoogleChatProvider {
 
     /// Extract the message ID from a full resource name like `spaces/AAAA/messages/BBBB`.
     fn message_id_from_name(name: &str) -> String {
-        name.rsplit('/')
-            .next()
-            .unwrap_or(name)
-            .to_string()
+        name.rsplit('/').next().unwrap_or(name).to_string()
     }
 
     /// Build a space resource name. If the input already starts with `spaces/`, return as-is.
@@ -245,10 +242,7 @@ impl MessagingProvider for GoogleChatProvider {
 
     async fn get_messages(&self, channel: &str, limit: u32) -> Result<Vec<IncomingMessage>> {
         let space = Self::space_name(channel);
-        let url = format!(
-            "{}/{}/messages?pageSize={}",
-            self.base_url, space, limit
-        );
+        let url = format!("{}/{}/messages?pageSize={}", self.base_url, space, limit);
 
         debug!(url = %url, channel = %channel, "getting Google Chat messages");
 
@@ -306,12 +300,7 @@ impl MessagingProvider for GoogleChatProvider {
             .collect())
     }
 
-    async fn add_reaction(
-        &self,
-        channel: &str,
-        message_id: &str,
-        emoji: &str,
-    ) -> Result<()> {
+    async fn add_reaction(&self, channel: &str, message_id: &str, emoji: &str) -> Result<()> {
         let space = Self::space_name(channel);
         let url = format!(
             "{}/{}/messages/{}/reactions",
@@ -388,8 +377,7 @@ mod tests {
 
     #[test]
     fn test_google_chat_provider_custom_base_url_strips_slash() {
-        let provider =
-            GoogleChatProvider::with_base_url("tok", "https://chat.test/v1/").unwrap();
+        let provider = GoogleChatProvider::with_base_url("tok", "https://chat.test/v1/").unwrap();
         assert_eq!(provider.base_url(), "https://chat.test/v1");
     }
 
@@ -412,15 +400,15 @@ mod tests {
 
     #[test]
     fn test_space_name_with_prefix() {
-        assert_eq!(
-            GoogleChatProvider::space_name("spaces/AAAA"),
-            "spaces/AAAA"
-        );
+        assert_eq!(GoogleChatProvider::space_name("spaces/AAAA"), "spaces/AAAA");
     }
 
     #[test]
     fn test_space_id_from_name() {
-        assert_eq!(GoogleChatProvider::space_id_from_name("spaces/AAAA"), "AAAA");
+        assert_eq!(
+            GoogleChatProvider::space_id_from_name("spaces/AAAA"),
+            "AAAA"
+        );
     }
 
     #[test]

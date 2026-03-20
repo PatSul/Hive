@@ -141,7 +141,10 @@ impl WebhookRegistry {
 
     /// Count the number of active subscribers for a given event (synchronous).
     pub fn subscriber_count_for(&self, event: &str) -> usize {
-        self.webhooks.iter().filter(|w| w.is_subscribed_to(event)).count()
+        self.webhooks
+            .iter()
+            .filter(|w| w.is_subscribed_to(event))
+            .count()
     }
 
     /// Trigger an event, sending the payload to all subscribed active webhooks.

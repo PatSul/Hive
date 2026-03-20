@@ -169,7 +169,9 @@ impl MessagingProvider for SignalProvider {
             .await
             .context("failed to parse Signal send response")?;
 
-        let ts = send_resp.timestamp.unwrap_or_else(|| Utc::now().timestamp_millis());
+        let ts = send_resp
+            .timestamp
+            .unwrap_or_else(|| Utc::now().timestamp_millis());
 
         Ok(SentMessage {
             id: ts.to_string(),
@@ -272,12 +274,7 @@ impl MessagingProvider for SignalProvider {
             .collect())
     }
 
-    async fn add_reaction(
-        &self,
-        _channel: &str,
-        message_id: &str,
-        emoji: &str,
-    ) -> Result<()> {
+    async fn add_reaction(&self, _channel: &str, message_id: &str, emoji: &str) -> Result<()> {
         let url = format!("{}/reactions/{}", self.base_url, self.number);
         let payload = serde_json::json!({
             "recipient": _channel,

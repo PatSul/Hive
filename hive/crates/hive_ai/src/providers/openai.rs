@@ -170,30 +170,31 @@ impl OpenAIProvider {
 
             // Assistant messages with tool_calls.
             if m.role == crate::types::MessageRole::Assistant
-                && let Some(ref calls) = m.tool_calls {
-                    let tc_msgs: Vec<OpenAIToolCallMsg> = calls
-                        .iter()
-                        .map(|c| OpenAIToolCallMsg {
-                            id: c.id.clone(),
-                            call_type: "function".into(),
-                            function: OpenAIFunctionCall {
-                                name: c.name.clone(),
-                                arguments: serde_json::to_string(&c.input).unwrap_or_default(),
-                            },
-                        })
-                        .collect();
-                    out.push(OpenAIMessage {
-                        role: role.into(),
-                        content: if m.content.is_empty() {
-                            None
-                        } else {
-                            Some(serde_json::Value::String(m.content.clone()))
+                && let Some(ref calls) = m.tool_calls
+            {
+                let tc_msgs: Vec<OpenAIToolCallMsg> = calls
+                    .iter()
+                    .map(|c| OpenAIToolCallMsg {
+                        id: c.id.clone(),
+                        call_type: "function".into(),
+                        function: OpenAIFunctionCall {
+                            name: c.name.clone(),
+                            arguments: serde_json::to_string(&c.input).unwrap_or_default(),
                         },
-                        tool_call_id: None,
-                        tool_calls: Some(tc_msgs),
-                    });
-                    continue;
-                }
+                    })
+                    .collect();
+                out.push(OpenAIMessage {
+                    role: role.into(),
+                    content: if m.content.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::String(m.content.clone()))
+                    },
+                    tool_call_id: None,
+                    tool_calls: Some(tc_msgs),
+                });
+                continue;
+            }
 
             out.push(OpenAIMessage {
                 role: role.into(),
@@ -315,10 +316,11 @@ impl AiProvider for OpenAIProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::OpenAI)
-            .into_iter()
-            .cloned()
-            .collect();
+        let mut static_models: Vec<ModelInfo> =
+            crate::model_registry::models_for_provider(ProviderType::OpenAI)
+                .into_iter()
+                .cloned()
+                .collect();
 
         let key = match self.require_key() {
             Ok(k) => k,
@@ -404,9 +406,9 @@ impl AiProvider for OpenAIProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }
             })
             .unwrap_or_default();
 

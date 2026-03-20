@@ -3,14 +3,13 @@ use std::collections::HashMap;
 use gpui::*;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
-
-use hive_ui_core::HiveTheme;
-use hive_ui_core::ChatReadAloud;
-use hive_ui_core::ToggleDisclosure;
 use crate::components::markdown::render_markdown;
 use crate::components::thinking_indicator::{ThinkingPhase, render_thinking_indicator};
-use hive_ui_core::WelcomeScreen;
 use hive_ai::MessageRole;
+use hive_ui_core::ChatReadAloud;
+use hive_ui_core::HiveTheme;
+use hive_ui_core::ToggleDisclosure;
+use hive_ui_core::WelcomeScreen;
 
 // ---------------------------------------------------------------------------
 // Markdown cache — parsed AST intermediate representation
@@ -308,7 +307,6 @@ impl CachedChatData {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Display types
@@ -621,9 +619,7 @@ impl ChatPanel {
 
         content.into_any_element()
     }
-
 }
-
 
 // ---------------------------------------------------------------------------
 // Progressive disclosure helpers
@@ -673,7 +669,9 @@ fn render_disclosure_toggle(
     };
 
     div()
-        .id(ElementId::Name(format!("disclosure-toggle-{message_index}").into()))
+        .id(ElementId::Name(
+            format!("disclosure-toggle-{message_index}").into(),
+        ))
         .flex()
         .items_center()
         .gap(theme.space_1)
@@ -695,10 +693,7 @@ fn render_disclosure_toggle(
                 .child(disclosure_label(level)),
         )
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-            window.dispatch_action(
-                Box::new(ToggleDisclosure { message_index }),
-                cx,
-            );
+            window.dispatch_action(Box::new(ToggleDisclosure { message_index }), cx);
         })
         .into_any_element()
 }
@@ -813,14 +808,19 @@ fn render_message_bubble(
 
     // Cost badge
     if let Some(cost) = msg.cost
-        && cost > 0.0 {
-            header = header.child(render_cost_badge(cost, msg.tokens, theme));
-        }
+        && cost > 0.0
+    {
+        header = header.child(render_cost_badge(cost, msg.tokens, theme));
+    }
 
     // Disclosure toggle for assistant messages
     let is_assistant = msg.role == MessageRole::Assistant;
     if is_assistant {
-        header = header.child(render_disclosure_toggle(msg.disclosure, message_index, theme));
+        header = header.child(render_disclosure_toggle(
+            msg.disclosure,
+            message_index,
+            theme,
+        ));
     }
 
     // Read Aloud button for assistant messages
@@ -833,7 +833,10 @@ fn render_message_bubble(
     // Thinking section (collapsible) — shown at Steps and Raw levels
     if let Some(ref thinking) = msg.thinking {
         let show = msg.show_thinking
-            || matches!(msg.disclosure, DisclosureLevel::Steps | DisclosureLevel::Raw);
+            || matches!(
+                msg.disclosure,
+                DisclosureLevel::Steps | DisclosureLevel::Raw
+            );
         bubble = bubble.child(render_thinking_section(thinking, show, theme));
     }
 
@@ -940,14 +943,19 @@ fn render_message_bubble_cached(
     }
 
     if let Some(cost) = msg.cost
-        && cost > 0.0 {
-            header = header.child(render_cost_badge(cost, msg.tokens, theme));
-        }
+        && cost > 0.0
+    {
+        header = header.child(render_cost_badge(cost, msg.tokens, theme));
+    }
 
     // Disclosure toggle for assistant messages
     let is_assistant = msg.role == MessageRole::Assistant;
     if is_assistant {
-        header = header.child(render_disclosure_toggle(msg.disclosure, message_index, theme));
+        header = header.child(render_disclosure_toggle(
+            msg.disclosure,
+            message_index,
+            theme,
+        ));
     }
 
     // Read Aloud button for assistant messages
@@ -960,7 +968,10 @@ fn render_message_bubble_cached(
     // Thinking section — shown at Steps and Raw levels
     if let Some(ref thinking) = msg.thinking {
         let show = msg.show_thinking
-            || matches!(msg.disclosure, DisclosureLevel::Steps | DisclosureLevel::Raw);
+            || matches!(
+                msg.disclosure,
+                DisclosureLevel::Steps | DisclosureLevel::Raw
+            );
         bubble = bubble.child(render_thinking_section(thinking, show, theme));
     }
 
@@ -1413,13 +1424,15 @@ fn render_code_block(code: &str, lang: &str, theme: &HiveTheme) -> AnyElement {
         let file_path = &lang[colon_pos + 1..];
         if !file_path.is_empty() && !actual_lang.is_empty() {
             return crate::components::code_block::render_code_block_with_path(
-                trimmed, actual_lang, file_path, theme,
+                trimmed,
+                actual_lang,
+                file_path,
+                theme,
             )
             .into_any_element();
         }
     }
 
     // Standard code block (no file path)
-    crate::components::code_block::render_code_block(trimmed, lang, theme)
-        .into_any_element()
+    crate::components::code_block::render_code_block(trimmed, lang, theme).into_any_element()
 }

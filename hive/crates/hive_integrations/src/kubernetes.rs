@@ -147,8 +147,8 @@ impl KubernetesClient {
             .run_kubectl(&["get", "pods", "-n", &ns, "-o", "json"])
             .await?;
 
-        let val: Value = serde_json::from_str(&output)
-            .context("failed to parse kubectl pods output")?;
+        let val: Value =
+            serde_json::from_str(&output).context("failed to parse kubectl pods output")?;
 
         let items = val["items"].as_array().cloned().unwrap_or_default();
         let pods = items.iter().map(|item| parse_pod(item)).collect();
@@ -164,8 +164,8 @@ impl KubernetesClient {
             .run_kubectl(&["get", "pod", name, "-n", &ns, "-o", "json"])
             .await?;
 
-        let val: Value = serde_json::from_str(&output)
-            .context("failed to parse kubectl pod output")?;
+        let val: Value =
+            serde_json::from_str(&output).context("failed to parse kubectl pod output")?;
 
         Ok(parse_pod(&val))
     }
@@ -199,8 +199,8 @@ impl KubernetesClient {
             .run_kubectl(&["get", "deployments", "-n", &ns, "-o", "json"])
             .await?;
 
-        let val: Value = serde_json::from_str(&output)
-            .context("failed to parse kubectl deployments output")?;
+        let val: Value =
+            serde_json::from_str(&output).context("failed to parse kubectl deployments output")?;
 
         let items = val["items"].as_array().cloned().unwrap_or_default();
         let deployments = items.iter().map(|item| parse_deployment(item)).collect();
@@ -234,8 +234,8 @@ impl KubernetesClient {
             .run_kubectl(&["get", "services", "-n", &ns, "-o", "json"])
             .await?;
 
-        let val: Value = serde_json::from_str(&output)
-            .context("failed to parse kubectl services output")?;
+        let val: Value =
+            serde_json::from_str(&output).context("failed to parse kubectl services output")?;
 
         let items = val["items"].as_array().cloned().unwrap_or_default();
         let services = items.iter().map(|item| parse_service(item)).collect();
@@ -252,8 +252,8 @@ impl KubernetesClient {
             .run_kubectl(&["get", "namespaces", "-o", "json"])
             .await?;
 
-        let val: Value = serde_json::from_str(&output)
-            .context("failed to parse kubectl namespaces output")?;
+        let val: Value =
+            serde_json::from_str(&output).context("failed to parse kubectl namespaces output")?;
 
         let items = val["items"].as_array().cloned().unwrap_or_default();
         let namespaces = items.iter().map(|item| parse_namespace(item)).collect();
@@ -323,8 +323,8 @@ impl KubernetesClient {
             .run_kubectl(&["get", "events", "-n", &ns, "-o", "json"])
             .await?;
 
-        let val: Value = serde_json::from_str(&output)
-            .context("failed to parse kubectl events output")?;
+        let val: Value =
+            serde_json::from_str(&output).context("failed to parse kubectl events output")?;
 
         let items = val["items"].as_array().cloned().unwrap_or_default();
         let events = items.iter().map(|item| parse_event(item)).collect();
@@ -344,12 +344,10 @@ impl KubernetesClient {
         let current_ctx = self.get_current_context().await.unwrap_or_default();
 
         // Get detailed context info.
-        let config_output = self
-            .run_kubectl(&["config", "view", "-o", "json"])
-            .await?;
+        let config_output = self.run_kubectl(&["config", "view", "-o", "json"]).await?;
 
-        let config: Value = serde_json::from_str(&config_output)
-            .context("failed to parse kubectl config")?;
+        let config: Value =
+            serde_json::from_str(&config_output).context("failed to parse kubectl config")?;
 
         let mut contexts = Vec::new();
         if let Some(ctx_list) = config["contexts"].as_array() {
@@ -403,22 +401,18 @@ impl KubernetesClient {
         );
 
         // Get node count.
-        let nodes_output = self
-            .run_kubectl(&["get", "nodes", "-o", "json"])
-            .await?;
-        let nodes_val: Value = serde_json::from_str(&nodes_output)
-            .context("failed to parse kubectl nodes output")?;
+        let nodes_output = self.run_kubectl(&["get", "nodes", "-o", "json"]).await?;
+        let nodes_val: Value =
+            serde_json::from_str(&nodes_output).context("failed to parse kubectl nodes output")?;
         let node_count = nodes_val["items"]
             .as_array()
             .map(|a| a.len() as u32)
             .unwrap_or(0);
 
         // Get server URL from cluster info.
-        let config_output = self
-            .run_kubectl(&["config", "view", "-o", "json"])
-            .await?;
-        let config_val: Value = serde_json::from_str(&config_output)
-            .context("failed to parse kubectl config")?;
+        let config_output = self.run_kubectl(&["config", "view", "-o", "json"]).await?;
+        let config_val: Value =
+            serde_json::from_str(&config_output).context("failed to parse kubectl config")?;
 
         let server_url = config_val["clusters"]
             .as_array()
@@ -438,9 +432,7 @@ impl KubernetesClient {
 
     /// Get the current kubectl context name.
     async fn get_current_context(&self) -> Result<String> {
-        let output = self
-            .run_kubectl(&["config", "current-context"])
-            .await?;
+        let output = self.run_kubectl(&["config", "current-context"]).await?;
         Ok(output.trim().to_string())
     }
 
@@ -510,7 +502,10 @@ fn parse_pod(val: &Value) -> Pod {
     let spec = &val["spec"];
 
     let name = metadata["name"].as_str().unwrap_or("").to_string();
-    let namespace = metadata["namespace"].as_str().unwrap_or("default").to_string();
+    let namespace = metadata["namespace"]
+        .as_str()
+        .unwrap_or("default")
+        .to_string();
 
     let phase = status["phase"].as_str().unwrap_or("Unknown").to_string();
 
@@ -555,7 +550,10 @@ fn parse_deployment(val: &Value) -> Deployment {
     let spec = &val["spec"];
 
     let name = metadata["name"].as_str().unwrap_or("").to_string();
-    let namespace = metadata["namespace"].as_str().unwrap_or("default").to_string();
+    let namespace = metadata["namespace"]
+        .as_str()
+        .unwrap_or("default")
+        .to_string();
 
     let desired = spec["replicas"].as_u64().unwrap_or(0) as u32;
     let ready = status["readyReplicas"].as_u64().unwrap_or(0) as u32;
@@ -578,7 +576,10 @@ fn parse_service(val: &Value) -> K8sService {
     let spec = &val["spec"];
 
     let name = metadata["name"].as_str().unwrap_or("").to_string();
-    let namespace = metadata["namespace"].as_str().unwrap_or("default").to_string();
+    let namespace = metadata["namespace"]
+        .as_str()
+        .unwrap_or("default")
+        .to_string();
     let service_type = spec["type"].as_str().unwrap_or("ClusterIP").to_string();
     let cluster_ip = spec["clusterIP"].as_str().unwrap_or("None").to_string();
 
@@ -586,11 +587,7 @@ fn parse_service(val: &Value) -> K8sService {
     let external_ip = val["status"]["loadBalancer"]["ingress"]
         .as_array()
         .and_then(|arr| arr.first())
-        .and_then(|ing| {
-            ing["ip"]
-                .as_str()
-                .or_else(|| ing["hostname"].as_str())
-        })
+        .and_then(|ing| ing["ip"].as_str().or_else(|| ing["hostname"].as_str()))
         .unwrap_or("<none>")
         .to_string();
 
@@ -647,10 +644,7 @@ fn parse_event(val: &Value) -> K8sEvent {
             .or_else(|| val["metadata"]["creationTimestamp"].as_str())
             .unwrap_or("")
             .to_string(),
-        last_seen: val["lastTimestamp"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
+        last_seen: val["lastTimestamp"].as_str().unwrap_or("").to_string(),
         count: val["count"].as_u64().unwrap_or(1) as u32,
     }
 }

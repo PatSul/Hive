@@ -15,8 +15,7 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use super::{
-    CreatePageRequest, KBPage, KBPageSummary, KBPlatform, KBSearchResult,
-    KnowledgeBaseProvider,
+    CreatePageRequest, KBPage, KBPageSummary, KBPlatform, KBSearchResult, KnowledgeBaseProvider,
 };
 
 // -- Types ------------------------------------------------------------------
@@ -202,10 +201,7 @@ impl ObsidianProvider {
         let outlinks = extract_wiki_links(&content);
 
         // Override title from front matter if present.
-        let title = front_matter
-            .get("title")
-            .cloned()
-            .unwrap_or(title);
+        let title = front_matter.get("title").cloned().unwrap_or(title);
 
         Ok(ObsidianPage {
             path: relative,
@@ -317,10 +313,7 @@ impl ObsidianProvider {
             .collect();
 
         // Sort descending by score.
-        scores.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(limit as usize);
 
         // Normalize scores to [0, 1].
@@ -370,24 +363,19 @@ impl KnowledgeBaseProvider for ObsidianProvider {
         let (front_matter, content) = parse_front_matter(&raw);
         let tags = extract_tags(&content, &front_matter);
 
-        let title = front_matter
-            .get("title")
-            .cloned()
-            .unwrap_or_else(|| {
-                full_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Untitled")
-                    .to_string()
-            });
+        let title = front_matter.get("title").cloned().unwrap_or_else(|| {
+            full_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Untitled")
+                .to_string()
+        });
 
         // Extract parent directory as parent_id.
-        let parent_id = Path::new(page_id)
-            .parent()
-            .and_then(|p| {
-                let s = p.to_string_lossy().to_string();
-                if s.is_empty() { None } else { Some(s) }
-            });
+        let parent_id = Path::new(page_id).parent().and_then(|p| {
+            let s = p.to_string_lossy().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        });
 
         // Try to get filesystem metadata for timestamps.
         let metadata = tokio::fs::metadata(&full_path).await.ok();
@@ -492,9 +480,7 @@ impl KnowledgeBaseProvider for ObsidianProvider {
         if let Some(parent_dir) = full_path.parent() {
             tokio::fs::create_dir_all(parent_dir)
                 .await
-                .with_context(|| {
-                    format!("failed to create directory: {}", parent_dir.display())
-                })?;
+                .with_context(|| format!("failed to create directory: {}", parent_dir.display()))?;
         }
 
         // Build file content with front matter.
@@ -558,23 +544,18 @@ impl KnowledgeBaseProvider for ObsidianProvider {
             .with_context(|| format!("failed to write Obsidian page: {}", full_path.display()))?;
 
         let tags = extract_tags(content, &front_matter);
-        let title = front_matter
-            .get("title")
-            .cloned()
-            .unwrap_or_else(|| {
-                full_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Untitled")
-                    .to_string()
-            });
+        let title = front_matter.get("title").cloned().unwrap_or_else(|| {
+            full_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Untitled")
+                .to_string()
+        });
 
-        let parent_id = Path::new(page_id)
-            .parent()
-            .and_then(|p| {
-                let s = p.to_string_lossy().to_string();
-                if s.is_empty() { None } else { Some(s) }
-            });
+        let parent_id = Path::new(page_id).parent().and_then(|p| {
+            let s = p.to_string_lossy().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        });
 
         Ok(KBPage {
             id: page_id.to_string(),
@@ -686,10 +667,7 @@ fn parse_yaml_simple(yaml: &str) -> HashMap<String, String> {
         if let Some(colon_pos) = trimmed.find(':') {
             let key = trimmed[..colon_pos].trim().to_string();
             let value = trimmed[colon_pos + 1..].trim().to_string();
-            let value = value
-                .trim_matches('"')
-                .trim_matches('\'')
-                .to_string();
+            let value = value.trim_matches('"').trim_matches('\'').to_string();
 
             if value.is_empty() {
                 // Might be a list header.
@@ -828,7 +806,8 @@ mod tests {
 
     #[test]
     fn test_parse_front_matter_basic() {
-        let raw = "---\ntitle: \"My Note\"\ntags:\n  - rust\n  - code\n---\n\n# Hello\n\nContent here.";
+        let raw =
+            "---\ntitle: \"My Note\"\ntags:\n  - rust\n  - code\n---\n\n# Hello\n\nContent here.";
         let (fm, content) = parse_front_matter(raw);
         assert_eq!(fm.get("title").unwrap(), "My Note");
         assert!(fm.get("tags").unwrap().contains("rust"));
@@ -966,17 +945,17 @@ mod tests {
     #[test]
     fn test_sanitize_filename() {
         assert_eq!(sanitize_filename("Hello World"), "Hello World");
-        assert_eq!(sanitize_filename("file/with:bad*chars"), "file-with-bad-chars");
+        assert_eq!(
+            sanitize_filename("file/with:bad*chars"),
+            "file-with-bad-chars"
+        );
         assert_eq!(sanitize_filename("normal_file-name"), "normal_file-name");
     }
 
     #[test]
     fn test_sanitize_filename_special_chars() {
         assert_eq!(sanitize_filename("a<b>c|d"), "a-b-c-d");
-        assert_eq!(
-            sanitize_filename("question?mark"),
-            "question-mark"
-        );
+        assert_eq!(sanitize_filename("question?mark"), "question-mark");
     }
 
     #[test]
@@ -1096,7 +1075,9 @@ mod tests {
             ObsidianPage {
                 path: "python-notes.md".to_string(),
                 title: "Python Notes".to_string(),
-                content: "Python is a high-level programming language. It is widely used for scripting.".to_string(),
+                content:
+                    "Python is a high-level programming language. It is widely used for scripting."
+                        .to_string(),
                 front_matter: HashMap::new(),
                 tags: vec!["python".to_string()],
                 backlinks: vec![],
@@ -1225,9 +1206,12 @@ mod tests {
     async fn test_get_page() {
         let tmp = tempdir();
         let file = tmp.join("test.md");
-        tokio::fs::write(&file, "---\ntitle: Test Page\ntags:\n  - demo\n---\n\n# Hello\n\nWorld")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &file,
+            "---\ntitle: Test Page\ntags:\n  - demo\n---\n\n# Hello\n\nWorld",
+        )
+        .await
+        .unwrap();
 
         let provider = ObsidianProvider::new(&tmp);
         let page = provider.get_page("test.md").await.unwrap();
@@ -1312,9 +1296,12 @@ mod tests {
     async fn test_update_page() {
         let tmp = tempdir();
         let file = tmp.join("updatable.md");
-        tokio::fs::write(&file, "---\ntitle: Original\nauthor: Alice\n---\n\nOld content")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &file,
+            "---\ntitle: Original\nauthor: Alice\n---\n\nOld content",
+        )
+        .await
+        .unwrap();
 
         let provider = ObsidianProvider::new(&tmp);
         let page = provider
@@ -1366,10 +1353,7 @@ mod tests {
 
     /// Create a temporary directory for tests.
     fn tempdir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "hive_obsidian_test_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("hive_obsidian_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

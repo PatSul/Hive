@@ -116,9 +116,10 @@ impl HiveLoop {
             return false;
         }
         if let Some(started) = self.started_at
-            && started.elapsed() >= Duration::from_secs(self.config.time_limit_secs) {
-                return false;
-            }
+            && started.elapsed() >= Duration::from_secs(self.config.time_limit_secs)
+        {
+            return false;
+        }
         // Check for steering interrupts.
         if self.has_steering() {
             return false;
@@ -177,9 +178,10 @@ impl HiveLoop {
         } else if self.total_cost >= self.config.cost_limit_usd {
             self.status = LoopStatus::CostLimitReached;
         } else if let Some(started) = self.started_at
-            && started.elapsed() >= Duration::from_secs(self.config.time_limit_secs) {
-                self.status = LoopStatus::TimeLimitReached;
-            }
+            && started.elapsed() >= Duration::from_secs(self.config.time_limit_secs)
+        {
+            self.status = LoopStatus::TimeLimitReached;
+        }
 
         self.status
     }

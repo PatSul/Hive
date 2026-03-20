@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use gpui::*;
-use gpui_component::{Icon, IconName};
 use gpui_component::scroll::ScrollableElement;
+use gpui_component::{Icon, IconName};
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{TerminalClear, TerminalKill, TerminalRestart};

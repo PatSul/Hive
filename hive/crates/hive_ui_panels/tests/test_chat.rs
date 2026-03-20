@@ -189,10 +189,7 @@ fn append_streaming_thinking() {
     panel.start_streaming();
     panel.append_streaming("", Some("step 1"));
     panel.append_streaming("", Some(" step 2"));
-    assert_eq!(
-        panel.streaming_thinking.as_deref(),
-        Some("step 1 step 2")
-    );
+    assert_eq!(panel.streaming_thinking.as_deref(), Some("step 1 step 2"));
 }
 
 #[test]
@@ -200,11 +197,7 @@ fn finish_streaming_creates_message() {
     let mut panel = ChatPanel::new();
     panel.start_streaming();
     panel.append_streaming("response text", Some("thinking"));
-    panel.finish_streaming(
-        Some("claude-sonnet-4-5".into()),
-        Some(0.02),
-        Some(500),
-    );
+    panel.finish_streaming(Some("claude-sonnet-4-5".into()), Some(0.02), Some(500));
     assert!(!panel.is_streaming);
     assert!(panel.streaming_content.is_empty());
     assert_eq!(panel.messages.len(), 1);

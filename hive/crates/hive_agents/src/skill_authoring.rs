@@ -197,8 +197,7 @@ impl SkillAuthoringPipeline {
             .collect();
 
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        let top_candidates: Vec<&AvailableSkill> =
-            scored.iter().take(5).map(|(_, s)| *s).collect();
+        let top_candidates: Vec<&AvailableSkill> = scored.iter().take(5).map(|(_, s)| *s).collect();
 
         let mut best_score = 0.0_f64;
         let mut best_match: Option<AvailableSkill> = None;
@@ -208,8 +207,11 @@ impl SkillAuthoringPipeline {
             let user_prompt = format!(
                 "User wants: {}\nDomain: {}\nSkill name: {}\nSkill description: {}\nSkill trigger: {}\n\
                  Rate the skill's sufficiency for the user's needs from 0-10. Respond with just a number.",
-                request.user_query, request.domain, candidate.name,
-                candidate.description, candidate.trigger
+                request.user_query,
+                request.domain,
+                candidate.name,
+                candidate.description,
+                candidate.trigger
             );
 
             let chat_request = ChatRequest {
@@ -408,10 +410,8 @@ impl SkillAuthoringPipeline {
             Ok(output) => {
                 let domain_keywords = extract_keywords(&request.domain);
                 let output_lower = output.to_lowercase();
-                let relevant = output.len() > 50
-                    && domain_keywords
-                        .iter()
-                        .any(|kw| output_lower.contains(kw));
+                let relevant =
+                    output.len() > 50 && domain_keywords.iter().any(|kw| output_lower.contains(kw));
 
                 if self.config.require_test_pass && !relevant {
                     warn!("Smoke test output not relevant enough");
@@ -529,7 +529,9 @@ impl SkillAuthoringPipeline {
 
         // Enforce prompt length limit.
         if draft.prompt_template.len() > self.config.max_prompt_length {
-            draft.prompt_template.truncate(self.config.max_prompt_length);
+            draft
+                .prompt_template
+                .truncate(self.config.max_prompt_length);
         }
 
         Ok(draft)
@@ -582,7 +584,9 @@ impl SkillAuthoringPipeline {
             draft.trigger = format!("/hive-{}", draft.trigger.trim_start_matches('/'));
         }
         if draft.prompt_template.len() > self.config.max_prompt_length {
-            draft.prompt_template.truncate(self.config.max_prompt_length);
+            draft
+                .prompt_template
+                .truncate(self.config.max_prompt_length);
         }
 
         Ok(draft)
@@ -677,9 +681,7 @@ fn parse_draft_json(content: &str) -> Result<DraftSkill, String> {
     let start = content
         .find('{')
         .ok_or("No JSON object found in response")?;
-    let end = content
-        .rfind('}')
-        .ok_or("No closing brace in response")?;
+    let end = content.rfind('}').ok_or("No closing brace in response")?;
     if end <= start {
         return Err("Malformed JSON in response".into());
     }
@@ -699,18 +701,9 @@ fn parse_draft_json(content: &str) -> Result<DraftSkill, String> {
             .to_string(),
         category: serde_json::from_value(value["category"].clone())
             .unwrap_or(SkillCategory::Custom),
-        description: value["description"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
-        prompt_template: value["prompt_template"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
-        test_input: value["test_input"]
-            .as_str()
-            .unwrap_or("Hello")
-            .to_string(),
+        description: value["description"].as_str().unwrap_or("").to_string(),
+        prompt_template: value["prompt_template"].as_str().unwrap_or("").to_string(),
+        test_input: value["test_input"].as_str().unwrap_or("Hello").to_string(),
         source_knowledge: value["source_knowledge"]
             .as_array()
             .map(|arr| {
@@ -762,9 +755,9 @@ mod tests {
                     prompt_tokens: 10,
                     completion_tokens: 20,
                     total_tokens: 30,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,

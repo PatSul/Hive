@@ -154,11 +154,12 @@ impl SubscriptionManager {
         // one-click unsubscribe.
         if let Some(post) = list_unsubscribe_post
             && post.to_lowercase().contains("list-unsubscribe=one-click")
-                && let Some(url) = http_url {
-                    return Some(UnsubscribeMethod::OneClick {
-                        url: url.to_string(),
-                    });
-                }
+            && let Some(url) = http_url
+        {
+            return Some(UnsubscribeMethod::OneClick {
+                url: url.to_string(),
+            });
+        }
 
         // Prefer HTTP link over mailto.
         if let Some(url) = http_url {

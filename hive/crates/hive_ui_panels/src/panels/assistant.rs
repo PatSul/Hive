@@ -926,4 +926,3 @@ fn empty_state(message: &str, theme: &HiveTheme) -> AnyElement {
         )
         .into_any_element()
 }
-

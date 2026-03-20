@@ -137,10 +137,12 @@ impl DockerClient {
     /// Get details of a specific container by ID or name.
     pub async fn get_container(&self, id: &str) -> Result<Container> {
         debug!(id = %id, "inspecting docker container");
-        let output = self.run_docker(&["inspect", id, "--format", "{{json .}}"]).await?;
+        let output = self
+            .run_docker(&["inspect", id, "--format", "{{json .}}"])
+            .await?;
 
-        let val: Value = serde_json::from_str(output.trim())
-            .context("failed to parse docker inspect output")?;
+        let val: Value =
+            serde_json::from_str(output.trim()).context("failed to parse docker inspect output")?;
 
         Ok(parse_container_inspect(&val))
     }
@@ -247,7 +249,8 @@ impl DockerClient {
     /// Build a Docker image from a Dockerfile.
     pub async fn build_image(&self, dockerfile_path: &str, tag: &str) -> Result<String> {
         debug!(path = %dockerfile_path, tag = %tag, "building docker image");
-        self.run_docker(&["build", "-t", tag, "-f", dockerfile_path, "."]).await
+        self.run_docker(&["build", "-t", tag, "-f", dockerfile_path, "."])
+            .await
     }
 
     // ── Network operations ────────────────────────────────────────
@@ -320,13 +323,15 @@ impl DockerClient {
     /// Start services defined in a Docker Compose file.
     pub async fn compose_up(&self, compose_file: &str) -> Result<String> {
         debug!(file = %compose_file, "docker compose up");
-        self.run_docker(&["compose", "-f", compose_file, "up", "-d"]).await
+        self.run_docker(&["compose", "-f", compose_file, "up", "-d"])
+            .await
     }
 
     /// Stop and remove services defined in a Docker Compose file.
     pub async fn compose_down(&self, compose_file: &str) -> Result<String> {
         debug!(file = %compose_file, "docker compose down");
-        self.run_docker(&["compose", "-f", compose_file, "down"]).await
+        self.run_docker(&["compose", "-f", compose_file, "down"])
+            .await
     }
 
     // ── System information ────────────────────────────────────────
@@ -336,14 +341,17 @@ impl DockerClient {
         debug!("getting docker system info");
         let output = self.run_docker(&["info", "--format", "{{json .}}"]).await?;
 
-        let val: Value = serde_json::from_str(output.trim())
-            .context("failed to parse docker info output")?;
+        let val: Value =
+            serde_json::from_str(output.trim()).context("failed to parse docker info output")?;
 
         Ok(DockerInfo {
             containers_running: val["ContainersRunning"].as_u64().unwrap_or(0),
             containers_stopped: val["ContainersStopped"].as_u64().unwrap_or(0),
             images_count: val["Images"].as_u64().unwrap_or(0),
-            server_version: val["ServerVersion"].as_str().unwrap_or("unknown").to_string(),
+            server_version: val["ServerVersion"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string(),
         })
     }
 
@@ -356,11 +364,7 @@ impl DockerClient {
             .output()
             .await
             .with_context(|| {
-                format!(
-                    "failed to execute: {} {}",
-                    self.docker_path,
-                    args.join(" ")
-                )
+                format!("failed to execute: {} {}", self.docker_path, args.join(" "))
             })?;
 
         if !output.status.success() {
@@ -833,7 +837,11 @@ mod tests {
             env_vars: vec![("ENV".to_string(), "prod".to_string())],
             volumes: vec![("/data".to_string(), "/app/data".to_string())],
             network: Some("my-net".to_string()),
-            command: Some(vec!["nginx".to_string(), "-g".to_string(), "daemon off;".to_string()]),
+            command: Some(vec![
+                "nginx".to_string(),
+                "-g".to_string(),
+                "daemon off;".to_string(),
+            ]),
         };
 
         let json = serde_json::to_string(&request).unwrap();

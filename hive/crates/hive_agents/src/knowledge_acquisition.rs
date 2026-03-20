@@ -288,13 +288,7 @@ pub fn validate_url(url: &str, allowed_domains: &[String]) -> Result<(), String>
     }
 
     // Block private/local addresses
-    let blocked = [
-        "localhost",
-        "127.",
-        "10.",
-        "192.168.",
-        "0.0.0.0",
-    ];
+    let blocked = ["localhost", "127.", "10.", "192.168.", "0.0.0.0"];
     let lower_domain = domain.to_lowercase();
     if lower_domain.ends_with(".local") {
         return Err(format!("Private domain blocked: {domain}"));
@@ -310,12 +304,16 @@ pub fn validate_url(url: &str, allowed_domains: &[String]) -> Result<(), String>
             .strip_prefix("172.")
             .and_then(|rest| rest.split('.').next())
             .and_then(|s| s.parse::<u8>().ok())
-            && (16..=31).contains(&second_octet) {
-                return Err(format!("Private address blocked: {domain}"));
-            }
+        && (16..=31).contains(&second_octet)
+    {
+        return Err(format!("Private address blocked: {domain}"));
+    }
 
     // Check allowed domains
-    if !allowed_domains.iter().any(|d| lower_domain == d.to_lowercase()) {
+    if !allowed_domains
+        .iter()
+        .any(|d| lower_domain == d.to_lowercase())
+    {
         return Err(format!("Domain not in allowlist: {domain}"));
     }
 
@@ -351,11 +349,10 @@ fn load_cached(path: &Path, ttl_hours: u64) -> Option<KnowledgePage> {
 /// Write a page to the cache directory.
 fn save_to_cache(path: &Path, page: &KnowledgePage) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create cache dir: {e}"))?;
     }
-    let json = serde_json::to_string_pretty(page)
-        .map_err(|e| format!("Failed to serialize page: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(page).map_err(|e| format!("Failed to serialize page: {e}"))?;
     std::fs::write(path, json).map_err(|e| format!("Failed to write cache file: {e}"))?;
     Ok(())
 }
@@ -550,7 +547,10 @@ impl KnowledgeAcquisitionAgent {
         // -- Step 3: Build context and synthesize --------------------------
         let mut context_parts: Vec<String> = Vec::new();
         for page in &pages {
-            context_parts.push(format!("--- {} ({}) ---\n{}", page.title, page.url, page.text_content));
+            context_parts.push(format!(
+                "--- {} ({}) ---\n{}",
+                page.title, page.url, page.text_content
+            ));
             for cb in &page.code_blocks {
                 let lang = cb.language.as_deref().unwrap_or("unknown");
                 context_parts.push(format!("```{lang}\n{}\n```", cb.content));
@@ -599,10 +599,7 @@ impl KnowledgeAcquisitionAgent {
                 MemoryCategory::General,
                 serde_json::to_string(&summary).unwrap_or_default(),
             );
-            entry.tags = vec![
-                "knowledge".to_string(),
-                topic.to_string(),
-            ];
+            entry.tags = vec!["knowledge".to_string(), topic.to_string()];
             if let Err(e) = mem.remember(&entry) {
                 warn!(error = %e, "Failed to store knowledge in memory");
             }
@@ -623,7 +620,10 @@ impl KnowledgeAcquisitionAgent {
 
     /// Inject a knowledge summary into a `ContextEngine` as a documentation source.
     pub fn inject_into_context(summary: &KnowledgeSummary, engine: &mut ContextEngine) {
-        let mut content = format!("# Knowledge Summary: {}\n\n{}\n", summary.topic, summary.summary);
+        let mut content = format!(
+            "# Knowledge Summary: {}\n\n{}\n",
+            summary.topic, summary.summary
+        );
 
         if !summary.key_concepts.is_empty() {
             content.push_str("\n## Key Concepts\n");
@@ -682,11 +682,7 @@ fn parse_url_array(text: &str) -> Vec<String> {
 }
 
 /// Parse the AI synthesis response into a `KnowledgeSummary`.
-fn parse_knowledge_summary(
-    topic: &str,
-    text: &str,
-    pages: &[KnowledgePage],
-) -> KnowledgeSummary {
+fn parse_knowledge_summary(topic: &str, text: &str, pages: &[KnowledgePage]) -> KnowledgeSummary {
     // Attempt to extract JSON from the response
     let trimmed = text.trim();
     let json_str = if let Some(start) = trimmed.find('{') {

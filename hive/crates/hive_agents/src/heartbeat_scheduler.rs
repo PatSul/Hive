@@ -72,9 +72,16 @@ impl HeartbeatScheduler {
     }
 
     pub fn is_complete(&self, id: &str) -> bool {
-        self.tasks.lock().unwrap().get(id).map(|t| {
-            t.max_iterations.map(|max| t.iteration_count >= max).unwrap_or(false)
-        }).unwrap_or(true)
+        self.tasks
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|t| {
+                t.max_iterations
+                    .map(|max| t.iteration_count >= max)
+                    .unwrap_or(false)
+            })
+            .unwrap_or(true)
     }
 }
 

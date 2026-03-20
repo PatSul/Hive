@@ -314,7 +314,11 @@ impl WorkflowBuilderView {
     }
 
     /// Refresh the workflow list from the automation service.
-    pub fn refresh_workflow_list(&mut self, workflows: Vec<WorkflowListEntry>, cx: &mut Context<Self>) {
+    pub fn refresh_workflow_list(
+        &mut self,
+        workflows: Vec<WorkflowListEntry>,
+        cx: &mut Context<Self>,
+    ) {
         self.workflow_list = workflows;
         cx.notify();
     }
@@ -503,16 +507,17 @@ impl WorkflowBuilderView {
         // action nodes in the order they appear).
         for node in &self.canvas.nodes {
             if node.kind == NodeKind::Action
-                && let Some(ref action) = node.action {
-                    steps.push(WorkflowStep {
-                        id: node.id.clone(),
-                        name: node.label.clone(),
-                        action: action.clone(),
-                        conditions: node.conditions.clone(),
-                        timeout_secs: node.timeout_secs,
-                        retry_count: node.retry_count,
-                    });
-                }
+                && let Some(ref action) = node.action
+            {
+                steps.push(WorkflowStep {
+                    id: node.id.clone(),
+                    name: node.label.clone(),
+                    action: action.clone(),
+                    conditions: node.conditions.clone(),
+                    timeout_secs: node.timeout_secs,
+                    retry_count: node.retry_count,
+                });
+            }
         }
 
         // Find trigger
@@ -846,15 +851,12 @@ impl WorkflowBuilderView {
                                 .child(node.label.clone()),
                         )
                         .when(node.persona.is_some(), |el| {
-                            el.child(
-                                div()
-                                    .text_size(px(9.0))
-                                    .text_color(theme.text_muted)
-                                    .child(format!(
-                                        "{:?}",
-                                        node.persona.as_ref().expect("guarded by is_some check")
-                                    )),
-                            )
+                            el.child(div().text_size(px(9.0)).text_color(theme.text_muted).child(
+                                format!(
+                                    "{:?}",
+                                    node.persona.as_ref().expect("guarded by is_some check")
+                                ),
+                            ))
                         }),
                 )
                 .into_any_element();
@@ -983,7 +985,10 @@ impl WorkflowBuilderView {
                         div()
                             .text_size(theme.font_size_xs)
                             .text_color(theme.text_secondary)
-                            .child(format!("Action: {:?}", node.action.as_ref().expect("guarded by is_some check"))),
+                            .child(format!(
+                                "Action: {:?}",
+                                node.action.as_ref().expect("guarded by is_some check")
+                            )),
                     )
                 })
                 .when(node.persona.is_some(), |el| {
@@ -1227,9 +1232,7 @@ impl Render for WorkflowBuilderView {
             .children(canvas_elements);
 
         // Node palette (left)
-        let palette = self
-            .render_node_palette(theme, cx)
-            .into_any_element();
+        let palette = self.render_node_palette(theme, cx).into_any_element();
 
         // Properties (right)
         let properties = self.render_properties_panel(theme).into_any_element();
@@ -1249,9 +1252,10 @@ impl Render for WorkflowBuilderView {
                     .min_h(px(0.0))
                     .when(show_palette, |el| el.child(palette))
                     .child(canvas_area)
-                    .when(self.show_properties_panel || self.selected_node_id.is_some(), |el| {
-                        el.child(properties)
-                    }),
+                    .when(
+                        self.show_properties_panel || self.selected_node_id.is_some(),
+                        |el| el.child(properties),
+                    ),
             )
     }
 }

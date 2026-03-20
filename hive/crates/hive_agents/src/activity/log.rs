@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
@@ -49,7 +49,9 @@ impl ActivityLog {
     /// Open the activity log at the given path.
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let conn = Connection::open(path)?;
-        let log = Self { conn: Mutex::new(conn) };
+        let log = Self {
+            conn: Mutex::new(conn),
+        };
         log.init_schema()?;
         Ok(log)
     }
@@ -57,7 +59,9 @@ impl ActivityLog {
     /// Open an in-memory database (for testing).
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        let log = Self { conn: Mutex::new(conn) };
+        let log = Self {
+            conn: Mutex::new(conn),
+        };
         log.init_schema()?;
         Ok(log)
     }
@@ -179,7 +183,11 @@ impl ActivityLog {
     }
 
     /// Summarize costs since a given timestamp.
-    pub fn cost_summary(&self, agent_id: Option<&str>, since: DateTime<Utc>) -> Result<CostSummary> {
+    pub fn cost_summary(
+        &self,
+        agent_id: Option<&str>,
+        since: DateTime<Utc>,
+    ) -> Result<CostSummary> {
         let conn = self.conn.lock().unwrap();
         let since_str = since.to_rfc3339();
 

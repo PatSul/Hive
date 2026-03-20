@@ -491,9 +491,10 @@ fn deserialize_trigger(
     match trigger_type {
         "at" => {
             if let Some(ref at_str) = trigger_at
-                && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(at_str) {
-                    return ReminderTrigger::At(dt.with_timezone(&chrono::Utc));
-                }
+                && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(at_str)
+            {
+                return ReminderTrigger::At(dt.with_timezone(&chrono::Utc));
+            }
             // Fallback: use epoch if parsing fails
             ReminderTrigger::At(chrono::DateTime::UNIX_EPOCH)
         }

@@ -634,11 +634,22 @@ mod tests {
     fn integration_skills_registered() {
         let registry = SkillsRegistry::new();
         let integration_skills = [
-            "slack", "jira", "notion", "db", "docker", "k8s", "deploy", "browse", "index-docs",
+            "slack",
+            "jira",
+            "notion",
+            "db",
+            "docker",
+            "k8s",
+            "deploy",
+            "browse",
+            "index-docs",
         ];
         for name in &integration_skills {
             let skill = registry.get(name);
-            assert!(skill.is_some(), "Integration skill '/{name}' should be registered");
+            assert!(
+                skill.is_some(),
+                "Integration skill '/{name}' should be registered"
+            );
             let skill = skill.unwrap();
             assert_eq!(skill.source, SkillSource::BuiltIn);
             assert!(skill.enabled);
@@ -649,7 +660,15 @@ mod tests {
     fn dispatch_integration_skills() {
         let registry = SkillsRegistry::new();
         let integration_skills = [
-            "slack", "jira", "notion", "db", "docker", "k8s", "deploy", "browse", "index-docs",
+            "slack",
+            "jira",
+            "notion",
+            "db",
+            "docker",
+            "k8s",
+            "deploy",
+            "browse",
+            "index-docs",
         ];
         for name in &integration_skills {
             let result = registry.dispatch(&format!("/{name}"));
@@ -666,7 +685,15 @@ mod tests {
     fn integration_skills_have_valid_integrity() {
         let registry = SkillsRegistry::new();
         let integration_skills = [
-            "slack", "jira", "notion", "db", "docker", "k8s", "deploy", "browse", "index-docs",
+            "slack",
+            "jira",
+            "notion",
+            "db",
+            "docker",
+            "k8s",
+            "deploy",
+            "browse",
+            "index-docs",
         ];
         for name in &integration_skills {
             let skill = registry.get(name).unwrap();
@@ -680,7 +707,12 @@ mod tests {
     #[test]
     fn total_builtin_count() {
         let registry = SkillsRegistry::new();
-        let builtins: Vec<_> = registry.list().iter().filter(|s| s.source == SkillSource::BuiltIn).cloned().collect();
+        let builtins: Vec<_> = registry
+            .list()
+            .iter()
+            .filter(|s| s.source == SkillSource::BuiltIn)
+            .cloned()
+            .collect();
         // 6 original + 9 integration = 15
         assert_eq!(builtins.len(), 15, "Should have 15 built-in skills total");
     }

@@ -70,6 +70,111 @@ impl McpServer {
         }
     }
 
+    /// Replace stub memory/context handlers with real service-backed implementations.
+    ///
+    /// Call this after `AppCollectiveMemory` and `AppContextEngine` globals are set.
+    pub fn wire_memory_tools(
+        &mut self,
+        collective_memory: Arc<crate::collective_memory::CollectiveMemory>,
+        context_engine: Arc<std::sync::Mutex<hive_ai::ContextEngine>>,
+    ) {
+        // query_memory: search collective memory by relevance
+        let mem = collective_memory.clone();
+        self.register(
+            McpTool {
+                name: "query_memory".into(),
+                description: "Search Hive's collective memory for relevant entries".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query" },
+                        "category": { "type": "string", "description": "Optional category filter (SuccessPattern, FailurePattern, ModelInsight, ConflictResolution, CodePattern, UserPreference, General)" },
+                        "limit": { "type": "integer", "description": "Max results (default 10)" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            Box::new(move |args| {
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                let category = args.get("category").and_then(|v| v.as_str()).map(|c| {
+                    crate::collective_memory::MemoryCategory::parse_str(c)
+                });
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+                let results = mem.recall(query, category, None, limit)?;
+                serde_json::to_value(&results).map_err(|e| e.to_string())
+            }),
+        );
+
+        // list_memories: list entries by category
+        let mem = collective_memory.clone();
+        self.register(
+            McpTool {
+                name: "list_memories".into(),
+                description: "List Hive's stored memories, optionally filtered by category".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "category": { "type": "string", "description": "Category filter" },
+                        "limit": { "type": "integer", "description": "Max results (default 20)" }
+                    }
+                }),
+            },
+            Box::new(move |args| {
+                let category = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .map(|c| crate::collective_memory::MemoryCategory::parse_str(c));
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+                // Use recall with empty query to list all
+                let results = mem.recall("", category, None, limit)?;
+                serde_json::to_value(&results).map_err(|e| e.to_string())
+            }),
+        );
+
+        // search_context: curate context via the context engine
+        let ctx = context_engine;
+        self.register(
+            McpTool {
+                name: "search_context".into(),
+                description: "Search Hive's context engine for relevant project context".into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Search query" },
+                        "max_results": { "type": "integer", "description": "Max sources (default 5)" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            Box::new(move |args| {
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                let max_results = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+                let budget = hive_ai::ContextBudget {
+                    max_tokens: 4000,
+                    max_sources: max_results,
+                    reserved_tokens: 0,
+                };
+                if let Ok(mut engine) = ctx.lock() {
+                    let curated = engine.curate(query, &budget);
+                    let sources: Vec<serde_json::Value> = curated.sources.iter().map(|s| {
+                        json!({
+                            "path": s.path,
+                            "type": format!("{:?}", s.source_type),
+                            "content": s.content,
+                        })
+                    }).collect();
+                    Ok(json!({
+                        "total_tokens": curated.total_tokens,
+                        "selected_count": curated.selected_count,
+                        "sources": sources,
+                    }))
+                } else {
+                    Err("Context engine lock failed".into())
+                }
+            }),
+        );
+    }
+
     /// List all available tools.
     pub fn list_tools(&self) -> Vec<&McpTool> {
         let mut tools: Vec<_> = self.tools.values().map(|(def, _)| def).collect();
@@ -451,7 +556,8 @@ impl McpServer {
             self.register(
                 McpTool {
                     name: "click".into(),
-                    description: "Simulate a mouse click at specific screen coordinates (x, y).".into(),
+                    description: "Simulate a mouse click at specific screen coordinates (x, y)."
+                        .into(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -471,9 +577,12 @@ impl McpServer {
                         .and_then(|v| v.as_i64())
                         .ok_or("Missing required argument 'y'")? as i32;
 
-                    let mut driver = crate::ui_automation::UiDriver::new().map_err(|e| format!("Driver init failed: {e}"))?;
-                    driver.click(x, y).map_err(|e| format!("Click failed: {e}"))?;
-                    
+                    let mut driver = crate::ui_automation::UiDriver::new()
+                        .map_err(|e| format!("Driver init failed: {e}"))?;
+                    driver
+                        .click(x, y)
+                        .map_err(|e| format!("Click failed: {e}"))?;
+
                     Ok(json!(format!("Clicked at {}, {}", x, y)))
                 }),
             );
@@ -499,9 +608,12 @@ impl McpServer {
                         .and_then(|v| v.as_str())
                         .ok_or("Missing required argument 'text'")?;
 
-                    let mut driver = crate::ui_automation::UiDriver::new().map_err(|e| format!("Driver init failed: {e}"))?;
-                    driver.type_text(text).map_err(|e| format!("Type failed: {e}"))?;
-                    
+                    let mut driver = crate::ui_automation::UiDriver::new()
+                        .map_err(|e| format!("Driver init failed: {e}"))?;
+                    driver
+                        .type_text(text)
+                        .map_err(|e| format!("Type failed: {e}"))?;
+
                     Ok(json!(format!("Typed '{}'", text)))
                 }),
             );
@@ -519,9 +631,12 @@ impl McpServer {
                     }),
                 },
                 Box::new(move |_args| {
-                    let mut driver = crate::ui_automation::UiDriver::new().map_err(|e| format!("Driver init failed: {e}"))?;
-                    driver.press_enter().map_err(|e| format!("Enter failed: {e}"))?;
-                    
+                    let mut driver = crate::ui_automation::UiDriver::new()
+                        .map_err(|e| format!("Driver init failed: {e}"))?;
+                    driver
+                        .press_enter()
+                        .map_err(|e| format!("Enter failed: {e}"))?;
+
                     Ok(json!("Pressed Enter".to_string()))
                 }),
             );
@@ -556,9 +671,9 @@ fn resolve_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
                 let canonical_parent = parent
                     .canonicalize()
                     .map_err(|e| format!("Invalid path: {e}"))?;
-                let file_name = resolved
-                    .file_name()
-                    .ok_or_else(|| format!("Invalid path: no filename in {}", resolved.display()))?;
+                let file_name = resolved.file_name().ok_or_else(|| {
+                    format!("Invalid path: no filename in {}", resolved.display())
+                })?;
                 canonical_parent.join(file_name)
             } else {
                 return Err(format!("Invalid path: {}", resolved.display()));
@@ -567,7 +682,13 @@ fn resolve_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
     };
 
     let path_str_lower = canonical.to_string_lossy().to_lowercase();
-    for segment in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+    for segment in &[
+        ".ssh",
+        ".aws",
+        ".gnupg",
+        ".config/gcloud",
+        ".config\\gcloud",
+    ] {
         if path_str_lower.contains(segment) {
             return Err(format!("Access to sensitive path blocked: {segment}"));
         }
@@ -598,11 +719,9 @@ fn execute_command_blocking(
         let cmd = command.to_string();
         let root = executor.working_dir().to_path_buf();
 
-        
-
         std::thread::spawn(move || {
-            let threaded_executor =
-                CommandExecutor::new(root).map_err(|e| format!("Invalid working directory: {e}"))?;
+            let threaded_executor = CommandExecutor::new(root)
+                .map_err(|e| format!("Invalid working directory: {e}"))?;
             let rt = tokio::runtime::Runtime::new()
                 .map_err(|e| format!("Failed to create runtime: {e}"))?;
             rt.block_on(threaded_executor.execute(&cmd))
@@ -611,8 +730,8 @@ fn execute_command_blocking(
         .join()
         .map_err(|_| "Command execution thread panicked".to_string())?
     } else {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create runtime: {e}"))?;
+        let rt =
+            tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {e}"))?;
         rt.block_on(executor.execute(command))
             .map_err(|e| format!("Command execution failed: {e}"))
     }

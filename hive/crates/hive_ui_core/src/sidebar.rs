@@ -66,7 +66,7 @@ impl Panel {
     pub fn label(self) -> &'static str {
         match self {
             Self::Chat => "Chat",
-            Self::QuickStart => "Quick Start",
+            Self::QuickStart => "Home",
             Self::History => "History",
             Self::Files => "Files",
             Self::CodeMap => "Code Map",
@@ -102,6 +102,43 @@ impl Panel {
     /// (index 8) and `ctrl-0` (index 9) to panels.
     pub fn from_index(idx: usize) -> Option<Panel> {
         Self::ALL.get(idx).copied()
+    }
+
+    /// Higher-level shell grouping for the panel. Utility panels intentionally
+    /// return `None` so the shell can preserve the previous primary
+    /// destination while a utility surface is open.
+    pub fn shell_destination(self) -> Option<ShellDestination> {
+        match self {
+            Self::QuickStart => Some(ShellDestination::Home),
+            Self::Chat
+            | Self::History
+            | Self::Files
+            | Self::CodeMap
+            | Self::PromptLibrary
+            | Self::Specs
+            | Self::Agents
+            | Self::Kanban
+            | Self::Review
+            | Self::Terminal => Some(ShellDestination::Build),
+            Self::Workflows | Self::Channels | Self::Network => Some(ShellDestination::Automate),
+            Self::Assistant => Some(ShellDestination::Assist),
+            Self::Monitor
+            | Self::Activity
+            | Self::Logs
+            | Self::Costs
+            | Self::Learning
+            | Self::Shield => Some(ShellDestination::Observe),
+            Self::Skills
+            | Self::Routing
+            | Self::Models
+            | Self::TokenLaunch
+            | Self::Settings
+            | Self::Help => None,
+        }
+    }
+
+    pub fn is_utility(self) -> bool {
+        self.shell_destination().is_none()
     }
 
     /// SVG icon for each panel via gpui-component IconName.
@@ -208,9 +245,101 @@ impl Panel {
     }
 }
 
-/// Sidebar component with 26 navigation icon buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShellDestination {
+    Home,
+    Build,
+    Automate,
+    Assist,
+    Observe,
+}
+
+impl ShellDestination {
+    pub const ALL: [ShellDestination; 5] = [
+        ShellDestination::Home,
+        ShellDestination::Build,
+        ShellDestination::Automate,
+        ShellDestination::Assist,
+        ShellDestination::Observe,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Home => "Home",
+            Self::Build => "Build",
+            Self::Automate => "Automate",
+            Self::Assist => "Assist",
+            Self::Observe => "Observe",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Home => "Start work, clear setup blockers, and launch the next mission.",
+            Self::Build => "Code, plan, review, and execute in the active workspace.",
+            Self::Automate => "Run workflows, channels, and distributed execution paths.",
+            Self::Assist => "Handle daily briefings, reminders, and assistant actions.",
+            Self::Observe => "Review approvals, activity, costs, and safety signals.",
+        }
+    }
+
+    pub fn icon(self) -> IconName {
+        match self {
+            Self::Home => IconName::Star,
+            Self::Build => IconName::Bot,
+            Self::Automate => IconName::Map,
+            Self::Assist => IconName::Bell,
+            Self::Observe => IconName::Inbox,
+        }
+    }
+
+    pub fn default_panel(self) -> Panel {
+        match self {
+            Self::Home => Panel::QuickStart,
+            Self::Build => Panel::Chat,
+            Self::Automate => Panel::Workflows,
+            Self::Assist => Panel::Assistant,
+            Self::Observe => Panel::Activity,
+        }
+    }
+
+    pub fn panels(self) -> &'static [Panel] {
+        match self {
+            Self::Home => &[Panel::QuickStart],
+            Self::Build => &[
+                Panel::Chat,
+                Panel::Files,
+                Panel::History,
+                Panel::Specs,
+                Panel::CodeMap,
+                Panel::PromptLibrary,
+                Panel::Agents,
+                Panel::Kanban,
+                Panel::Review,
+                Panel::Terminal,
+            ],
+            Self::Automate => &[Panel::Workflows, Panel::Channels, Panel::Network],
+            Self::Assist => &[Panel::Assistant],
+            Self::Observe => &[
+                Panel::Activity,
+                Panel::Monitor,
+                Panel::Logs,
+                Panel::Costs,
+                Panel::Learning,
+                Panel::Shield,
+            ],
+        }
+    }
+
+    pub fn from_panel(panel: Panel) -> Option<Self> {
+        panel.shell_destination()
+    }
+}
+
+/// Sidebar state for shell-level destinations and panel routing.
 pub struct Sidebar {
     pub active_panel: Panel,
+    pub active_destination: ShellDestination,
 }
 
 impl Default for Sidebar {
@@ -223,6 +352,7 @@ impl Sidebar {
     pub fn new() -> Self {
         Self {
             active_panel: Panel::Chat,
+            active_destination: ShellDestination::Build,
         }
     }
 }

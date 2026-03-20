@@ -10,9 +10,9 @@ type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
 /// Known code file extensions worth indexing
 const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "tsx", "jsx", "go", "c", "cpp", "h", "hpp", "java", "kt", "rb",
-    "php", "swift", "cs", "lua", "sh", "bash", "zsh", "toml", "yaml", "yml", "json", "md",
-    "html", "css", "scss", "sql", "proto", "graphql",
+    "rs", "py", "js", "ts", "tsx", "jsx", "go", "c", "cpp", "h", "hpp", "java", "kt", "rb", "php",
+    "swift", "cs", "lua", "sh", "bash", "zsh", "toml", "yaml", "yml", "json", "md", "html", "css",
+    "scss", "sql", "proto", "graphql",
 ];
 
 /// Background indexer that walks a directory and indexes code files into HiveMemory.
@@ -152,10 +152,7 @@ impl BackgroundIndexer {
     }
 
     fn is_indexable(path: &Path) -> bool {
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         CODE_EXTENSIONS.contains(&ext)
     }
 

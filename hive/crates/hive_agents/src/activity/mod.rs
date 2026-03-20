@@ -5,14 +5,14 @@ pub mod notification;
 pub mod rules;
 pub mod types;
 
+pub use approval::{ApprovalDecision, ApprovalGate, ApprovalRequest};
+pub use budget::{BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction};
+pub use log::{ActivityEntry, ActivityFilter, ActivityLog, CostSummary};
+pub use notification::{Notification, NotificationKind, NotificationService};
+pub use rules::{ApprovalRule, RuleTrigger};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 pub use types::{ActivityEvent, FileOp, OperationType, PauseReason};
-pub use log::{ActivityLog, ActivityEntry, ActivityFilter, CostSummary};
-pub use budget::{BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction};
-pub use approval::{ApprovalGate, ApprovalDecision, ApprovalRequest};
-pub use notification::{NotificationService, NotificationKind, Notification};
-pub use rules::{ApprovalRule, RuleTrigger};
 
 use crate::coordinator::TaskEvent;
 
@@ -37,9 +37,10 @@ impl ActivityService {
         let (tx, _) = broadcast::channel(1024);
         let mut rx = tx.subscribe();
 
-        // Spawn listener task
+        // Persist activity on an available Tokio runtime, or spin up a small
+        // dedicated runtime when desktop startup has not entered one yet.
         let log_ref = log.clone();
-        tokio::spawn(async move {
+        spawn_background(async move {
             while let Ok(event) = rx.recv().await {
                 if let Err(e) = log_ref.record(&event) {
                     tracing::warn!("ActivityLog write failed: {e}");
@@ -67,7 +68,7 @@ impl ActivityService {
     /// `activity.bridge_task_events(coordinator.subscribe())`
     pub fn bridge_task_events(&self, mut task_rx: broadcast::Receiver<TaskEvent>) {
         let tx = self.tx.clone();
-        tokio::spawn(async move {
+        spawn_background(async move {
             while let Ok(task_event) = task_rx.recv().await {
                 if let Some(activity_event) = translate_task_event(task_event) {
                     let _ = tx.send(activity_event);
@@ -77,27 +78,39 @@ impl ActivityService {
     }
 }
 
+fn spawn_background<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(future);
+    } else {
+        std::thread::spawn(move || match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime.block_on(future),
+            Err(error) => tracing::warn!("ActivityService runtime bootstrap failed: {error}"),
+        });
+    }
+}
+
 fn translate_task_event(event: TaskEvent) -> Option<ActivityEvent> {
     match event {
-        TaskEvent::TaskStarted { task_id, persona, .. } => {
-            Some(ActivityEvent::AgentStarted {
-                agent_id: persona,
-                role: "task".into(),
-                task_id: Some(task_id),
-            })
-        }
-        TaskEvent::TaskCompleted { task_id, cost, .. } => {
-            Some(ActivityEvent::TaskCompleted {
-                task_id,
-                agent_id: "coordinator".into(),
-                cost,
-            })
-        }
+        TaskEvent::TaskStarted {
+            task_id, persona, ..
+        } => Some(ActivityEvent::AgentStarted {
+            agent_id: persona,
+            role: "task".into(),
+            task_id: Some(task_id),
+        }),
+        TaskEvent::TaskCompleted { task_id, cost, .. } => Some(ActivityEvent::TaskCompleted {
+            task_id,
+            agent_id: "coordinator".into(),
+            cost,
+        }),
         TaskEvent::TaskFailed { task_id, error } => {
-            Some(ActivityEvent::TaskFailed {
-                task_id,
-                error,
-            })
+            Some(ActivityEvent::TaskFailed { task_id, error })
         }
         TaskEvent::TaskApprovalPending {
             request_id,
@@ -111,12 +124,10 @@ fn translate_task_event(event: TaskEvent) -> Option<ActivityEvent> {
             context: task_id,
             rule,
         }),
-        TaskEvent::TaskDenied { task_id, reason } => {
-            Some(ActivityEvent::ApprovalDenied {
-                request_id: task_id,
-                reason,
-            })
-        }
+        TaskEvent::TaskDenied { task_id, reason } => Some(ActivityEvent::ApprovalDenied {
+            request_id: task_id,
+            reason,
+        }),
         _ => None,
     }
 }

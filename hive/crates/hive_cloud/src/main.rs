@@ -29,11 +29,8 @@ async fn main() -> anyhow::Result<()> {
     let app = build_app();
 
     // Run it with hyper — bind address is configurable via HIVE_CLOUD_BIND
-    let bind = std::env::var("HIVE_CLOUD_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:3000".into());
-    let addr: SocketAddr = bind
-        .parse()
-        .context("Invalid HIVE_CLOUD_BIND address")?;
+    let bind = std::env::var("HIVE_CLOUD_BIND").unwrap_or_else(|_| "127.0.0.1:3000".into());
+    let addr: SocketAddr = bind.parse().context("Invalid HIVE_CLOUD_BIND address")?;
     info!("listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

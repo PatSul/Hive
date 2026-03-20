@@ -582,9 +582,10 @@ impl ComplexityClassifier {
 
         // Context file count contribution
         if let Some(ctx) = context
-            && let Some(fc) = ctx.file_count {
-                complexity += (fc as f32 / 20.0).min(0.3);
-            }
+            && let Some(fc) = ctx.file_count
+        {
+            complexity += (fc as f32 / 20.0).min(0.3);
+        }
 
         // Complex code patterns
         for re in CODE_COMPLEXITY_PATTERNS.iter() {

@@ -80,9 +80,13 @@ fn find_hive_window() -> *mut std::ffi::c_void {
 }
 
 fn click_at(enigo: &mut Enigo, x: i32, y: i32) {
-    enigo.move_mouse(x, y, Coordinate::Abs).expect("move failed");
+    enigo
+        .move_mouse(x, y, Coordinate::Abs)
+        .expect("move failed");
     thread::sleep(Duration::from_millis(100));
-    enigo.button(Button::Left, Direction::Click).expect("click failed");
+    enigo
+        .button(Button::Left, Direction::Click)
+        .expect("click failed");
 }
 
 fn main() {
@@ -103,16 +107,27 @@ fn main() {
                 println!("Hive window (Zed::Window) not found!");
                 std::process::exit(1);
             }
-            let mut rect = win32::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            let mut rect = win32::RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
             unsafe {
                 win32::GetWindowRect(hwnd, &mut rect);
                 let visible = win32::IsWindowVisible(hwnd);
                 println!("Hive Zed::Window");
                 println!("  Handle: {:?}", hwnd);
                 println!("  Visible: {}", visible != 0);
-                println!("  Rect: ({},{}) to ({},{}) = {}x{}",
-                    rect.left, rect.top, rect.right, rect.bottom,
-                    rect.right - rect.left, rect.bottom - rect.top);
+                println!(
+                    "  Rect: ({},{}) to ({},{}) = {}x{}",
+                    rect.left,
+                    rect.top,
+                    rect.right,
+                    rect.bottom,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top
+                );
             }
         }
         "focus" => {
@@ -122,10 +137,17 @@ fn main() {
                 std::process::exit(1);
             }
             println!("Bringing Hive to foreground...");
-            unsafe { win32::force_foreground(hwnd); }
+            unsafe {
+                win32::force_foreground(hwnd);
+            }
             thread::sleep(Duration::from_millis(500));
             let fg = unsafe { win32::GetForegroundWindow() };
-            println!("Foreground: {:?} (target: {:?}, match: {})", fg, hwnd, fg == hwnd);
+            println!(
+                "Foreground: {:?} (target: {:?}, match: {})",
+                fg,
+                hwnd,
+                fg == hwnd
+            );
         }
         "click" => {
             let x: i32 = args[2].parse().unwrap();
@@ -142,14 +164,25 @@ fn main() {
             }
 
             // Get window position for coordinate mapping
-            let mut rect = win32::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-            unsafe { win32::GetWindowRect(hwnd, &mut rect); }
-            println!("Window rect: ({},{}) to ({},{})",
-                rect.left, rect.top, rect.right, rect.bottom);
+            let mut rect = win32::RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            unsafe {
+                win32::GetWindowRect(hwnd, &mut rect);
+            }
+            println!(
+                "Window rect: ({},{}) to ({},{})",
+                rect.left, rect.top, rect.right, rect.bottom
+            );
 
             // Bring to front
             println!("Bringing Hive to foreground...");
-            unsafe { win32::force_foreground(hwnd); }
+            unsafe {
+                win32::force_foreground(hwnd);
+            }
             thread::sleep(Duration::from_millis(1000));
 
             let fg = unsafe { win32::GetForegroundWindow() };
@@ -162,30 +195,36 @@ fn main() {
             // Sidebar items in the capture bitmap start at ~x=80, y varies
             // Screen coord = window_left + bitmap_x
             let wx = rect.left; // -7 typically for maximized
-            let wy = rect.top;  // -7
+            let wy = rect.top; // -7
 
             let sidebar_items = vec![
-                ("Chat",       wx + 100, wy + 250),
-                ("History",    wx + 100, wy + 298),
-                ("Files",      wx + 100, wy + 346),
-                ("Specs",      wx + 100, wy + 394),
-                ("Agents",     wx + 100, wy + 470),
-                ("Workflows",  wx + 100, wy + 518),
-                ("Channels",   wx + 100, wy + 566),
-                ("Kanban",     wx + 100, wy + 614),
-                ("Git_Ops",    wx + 100, wy + 662),
-                ("Skills",     wx + 100, wy + 710),
-                ("Routing",    wx + 100, wy + 758),
-                ("Models",     wx + 100, wy + 806),
-                ("Learning",   wx + 100, wy + 854),
+                ("Chat", wx + 100, wy + 250),
+                ("History", wx + 100, wy + 298),
+                ("Files", wx + 100, wy + 346),
+                ("Specs", wx + 100, wy + 394),
+                ("Agents", wx + 100, wy + 470),
+                ("Workflows", wx + 100, wy + 518),
+                ("Channels", wx + 100, wy + 566),
+                ("Kanban", wx + 100, wy + 614),
+                ("Git_Ops", wx + 100, wy + 662),
+                ("Skills", wx + 100, wy + 710),
+                ("Routing", wx + 100, wy + 758),
+                ("Models", wx + 100, wy + 806),
+                ("Learning", wx + 100, wy + 854),
             ];
 
             println!("=== HIVE SIDEBAR UI TEST ===");
             println!("Testing {} sidebar panels...\n", sidebar_items.len());
 
             for (i, (name, x, y)) in sidebar_items.iter().enumerate() {
-                print!("  [{:2}/{}] {:<12} @ ({},{})... ",
-                    i + 1, sidebar_items.len(), name, x, y);
+                print!(
+                    "  [{:2}/{}] {:<12} @ ({},{})... ",
+                    i + 1,
+                    sidebar_items.len(),
+                    name,
+                    x,
+                    y
+                );
                 click_at(&mut enigo, *x, *y);
                 thread::sleep(Duration::from_millis(2000));
                 println!("CLICKED");

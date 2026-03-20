@@ -14,6 +14,7 @@ const CHARS_PER_TOKEN: usize = 4;
 
 /// Default proactive compaction threshold (80% of context budget).
 const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.80;
+const PROACTIVE_COMPACTION_RATIO: f64 = 0.50;
 
 /// Aggressive compaction threshold used in reactive (post-overflow) path.
 const REACTIVE_COMPACTION_RATIO: f64 = 0.70;
@@ -30,7 +31,7 @@ pub fn estimate_tokens(text: &str) -> usize {
 // ---------------------------------------------------------------------------
 
 /// A message in the context window.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextMessage {
     pub role: String,
     pub content: String,
@@ -105,6 +106,11 @@ impl ContextWindow {
         }
     }
 
+    /// Get the maximum token budget.
+    pub fn max_tokens(&self) -> usize {
+        self.max_tokens
+    }
+
     /// Set the proactive compaction threshold (0.0 to 1.0).
     ///
     /// When `usage_pct()` exceeds this value, `needs_compaction()` returns true.
@@ -173,7 +179,11 @@ impl ContextWindow {
         if self.max_tokens == 0 {
             return false;
         }
-        let compactable = self.messages.iter().filter(|m| !m.pinned && !m.is_compacted).count();
+        let compactable = self
+            .messages
+            .iter()
+            .filter(|m| !m.pinned && !m.is_compacted)
+            .count();
         self.usage_pct() >= self.compaction_threshold && compactable >= 3
     }
 
@@ -202,6 +212,95 @@ impl ContextWindow {
         selected
     }
 
+    fn selected_messages_for_compaction(&self, ratio: f64) -> Vec<ContextMessage> {
+        self.select_for_compaction(ratio)
+            .into_iter()
+            .map(|idx| self.messages[idx].clone())
+            .collect()
+    }
+
+    fn find_message_indices(&self, messages: &[ContextMessage]) -> Result<Vec<usize>, String> {
+        if messages.is_empty() {
+            return Err("No compactable messages found".into());
+        }
+
+        let mut indices = Vec::with_capacity(messages.len());
+        let mut search_start = 0usize;
+
+        for expected in messages {
+            let Some((idx, _)) = self
+                .messages
+                .iter()
+                .enumerate()
+                .skip(search_start)
+                .find(|(_, actual)| *actual == expected)
+            else {
+                return Err("Compaction candidates no longer match the current context".into());
+            };
+            indices.push(idx);
+            search_start = idx + 1;
+        }
+
+        Ok(indices)
+    }
+
+    fn apply_compaction_summary_internal(
+        &mut self,
+        indices: &[usize],
+        summary_text: String,
+    ) -> Result<CompactionResult, String> {
+        if indices.is_empty() {
+            return Err("No compactable messages found".into());
+        }
+
+        let to_compact: Vec<ContextMessage> =
+            indices.iter().map(|&i| self.messages[i].clone()).collect();
+        let tokens_before: usize = to_compact.iter().map(|m| m.tokens).sum();
+        let count = to_compact.len() as u32;
+        let summary_tokens = estimate_tokens(&summary_text);
+        let insert_at = indices[0];
+
+        for &idx in indices.iter().rev() {
+            self.messages.remove(idx);
+        }
+
+        let summary_msg = ContextMessage {
+            role: "system".into(),
+            content: summary_text,
+            tokens: summary_tokens,
+            pinned: true,
+            is_compacted: true,
+            original_count: Some(count),
+        };
+        self.messages.insert(insert_at, summary_msg);
+
+        let tokens_freed = tokens_before.saturating_sub(summary_tokens);
+
+        Ok(CompactionResult {
+            messages_compacted: count as usize,
+            tokens_freed,
+            summary_tokens,
+            usage_after: self.usage_pct(),
+        })
+    }
+
+    pub fn compaction_candidates(&self) -> Vec<ContextMessage> {
+        if !self.needs_compaction() {
+            return Vec::new();
+        }
+
+        self.selected_messages_for_compaction(PROACTIVE_COMPACTION_RATIO)
+    }
+
+    pub fn apply_compaction_summary(
+        &mut self,
+        messages: &[ContextMessage],
+        summary_text: String,
+    ) -> Result<CompactionResult, String> {
+        let indices = self.find_message_indices(messages)?;
+        self.apply_compaction_summary_internal(&indices, summary_text)
+    }
+
     /// Proactively compact the context window by summarizing older messages.
     ///
     /// The `summarize` callback receives the messages to be compacted and
@@ -219,7 +318,7 @@ impl ContextWindow {
             return None;
         }
 
-        Some(self.do_compact(0.50, summarize))
+        Some(self.do_compact(PROACTIVE_COMPACTION_RATIO, summarize))
     }
 
     /// Compact unconditionally with a custom ratio. Used for both proactive
@@ -228,48 +327,14 @@ impl ContextWindow {
     where
         F: FnOnce(&[ContextMessage]) -> Result<String, String>,
     {
-        let indices = self.select_for_compaction(ratio);
-        if indices.is_empty() {
+        let to_compact = self.selected_messages_for_compaction(ratio);
+        if to_compact.is_empty() {
             return Err("No compactable messages found".into());
         }
 
-        // Collect the messages to compact.
-        let to_compact: Vec<ContextMessage> = indices
-            .iter()
-            .map(|&i| self.messages[i].clone())
-            .collect();
-
-        let tokens_before: usize = to_compact.iter().map(|m| m.tokens).sum();
-        let count = to_compact.len() as u32;
-
         // Call the summarizer.
         let summary_text = summarize(&to_compact)?;
-        let summary_tokens = estimate_tokens(&summary_text);
-
-        // Remove compacted messages (iterate in reverse to preserve indices).
-        for &idx in indices.iter().rev() {
-            self.messages.remove(idx);
-        }
-
-        // Insert the compaction summary at the beginning (before remaining messages).
-        let summary_msg = ContextMessage {
-            role: "system".into(),
-            content: summary_text,
-            tokens: summary_tokens,
-            pinned: true,
-            is_compacted: true,
-            original_count: Some(count),
-        };
-        self.messages.insert(0, summary_msg);
-
-        let tokens_freed = tokens_before.saturating_sub(summary_tokens);
-
-        Ok(CompactionResult {
-            messages_compacted: count as usize,
-            tokens_freed,
-            summary_tokens,
-            usage_after: self.usage_pct(),
-        })
+        self.apply_compaction_summary(&to_compact, summary_text)
     }
 
     /// Reactive compaction — called after a context-length API error.
@@ -549,7 +614,10 @@ mod tests {
         ctx.set_compaction_threshold(0.5);
         // One big message — above threshold but only 1 compactable message
         ctx.push(ContextMessage::new("user", "a".repeat(120))); // ~30 tokens = 60%
-        assert!(!ctx.needs_compaction(), "Need at least 3 compactable messages");
+        assert!(
+            !ctx.needs_compaction(),
+            "Need at least 3 compactable messages"
+        );
     }
 
     #[test]
@@ -564,7 +632,11 @@ mod tests {
         ctx.push(ContextMessage::new("assistant", "d".repeat(400)));
 
         let usage_before = ctx.usage_pct();
-        assert!(ctx.needs_compaction(), "usage={:.2}% should exceed 80%", usage_before * 100.0);
+        assert!(
+            ctx.needs_compaction(),
+            "usage={:.2}% should exceed 80%",
+            usage_before * 100.0
+        );
 
         let result = ctx.compact(|msgs| {
             // Simple mock summarizer — return a short summary
@@ -605,7 +677,11 @@ mod tests {
         });
 
         // The original pinned message should still exist
-        assert!(ctx.messages().iter().any(|m| m.pinned && m.content == "Important context"));
+        assert!(
+            ctx.messages()
+                .iter()
+                .any(|m| m.pinned && m.content == "Important context")
+        );
     }
 
     #[test]
@@ -626,6 +702,28 @@ mod tests {
         assert!(compacted.pinned);
         assert!(compacted.original_count.is_some());
         assert!(compacted.original_count.unwrap() > 0);
+    }
+
+    #[test]
+    fn apply_compaction_summary_preserves_message_selection() {
+        let mut ctx = ContextWindow::new(1_000);
+        ctx.push(ContextMessage::new("system", "Important context").pinned());
+        ctx.push(ContextMessage::new("user", "a".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "b".repeat(400)));
+        ctx.push(ContextMessage::new("user", "c".repeat(400)));
+        ctx.push(ContextMessage::new("assistant", "d".repeat(400)));
+
+        let selected = vec![ctx.messages()[1].clone(), ctx.messages()[2].clone()];
+        let result = ctx
+            .apply_compaction_summary(&selected, "Selected summary".into())
+            .unwrap();
+
+        assert_eq!(result.messages_compacted, 2);
+        assert_eq!(ctx.messages()[0].content, "Important context");
+        assert_eq!(ctx.messages()[1].content, "Selected summary");
+        assert!(ctx.messages()[1].is_compacted);
+        assert_eq!(ctx.messages()[2].content, "c".repeat(400));
+        assert_eq!(ctx.messages()[3].content, "d".repeat(400));
     }
 
     #[test]

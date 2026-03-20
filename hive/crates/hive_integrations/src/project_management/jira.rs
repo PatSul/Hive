@@ -182,10 +182,7 @@ impl JiraClient {
 
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let client = Client::builder()
             .default_headers(headers)
@@ -263,11 +260,7 @@ impl JiraClient {
     }
 
     /// Perform an authenticated PUT request with a JSON body, returning no body.
-    async fn put_no_content(
-        &self,
-        url: &str,
-        payload: &serde_json::Value,
-    ) -> Result<()> {
+    async fn put_no_content(&self, url: &str, payload: &serde_json::Value) -> Result<()> {
         debug!(url = %url, "Jira PUT request");
 
         let resp = self
@@ -289,11 +282,7 @@ impl JiraClient {
     }
 
     /// Perform an authenticated POST request that returns no JSON body (e.g. 204).
-    async fn post_no_content(
-        &self,
-        url: &str,
-        payload: &serde_json::Value,
-    ) -> Result<()> {
+    async fn post_no_content(&self, url: &str, payload: &serde_json::Value) -> Result<()> {
         debug!(url = %url, "Jira POST (no content) request");
 
         let resp = self
@@ -328,11 +317,7 @@ impl JiraClient {
             .assignee
             .as_ref()
             .and_then(|a| a.display_name.clone());
-        let sprint_name = jira
-            .fields
-            .sprint
-            .as_ref()
-            .and_then(|s| s.name.clone());
+        let sprint_name = jira.fields.sprint.as_ref().and_then(|s| s.name.clone());
         let description = jira
             .fields
             .description
@@ -544,11 +529,7 @@ impl ProjectManagementProvider for JiraClient {
             .collect())
     }
 
-    async fn list_issues(
-        &self,
-        project_id: &str,
-        filters: &IssueFilters,
-    ) -> Result<Vec<Issue>> {
+    async fn list_issues(&self, project_id: &str, filters: &IssueFilters) -> Result<Vec<Issue>> {
         let jql = self.build_jql(project_id, filters);
         let url = format!(
             "{}/search?jql={}&maxResults=50&fields=summary,description,status,priority,assignee,labels,sprint,created,updated",
@@ -557,7 +538,11 @@ impl ProjectManagementProvider for JiraClient {
         );
 
         let resp: JiraSearchResponse = self.get(&url).await?;
-        debug!(total = resp.total, returned = resp.issues.len(), "Jira search results");
+        debug!(
+            total = resp.total,
+            returned = resp.issues.len(),
+            "Jira search results"
+        );
 
         Ok(resp.issues.iter().map(|i| self.convert_issue(i)).collect())
     }
@@ -660,9 +645,7 @@ impl ProjectManagementProvider for JiraClient {
 
         Ok(Comment {
             id: jira_comment.id,
-            author: jira_comment
-                .author
-                .and_then(|a| a.display_name),
+            author: jira_comment.author.and_then(|a| a.display_name),
             body: jira_comment
                 .body
                 .as_ref()
@@ -730,14 +713,9 @@ impl ProjectManagementProvider for JiraClient {
 
     async fn get_sprints(&self, project_id: &str) -> Result<Vec<Sprint>> {
         // Sprints are accessed via the Agile API, which requires finding the board first.
-        let agile_base = self
-            .base_url
-            .replace("/rest/api/3", "/rest/agile/1.0");
+        let agile_base = self.base_url.replace("/rest/api/3", "/rest/agile/1.0");
 
-        let boards_url = format!(
-            "{}/board?projectKeyOrId={}",
-            agile_base, project_id
-        );
+        let boards_url = format!("{}/board?projectKeyOrId={}", agile_base, project_id);
 
         let boards: JiraBoardResponse = match self.get(&boards_url).await {
             Ok(b) => b,
@@ -829,10 +807,7 @@ mod tests {
             "https://test.atlassian.net/rest/api/3/",
         )
         .unwrap();
-        assert_eq!(
-            client.base_url(),
-            "https://test.atlassian.net/rest/api/3"
-        );
+        assert_eq!(client.base_url(), "https://test.atlassian.net/rest/api/3");
     }
 
     #[test]
@@ -969,9 +944,15 @@ mod tests {
 
     #[test]
     fn test_priority_to_jira() {
-        assert_eq!(JiraClient::priority_to_jira(IssuePriority::Critical), "Highest");
+        assert_eq!(
+            JiraClient::priority_to_jira(IssuePriority::Critical),
+            "Highest"
+        );
         assert_eq!(JiraClient::priority_to_jira(IssuePriority::High), "High");
-        assert_eq!(JiraClient::priority_to_jira(IssuePriority::Medium), "Medium");
+        assert_eq!(
+            JiraClient::priority_to_jira(IssuePriority::Medium),
+            "Medium"
+        );
         assert_eq!(JiraClient::priority_to_jira(IssuePriority::Low), "Low");
         assert_eq!(JiraClient::priority_to_jira(IssuePriority::None), "Lowest");
     }
@@ -1122,8 +1103,14 @@ mod tests {
 
     #[test]
     fn test_status_to_jira_category() {
-        assert_eq!(JiraClient::status_to_jira_category(IssueStatus::Backlog), "new");
-        assert_eq!(JiraClient::status_to_jira_category(IssueStatus::Todo), "new");
+        assert_eq!(
+            JiraClient::status_to_jira_category(IssueStatus::Backlog),
+            "new"
+        );
+        assert_eq!(
+            JiraClient::status_to_jira_category(IssueStatus::Todo),
+            "new"
+        );
         assert_eq!(
             JiraClient::status_to_jira_category(IssueStatus::InProgress),
             "indeterminate"
@@ -1132,8 +1119,14 @@ mod tests {
             JiraClient::status_to_jira_category(IssueStatus::InReview),
             "indeterminate"
         );
-        assert_eq!(JiraClient::status_to_jira_category(IssueStatus::Done), "done");
-        assert_eq!(JiraClient::status_to_jira_category(IssueStatus::Cancelled), "done");
+        assert_eq!(
+            JiraClient::status_to_jira_category(IssueStatus::Done),
+            "done"
+        );
+        assert_eq!(
+            JiraClient::status_to_jira_category(IssueStatus::Cancelled),
+            "done"
+        );
     }
 
     #[test]

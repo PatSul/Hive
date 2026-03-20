@@ -395,10 +395,8 @@ impl CliService {
             let check_path = hive_core::config::HiveConfig::base_dir()
                 .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
             use std::mem::MaybeUninit;
-            let c_path = std::ffi::CString::new(
-                check_path.to_string_lossy().as_bytes(),
-            )
-            .unwrap_or_else(|_| std::ffi::CString::new("/").unwrap());
+            let c_path = std::ffi::CString::new(check_path.to_string_lossy().as_bytes())
+                .unwrap_or_else(|_| std::ffi::CString::new("/").unwrap());
 
             let mut stat = MaybeUninit::<libc::statvfs>::uninit();
             let result = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
@@ -426,7 +424,10 @@ impl CliService {
                             "Only {:.1} GB available (recommend >= {:.0} GB)",
                             available_gb, min_gb
                         ),
-                        fix_suggestion: Some("Free up disk space to ensure Hive can store conversations and models".to_string()),
+                        fix_suggestion: Some(
+                            "Free up disk space to ensure Hive can store conversations and models"
+                                .to_string(),
+                        ),
                     }
                 }
             } else {

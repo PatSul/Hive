@@ -143,12 +143,16 @@ mod tests {
 
     #[test]
     fn parse_fenced_code_block_with_path() {
-        let response = "Here's the fix:\n```rust:src/main.rs\nfn main() {\n    println!(\"hello\");\n}\n```\n";
+        let response =
+            "Here's the fix:\n```rust:src/main.rs\nfn main() {\n    println!(\"hello\");\n}\n```\n";
         let edits = parse_edits(response);
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].file_path, "src/main.rs");
         assert_eq!(edits[0].language, "rust");
-        assert_eq!(edits[0].new_content, "fn main() {\n    println!(\"hello\");\n}");
+        assert_eq!(
+            edits[0].new_content,
+            "fn main() {\n    println!(\"hello\");\n}"
+        );
     }
 
     #[test]
@@ -157,7 +161,10 @@ mod tests {
         let edits = parse_edits(response);
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].file_path, "src/lib.rs");
-        assert_eq!(edits[0].new_content, "pub fn add(a: i32, b: i32) -> i32 { a + b }");
+        assert_eq!(
+            edits[0].new_content,
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }"
+        );
     }
 
     #[test]
@@ -170,7 +177,8 @@ mod tests {
 
     #[test]
     fn parse_multiple_edits() {
-        let response = "```rust:src/a.rs\nlet a = 1;\n```\nSome text\n```py:src/b.py\nprint('hi')\n```\n";
+        let response =
+            "```rust:src/a.rs\nlet a = 1;\n```\nSome text\n```py:src/b.py\nprint('hi')\n```\n";
         let edits = parse_edits(response);
         assert_eq!(edits.len(), 2);
         assert_eq!(edits[0].file_path, "src/a.rs");

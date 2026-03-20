@@ -179,14 +179,12 @@ impl GitOpsTab {
 // Sub-data for each Git Ops tab
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AiCommitState {
     pub generating: bool,
     pub generated_message: Option<String>,
     pub user_edited_message: String,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct PushData {
@@ -244,15 +242,13 @@ impl Default for PrForm {
     }
 }
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PullRequestsData {
     pub open_prs: Vec<PrSummary>,
     pub pr_form: PrForm,
     pub loading: bool,
     pub github_connected: bool,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct BranchEntry {
@@ -263,14 +259,12 @@ pub struct BranchEntry {
     pub last_commit_time: String,
 }
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct BranchesData {
     pub branches: Vec<BranchEntry>,
     pub current_branch: String,
     pub new_branch_name: String,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct LfsFileEntry {
@@ -280,8 +274,7 @@ pub struct LfsFileEntry {
     pub is_pointer: bool,
 }
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LfsData {
     pub is_lfs_installed: bool,
     pub tracked_patterns: Vec<String>,
@@ -290,7 +283,6 @@ pub struct LfsData {
     pub lfs_pull_in_progress: bool,
     pub lfs_push_in_progress: bool,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct GitflowData {
@@ -959,9 +951,7 @@ impl ReviewPanel {
             // Column header
             container = container.child(Self::file_list_header(theme));
             for entry in &data.files {
-                let is_selected = data
-                    .selected_file
-                    .as_ref() == Some(&entry.path);
+                let is_selected = data.selected_file.as_ref() == Some(&entry.path);
                 let comment_count = data.comments_for_file(&entry.path).len();
                 container =
                     container.child(Self::file_row(entry, is_selected, comment_count, theme));
@@ -1659,10 +1649,7 @@ impl ReviewPanel {
                                     .cursor_pointer()
                                     .when(data.ai_commit.generating, |el| el.opacity(0.5))
                                     .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                                        window.dispatch_action(
-                                            Box::new(ReviewAiCommitMessage),
-                                            cx,
-                                        );
+                                        window.dispatch_action(Box::new(ReviewAiCommitMessage), cx);
                                     })
                                     .child(if data.ai_commit.generating {
                                         "Generating..."
@@ -1700,15 +1687,10 @@ impl ReviewPanel {
                     .flex_row()
                     .gap(theme.space_3)
                     .child(
-                        Self::action_btn(
-                            "review-stage-all",
-                            "Stage All",
-                            theme.accent_cyan,
-                            theme,
-                        )
-                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                            window.dispatch_action(Box::new(ReviewStageAll), cx);
-                        }),
+                        Self::action_btn("review-stage-all", "Stage All", theme.accent_cyan, theme)
+                            .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                                window.dispatch_action(Box::new(ReviewStageAll), cx);
+                            }),
                     )
                     .child(
                         Self::action_btn(
@@ -1717,20 +1699,18 @@ impl ReviewPanel {
                             theme.accent_yellow,
                             theme,
                         )
-                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                            window.dispatch_action(Box::new(ReviewUnstageAll), cx);
-                        }),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            |_event, window, cx| {
+                                window.dispatch_action(Box::new(ReviewUnstageAll), cx);
+                            },
+                        ),
                     )
                     .child(
-                        Self::action_btn(
-                            "review-commit",
-                            "Commit",
-                            theme.accent_green,
-                            theme,
-                        )
-                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                            window.dispatch_action(Box::new(ReviewCommitWithMessage), cx);
-                        }),
+                        Self::action_btn("review-commit", "Commit", theme.accent_green, theme)
+                            .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                                window.dispatch_action(Box::new(ReviewCommitWithMessage), cx);
+                            }),
                     )
                     .child(div().flex_1())
                     .child(
@@ -1740,9 +1720,12 @@ impl ReviewPanel {
                             theme.accent_red,
                             theme,
                         )
-                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                            window.dispatch_action(Box::new(ReviewDiscardAll), cx);
-                        }),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            |_event, window, cx| {
+                                window.dispatch_action(Box::new(ReviewDiscardAll), cx);
+                            },
+                        ),
                     ),
             )
     }
@@ -1910,7 +1893,10 @@ impl ReviewPanel {
             )
             // Last push result
             .when(push.last_push_result.is_some(), |el| {
-                let result = push.last_push_result.as_ref().expect("guarded by is_some check");
+                let result = push
+                    .last_push_result
+                    .as_ref()
+                    .expect("guarded by is_some check");
                 let (color, msg) = match result {
                     Ok(m) => (
                         theme.accent_green,
@@ -2561,9 +2547,7 @@ impl ReviewPanel {
                         div()
                             .text_size(rems(0.8125))
                             .text_color(theme.text_muted)
-                            .child(
-                                "Initialize Gitflow to use feature/release/hotfix branching.",
-                            ),
+                            .child("Initialize Gitflow to use feature/release/hotfix branching."),
                     )
                     .child(
                         div()
@@ -2673,9 +2657,7 @@ impl ReviewPanel {
                             )
                             .child(
                                 div()
-                                    .id(SharedString::from(format!(
-                                        "finish-{kind}-{name}"
-                                    )))
+                                    .id(SharedString::from(format!("finish-{kind}-{name}")))
                                     .px_3()
                                     .py_1()
                                     .rounded_md()

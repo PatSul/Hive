@@ -281,9 +281,9 @@ impl Scheduler {
             if let Some(last) = job.last_run
                 && last.format("%Y-%m-%d %H:%M").to_string()
                     == now.format("%Y-%m-%d %H:%M").to_string()
-                {
-                    continue;
-                }
+            {
+                continue;
+            }
 
             if job.schedule.matches(&now) {
                 job.last_run = Some(now);

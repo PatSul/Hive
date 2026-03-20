@@ -135,7 +135,8 @@ impl AwsClient {
                 .get("Tags")
                 .and_then(|tags| tags.as_array())
                 .and_then(|tags| {
-                    tags.iter().find(|t| t.get("Key").and_then(|k| k.as_str()) == Some("Name"))
+                    tags.iter()
+                        .find(|t| t.get("Key").and_then(|k| k.as_str()) == Some("Name"))
                 })
                 .and_then(|t| t.get("Value"))
                 .and_then(|v| v.as_str())
@@ -227,10 +228,7 @@ impl AwsClient {
             .iter()
             .map(|obj| S3Object {
                 key: json_str(obj, "Key"),
-                size_bytes: obj
-                    .get("Size")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
+                size_bytes: obj.get("Size").and_then(|v| v.as_u64()).unwrap_or(0),
                 last_modified: json_str(obj, "LastModified"),
                 storage_class: obj
                     .get("StorageClass")
@@ -304,8 +302,8 @@ impl AwsClient {
         let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         let output = self.run(&str_args).await?;
 
-        let value: serde_json::Value = serde_json::from_str(&output)
-            .context("failed to parse Lambda invocation response")?;
+        let value: serde_json::Value =
+            serde_json::from_str(&output).context("failed to parse Lambda invocation response")?;
 
         Ok(value)
     }
@@ -433,11 +431,7 @@ impl AwsClient {
     // -- CloudWatch ---------------------------------------------------------
 
     /// Retrieve recent log events from a CloudWatch log group.
-    pub async fn get_cloudwatch_logs(
-        &self,
-        log_group: &str,
-        limit: u32,
-    ) -> Result<Vec<LogEvent>> {
+    pub async fn get_cloudwatch_logs(&self, log_group: &str, limit: u32) -> Result<Vec<LogEvent>> {
         debug!(log_group = %log_group, limit = limit, "fetching CloudWatch logs");
 
         let limit_str = limit.to_string();
@@ -532,10 +526,7 @@ impl AwsClient {
         Ok(DynamoTable {
             name: json_str(table, "TableName"),
             status: json_str(table, "TableStatus"),
-            item_count: table
-                .get("ItemCount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
+            item_count: table.get("ItemCount").and_then(|v| v.as_u64()).unwrap_or(0),
             size_bytes: table
                 .get("TableSizeBytes")
                 .and_then(|v| v.as_u64())

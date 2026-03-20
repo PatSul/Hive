@@ -30,7 +30,10 @@ fn test_key_exchange_produces_shared_secret() {
     let secret_a = alice.derive_shared_secret(bob.public_key_bytes());
     let secret_b = bob.derive_shared_secret(alice.public_key_bytes());
 
-    assert_eq!(secret_a, secret_b, "Both sides must derive the same shared secret");
+    assert_eq!(
+        secret_a, secret_b,
+        "Both sides must derive the same shared secret"
+    );
     // Shared secret should not be all zeros
     assert_ne!(secret_a, [0u8; 32]);
 }
@@ -92,7 +95,10 @@ fn test_encrypt_different_nonces() {
     let ct2 = keys.encrypt(plaintext).unwrap();
 
     // Same plaintext should produce different ciphertext due to random nonces
-    assert_ne!(ct1, ct2, "Different encryptions should use different nonces");
+    assert_ne!(
+        ct1, ct2,
+        "Different encryptions should use different nonces"
+    );
 
     // Both should decrypt to the original
     assert_eq!(keys.decrypt(&ct1).unwrap(), plaintext);
@@ -205,7 +211,10 @@ fn test_paired_device_store_remove() {
 fn test_device_permissions_default() {
     let perms = DevicePermissions::default();
     assert!(perms.can_chat, "Default should allow chat");
-    assert!(!perms.can_run_agents, "Default should NOT allow running agents");
+    assert!(
+        !perms.can_run_agents,
+        "Default should NOT allow running agents"
+    );
     assert!(perms.can_view_files, "Default should allow viewing files");
     assert!(
         !perms.can_execute_commands,

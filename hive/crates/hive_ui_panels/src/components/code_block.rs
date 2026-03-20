@@ -43,10 +43,7 @@ fn render_code_block_inner(
     // Build action buttons
     let copy_content = code_for_copy.clone();
     let copy_id = SharedString::from(format!("copy-{}", label));
-    let mut buttons = div()
-        .flex()
-        .items_center()
-        .gap(theme.space_2);
+    let mut buttons = div().flex().items_center().gap(theme.space_2);
 
     // Copy button
     buttons = buttons.child(

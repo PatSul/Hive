@@ -21,6 +21,6 @@ pub use client::{discover_agent, DiscoveryCache};
 pub use config::A2aConfig;
 pub use error::A2aError;
 pub use remote_agent::RemoteAgent;
-pub use service::{A2aClientService, RemoteAgentRunResult, RemoteAgentSummary};
 pub use server::{start_server, start_server_with_handler, TaskHandlerAdapter};
+pub use service::{A2aClientService, RemoteAgentRunResult, RemoteAgentSummary};
 pub use task_handler::{HiveTaskHandler, ProviderExecutor};

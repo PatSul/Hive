@@ -316,7 +316,9 @@ impl ToolHandler for ExecuteCommandTool {
                 .lock()
                 .map_err(|e| format!("Failed to lock sandbox: {e}"))?;
             if sb.is_running() {
-                let result = sb.exec(command).map_err(|e| format!("Sandbox exec failed: {e}"))?;
+                let result = sb
+                    .exec(command)
+                    .map_err(|e| format!("Sandbox exec failed: {e}"))?;
                 let mut output = String::new();
                 if !result.stdout.is_empty() {
                     output.push_str(&result.stdout);
@@ -720,16 +722,16 @@ pub fn parse_tool_calls_from_response(response: &serde_json::Value) -> Vec<ToolC
     // Try OpenAI format: { "choices": [{ "message": { "tool_calls": [...] } }] }
     if let Some(choices) = response.get("choices").and_then(|v| v.as_array())
         && let Some(first) = choices.first()
-            && let Some(tool_calls) = first
-                .get("message")
-                .and_then(|m| m.get("tool_calls"))
-                .and_then(|tc| tc.as_array())
-            {
-                let calls = extract_openai_tool_calls(tool_calls);
-                if !calls.is_empty() {
-                    return calls;
-                }
-            }
+        && let Some(tool_calls) = first
+            .get("message")
+            .and_then(|m| m.get("tool_calls"))
+            .and_then(|tc| tc.as_array())
+    {
+        let calls = extract_openai_tool_calls(tool_calls);
+        if !calls.is_empty() {
+            return calls;
+        }
+    }
 
     // Try flat `tool_calls` at top level (generic format)
     if let Some(tool_calls) = response.get("tool_calls").and_then(|v| v.as_array()) {

@@ -11,9 +11,9 @@ use hive_terminal::local_ai::PullProgress;
 
 use crate::components::model_selector::{ModelSelected, ModelSelectorView};
 use hive_core::theme_manager::ThemeManager;
+use hive_ui_core::{AccountConnectPlatform, ExportConfig, ImportConfig};
 use hive_ui_core::{AppConfig, AppHueClient, AppOllamaManager};
 use hive_ui_core::{AppTheme, ContextFormatChanged, HiveTheme, ThemeChanged};
-use hive_ui_core::{AccountConnectPlatform, ExportConfig, ImportConfig};
 
 // ---------------------------------------------------------------------------
 // Actions
@@ -159,10 +159,7 @@ impl SettingsData {
                 .huggingface_api_key
                 .as_ref()
                 .is_some_and(|k| !k.is_empty()),
-            has_litellm_key: cfg
-                .litellm_api_key
-                .as_ref()
-                .is_some_and(|k| !k.is_empty()),
+            has_litellm_key: cfg.litellm_api_key.as_ref().is_some_and(|k| !k.is_empty()),
             has_hue_key: cfg.hue_api_key.as_ref().is_some_and(|k| !k.is_empty()),
             ollama_url: cfg.ollama_url.clone(),
             lmstudio_url: cfg.lmstudio_url.clone(),
@@ -270,6 +267,7 @@ pub struct SettingsView {
     // Budget inputs
     daily_budget_input: Entity<InputState>,
     monthly_budget_input: Entity<InputState>,
+    config_backup_password_input: Entity<InputState>,
 
     // Toggle states
     privacy_mode: bool,
@@ -359,10 +357,7 @@ impl SettingsView {
             .huggingface_api_key
             .as_ref()
             .is_some_and(|k| !k.is_empty());
-        let had_litellm = cfg
-            .litellm_api_key
-            .as_ref()
-            .is_some_and(|k| !k.is_empty());
+        let had_litellm = cfg.litellm_api_key.as_ref().is_some_and(|k| !k.is_empty());
         let had_elevenlabs = cfg
             .elevenlabs_api_key
             .as_ref()
@@ -493,6 +488,12 @@ impl SettingsView {
             state.set_value(format!("{:.2}", cfg.monthly_budget_usd), window, cx);
             state
         });
+        let config_backup_password_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Enter backup password", window, cx);
+            state = state.masked(true);
+            state
+        });
 
         // OAuth client ID inputs per platform
         let google_client_id_input = cx.new(|cx| {
@@ -564,6 +565,7 @@ impl SettingsView {
             &custom_url_input,
             &daily_budget_input,
             &monthly_budget_input,
+            &config_backup_password_input,
             &google_client_id_input,
             &microsoft_client_id_input,
             &github_client_id_input,
@@ -593,7 +595,10 @@ impl SettingsView {
             .collect();
         if let Ok(mgr) = ThemeManager::new() {
             for t in mgr.list_custom_themes() {
-                if !available_themes.iter().any(|n| n.to_lowercase() == t.name.to_lowercase()) {
+                if !available_themes
+                    .iter()
+                    .any(|n| n.to_lowercase() == t.name.to_lowercase())
+                {
                     available_themes.push(t.name.clone());
                 }
             }
@@ -627,6 +632,7 @@ impl SettingsView {
             model_selector,
             daily_budget_input,
             monthly_budget_input,
+            config_backup_password_input,
             privacy_mode: cfg.privacy_mode,
             auto_routing: cfg.auto_routing,
             speculative_decoding: cfg.speculative_decoding,
@@ -700,6 +706,14 @@ impl SettingsView {
     pub fn set_selected_context_format(&mut self, format: String, cx: &mut Context<Self>) {
         self.selected_context_format = format;
         cx.notify();
+    }
+
+    pub fn backup_password(&self, cx: &App) -> String {
+        self.config_backup_password_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string()
     }
 
     fn refresh_ollama_models(&mut self, cx: &mut Context<Self>) {
@@ -870,7 +884,9 @@ impl SettingsView {
 
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt.block_on(manager.show_model(&model_name)).map_err(|e| e.to_string()),
+                Ok(rt) => rt
+                    .block_on(manager.show_model(&model_name))
+                    .map_err(|e| e.to_string()),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -930,8 +946,7 @@ impl SettingsView {
                 this.ollama_busy = false;
                 match result {
                     Ok(()) => {
-                        this.ollama_status =
-                            Some(format!("Deleted model '{deleted_model_name}'"));
+                        this.ollama_status = Some(format!("Deleted model '{deleted_model_name}'"));
                         this.ollama_models
                             .retain(|model| model.name != deleted_model_name);
                     }
@@ -1123,8 +1138,7 @@ impl SettingsView {
                 this.hue_busy = false;
                 match result {
                     Ok(()) => {
-                        this.hue_status =
-                            Some(format!("Activated scene '{activated_scene_id}'"));
+                        this.hue_status = Some(format!("Activated scene '{activated_scene_id}'"));
                         this.refresh_hue_state(cx);
                     }
                     Err(e) => {
@@ -1356,11 +1370,7 @@ impl SettingsView {
     }
 
     /// Push the curated project model list into the model selector.
-    pub fn set_project_models(
-        &mut self,
-        models: Vec<String>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_project_models(&mut self, models: Vec<String>, cx: &mut Context<Self>) {
         self.model_selector.update(cx, |selector, cx| {
             selector.set_project_models(models, cx);
         });
@@ -1508,20 +1518,20 @@ impl Render for SettingsView {
                     cx.notify();
                 }),
             )
-            .on_action(
-                cx.listener(|this: &mut Self, _: &SettingsToggleSpeculativeDecoding, _, cx| {
+            .on_action(cx.listener(
+                |this: &mut Self, _: &SettingsToggleSpeculativeDecoding, _, cx| {
                     this.speculative_decoding = !this.speculative_decoding;
                     cx.emit(SettingsSaved);
                     cx.notify();
-                }),
-            )
-            .on_action(
-                cx.listener(|this: &mut Self, _: &SettingsToggleSpeculativeMetrics, _, cx| {
+                },
+            ))
+            .on_action(cx.listener(
+                |this: &mut Self, _: &SettingsToggleSpeculativeMetrics, _, cx| {
                     this.speculative_show_metrics = !this.speculative_show_metrics;
                     cx.emit(SettingsSaved);
                     cx.notify();
-                }),
-            )
+                },
+            ))
             .on_action(
                 cx.listener(|this: &mut Self, _: &SettingsToggleTts, _, cx| {
                     this.tts_enabled = !this.tts_enabled;
@@ -1769,7 +1779,12 @@ impl SettingsView {
         } else {
             let mut rows = div().flex().flex_col().gap(theme.space_2);
             for model in &self.ollama_models {
-                rows = rows.child(render_ollama_model_row(entity.clone(), model, self.ollama_busy, theme));
+                rows = rows.child(render_ollama_model_row(
+                    entity.clone(),
+                    model,
+                    self.ollama_busy,
+                    theme,
+                ));
             }
             section = section.child(rows);
         }
@@ -1858,7 +1873,8 @@ impl SettingsView {
         } else {
             let mut bridge_rows = div().flex().flex_col().gap(theme.space_2);
             for bridge in &self.hue_bridges {
-                bridge_rows = bridge_rows.child(render_hue_bridge_row(entity.clone(), bridge, theme));
+                bridge_rows =
+                    bridge_rows.child(render_hue_bridge_row(entity.clone(), bridge, theme));
             }
             section = section.child(bridge_rows);
         }
@@ -1874,7 +1890,12 @@ impl SettingsView {
         } else {
             let mut light_rows = div().flex().flex_col().gap(theme.space_2);
             for light in &self.hue_lights {
-                light_rows = light_rows.child(render_hue_light_row(entity.clone(), light, self.hue_busy, theme));
+                light_rows = light_rows.child(render_hue_light_row(
+                    entity.clone(),
+                    light,
+                    self.hue_busy,
+                    theme,
+                ));
             }
             section = section.child(light_rows);
         }
@@ -1889,7 +1910,12 @@ impl SettingsView {
         } else {
             let mut scene_rows = div().flex().flex_col().gap(theme.space_2);
             for scene in &self.hue_scenes {
-                scene_rows = scene_rows.child(render_hue_scene_row(entity.clone(), scene, self.hue_busy, theme));
+                scene_rows = scene_rows.child(render_hue_scene_row(
+                    entity.clone(),
+                    scene,
+                    self.hue_busy,
+                    theme,
+                ));
             }
             section = section.child(scene_rows);
         }
@@ -2184,8 +2210,7 @@ impl SettingsView {
                         })
                         .font_weight(FontWeight::BOLD)
                         .when(!is_connected && has_url, |el| {
-                            el.cursor_pointer()
-                                .hover(|s| s.opacity(0.85))
+                            el.cursor_pointer().hover(|s| s.opacity(0.85))
                         })
                         .on_click(move |_ev, _window, cx| {
                             if let Some(ref auth_url) = url {
@@ -2230,8 +2255,7 @@ impl SettingsView {
                         })
                         .font_weight(FontWeight::BOLD)
                         .when(!is_connected && has_url, |el| {
-                            el.cursor_pointer()
-                                .hover(|s| s.opacity(0.85))
+                            el.cursor_pointer().hover(|s| s.opacity(0.85))
                         })
                         .on_click(move |_ev, _window, cx| {
                             if let Some(ref auth_url) = url {
@@ -2291,11 +2315,7 @@ impl SettingsView {
                             .flex()
                             .items_center()
                             .gap(theme.space_3)
-                            .child(
-                                div()
-                                    .text_size(px(20.0))
-                                    .child(platform.icon().to_string()),
-                            )
+                            .child(div().text_size(px(20.0)).child(platform.icon().to_string()))
                             .child(
                                 div()
                                     .flex()
@@ -2377,14 +2397,11 @@ impl SettingsView {
                             .gap(theme.space_2)
                             .pl(px(32.0)) // Indent under icon
                             .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .child(
-                                        Input::new(&client_id_input)
-                                            .text_size(theme.font_size_xs)
-                                            .cleanable(true),
-                                    ),
+                                div().flex_1().min_w(px(0.0)).child(
+                                    Input::new(&client_id_input)
+                                        .text_size(theme.font_size_xs)
+                                        .cleanable(true),
+                                ),
                             )
                             .child(
                                 div()
@@ -2536,11 +2553,8 @@ impl SettingsView {
                     )
                     .child({
                         let sel = self.selected_context_format.to_lowercase();
-                        let options = vec![
-                            ("markdown", "Markdown"),
-                            ("toon", "TOON"),
-                            ("xml", "XML"),
-                        ];
+                        let options =
+                            vec![("markdown", "Markdown"), ("toon", "TOON"), ("xml", "XML")];
                         div()
                             .flex()
                             .flex_row()
@@ -2614,6 +2628,11 @@ impl SettingsView {
                 theme,
             ))
             .child(separator(theme))
+            .child(masked_input_row(
+                "Backup Password",
+                &self.config_backup_password_input,
+                theme,
+            ))
             .child(
                 div()
                     .flex()
@@ -2673,7 +2692,7 @@ impl SettingsView {
                     .bg(theme.bg_primary)
                     .text_size(theme.font_size_xs)
                     .text_color(theme.text_muted)
-                    .child("Exported files are encrypted with a password you provide. Keep the password safe -- it cannot be recovered."),
+                    .child("Use the same password for export and import. Hive does not store or recover it for you."),
             )
             .into_any_element()
     }
@@ -2870,7 +2889,10 @@ fn render_ollama_model_row(
                 .child(format!(
                     "Size {} | Modified {}",
                     format_optional_size(model.size),
-                    model.modified_at.clone().unwrap_or_else(|| "unknown".into())
+                    model
+                        .modified_at
+                        .clone()
+                        .unwrap_or_else(|| "unknown".into())
                 )),
         )
         .into_any_element()
@@ -2911,15 +2933,20 @@ fn render_hue_bridge_row(
                         .child(bridge.ip.clone()),
                 ),
         )
-        .child(settings_action_button("Use Bridge", false, theme, move |_event, window, cx| {
-            entity.update(cx, |this, cx| {
-                this.hue_bridge_ip_input.update(cx, |state, cx| {
-                    state.set_value(bridge_ip.clone(), window, cx);
+        .child(settings_action_button(
+            "Use Bridge",
+            false,
+            theme,
+            move |_event, window, cx| {
+                entity.update(cx, |this, cx| {
+                    this.hue_bridge_ip_input.update(cx, |state, cx| {
+                        state.set_value(bridge_ip.clone(), window, cx);
+                    });
+                    cx.emit(SettingsSaved);
+                    cx.notify();
                 });
-                cx.emit(SettingsSaved);
-                cx.notify();
-            });
-        }))
+            },
+        ))
         .into_any_element()
 }
 
@@ -3045,11 +3072,16 @@ fn render_hue_scene_row(
                         .child(scene.id.clone()),
                 ),
         )
-        .child(settings_action_button("Activate", busy, theme, move |_event, _window, cx| {
-            entity.update(cx, |this, cx| {
-                this.activate_hue_scene(scene_id.clone(), cx);
-            });
-        }))
+        .child(settings_action_button(
+            "Activate",
+            busy,
+            theme,
+            move |_event, _window, cx| {
+                entity.update(cx, |this, cx| {
+                    this.activate_hue_scene(scene_id.clone(), cx);
+                });
+            },
+        ))
         .into_any_element()
 }
 
@@ -3092,16 +3124,12 @@ fn api_key_row(
                 .child(status_text(has_key, theme)),
         )
         .child(
-            div()
-                .min_w(px(280.0))
-                .max_w(px(420.0))
-                .w_full()
-                .child(
-                    Input::new(input_state)
-                        .appearance(true)
-                        .mask_toggle()
-                        .cleanable(false),
-                ),
+            div().min_w(px(280.0)).max_w(px(420.0)).w_full().child(
+                Input::new(input_state)
+                    .appearance(true)
+                    .mask_toggle()
+                    .cleanable(false),
+            ),
         )
         .into_any_element()
 }
@@ -3126,6 +3154,34 @@ fn input_row(label: &str, input_state: &Entity<InputState>, theme: &HiveTheme) -
                 .max_w(px(420.0))
                 .w_full()
                 .child(Input::new(input_state).appearance(true).cleanable(false)),
+        )
+        .into_any_element()
+}
+
+fn masked_input_row(
+    label: &str,
+    input_state: &Entity<InputState>,
+    theme: &HiveTheme,
+) -> AnyElement {
+    div()
+        .flex()
+        .items_start()
+        .gap(theme.space_4)
+        .py(theme.space_2)
+        .child(
+            div()
+                .flex_1()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_secondary)
+                .child(label.to_string()),
+        )
+        .child(
+            div().min_w(px(280.0)).max_w(px(420.0)).w_full().child(
+                Input::new(input_state)
+                    .appearance(true)
+                    .mask_toggle()
+                    .cleanable(false),
+            ),
         )
         .into_any_element()
 }

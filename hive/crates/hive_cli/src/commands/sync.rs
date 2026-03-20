@@ -9,7 +9,13 @@ pub async fn push(key: &str, file_path: &str) -> Result<()> {
         .canonicalize()
         .with_context(|| format!("Invalid path: {file_path}"))?;
     let path_str = canonical.to_string_lossy().to_lowercase();
-    for seg in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+    for seg in &[
+        ".ssh",
+        ".aws",
+        ".gnupg",
+        ".config/gcloud",
+        ".config\\gcloud",
+    ] {
         if path_str.contains(seg) {
             anyhow::bail!("Access to sensitive path blocked: {seg}");
         }
@@ -33,9 +39,7 @@ pub async fn push(key: &str, file_path: &str) -> Result<()> {
 pub async fn pull(key: &str, file_path: &str) -> Result<()> {
     // For pull, the file may not exist yet, so canonicalize the parent directory
     let path = std::path::Path::new(file_path);
-    let parent = path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     let canonical_parent = parent
         .canonicalize()
         .with_context(|| format!("Invalid parent directory: {}", parent.display()))?;
@@ -44,7 +48,13 @@ pub async fn pull(key: &str, file_path: &str) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("Invalid file path: {file_path}"))?,
     );
     let path_str = canonical.to_string_lossy().to_lowercase();
-    for seg in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+    for seg in &[
+        ".ssh",
+        ".aws",
+        ".gnupg",
+        ".config/gcloud",
+        ".config\\gcloud",
+    ] {
         if path_str.contains(seg) {
             anyhow::bail!("Access to sensitive path blocked: {seg}");
         }

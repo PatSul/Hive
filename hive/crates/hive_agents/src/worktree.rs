@@ -351,10 +351,10 @@ impl WorktreeManager {
                 .find_tree(tree_oid)
                 .map_err(|e| format!("Failed to find merged tree: {e}"))?;
 
-            let sig = repo
-                .signature()
-                .unwrap_or_else(|_| git2::Signature::now("Hive Swarm", "hive@localhost")
-                    .expect("static signature should never fail"));
+            let sig = repo.signature().unwrap_or_else(|_| {
+                git2::Signature::now("Hive Swarm", "hive@localhost")
+                    .expect("static signature should never fail")
+            });
 
             let message = format!("hive: merge {team_branch} into {target_branch}");
 
@@ -520,13 +520,14 @@ impl WorktreeManager {
             let worktree_path = self.worktrees_dir().join(&team_id);
             if worktree_path.exists()
                 && let Ok(_validated) = self.validate_worktree_path(&worktree_path)
-                    && let Err(e) = std::fs::remove_dir_all(&worktree_path) {
-                        warn!(
-                            path = %worktree_path.display(),
-                            error = %e,
-                            "Failed to remove worktree directory"
-                        );
-                    }
+                && let Err(e) = std::fs::remove_dir_all(&worktree_path)
+            {
+                warn!(
+                    path = %worktree_path.display(),
+                    error = %e,
+                    "Failed to remove worktree directory"
+                );
+            }
 
             // Prune the worktree reference.
             if let Ok(wt) = repo.find_worktree(&team_id) {
@@ -537,18 +538,20 @@ impl WorktreeManager {
             }
 
             // Delete the branch (never main/master).
-            if branch_name != "main" && branch_name != "master"
-                && let Ok(mut branch) = repo.find_branch(branch_name, BranchType::Local) {
-                    if let Err(e) = branch.delete() {
-                        warn!(
-                            branch = %branch_name,
-                            error = %e,
-                            "Failed to delete branch"
-                        );
-                    } else {
-                        info!(branch = %branch_name, "Deleted swarm branch");
-                    }
+            if branch_name != "main"
+                && branch_name != "master"
+                && let Ok(mut branch) = repo.find_branch(branch_name, BranchType::Local)
+            {
+                if let Err(e) = branch.delete() {
+                    warn!(
+                        branch = %branch_name,
+                        error = %e,
+                        "Failed to delete branch"
+                    );
+                } else {
+                    info!(branch = %branch_name, "Deleted swarm branch");
                 }
+            }
 
             cleaned += 1;
         }
@@ -558,9 +561,10 @@ impl WorktreeManager {
         if worktrees_dir.exists() {
             // Only remove if the directory is empty.
             if let Ok(mut entries) = std::fs::read_dir(&worktrees_dir)
-                && entries.next().is_none() {
-                    let _ = std::fs::remove_dir(&worktrees_dir);
-                }
+                && entries.next().is_none()
+            {
+                let _ = std::fs::remove_dir(&worktrees_dir);
+            }
         }
 
         info!(count = cleaned, run_id = %safe_run_id, "Swarm cleanup complete");
@@ -622,9 +626,11 @@ impl WorktreeManager {
         for branch_result in branches {
             if let Ok((branch, _)) = branch_result
                 && let Ok(Some(name)) = branch.name()
-                    && name.starts_with("swarm/") && name.ends_with(&suffix) {
-                        return Some(name.to_string());
-                    }
+                && name.starts_with("swarm/")
+                && name.ends_with(&suffix)
+            {
+                return Some(name.to_string());
+            }
         }
 
         None

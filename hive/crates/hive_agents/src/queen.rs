@@ -7,16 +7,16 @@
 //! a final output, and records learnings to collective memory.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hive_ai::types::{ChatMessage, ChatRequest, ChatResponse, MessageRole, ModelTier};
 
+use crate::activity::ActivityService;
 use crate::activity::approval::ApprovalGate;
 use crate::activity::budget::BudgetEnforcer;
 use crate::activity::notification::{NotificationKind, NotificationService};
-use crate::activity::ActivityService;
 use crate::collective_memory::{CollectiveMemory, MemoryCategory, MemoryEntry};
 use crate::coordinator::{Coordinator, CoordinatorConfig, CoordinatorResult};
 use crate::hivemind::{
@@ -334,7 +334,9 @@ impl<E: AiExecutor + 'static> Queen<E> {
                     NotificationKind::AgentCompleted,
                     &format!(
                         "Swarm completed: {} teams succeeded (${:.4}, {:.1}s)",
-                        completed, total_cost, total_duration_ms as f64 / 1000.0,
+                        completed,
+                        total_cost,
+                        total_duration_ms as f64 / 1000.0,
                     ),
                 );
             }
@@ -550,9 +552,7 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 // Emit a budget warning when cost crosses 80% of the limit.
                 let cost_now = self.current_cost();
                 let threshold = self.config.total_cost_limit_usd * 0.8;
-                if threshold > 0.0
-                    && cost_now >= threshold
-                    && (cost_now - result.cost) < threshold
+                if threshold > 0.0 && cost_now >= threshold && (cost_now - result.cost) < threshold
                 {
                     self.notify(
                         NotificationKind::BudgetWarning,

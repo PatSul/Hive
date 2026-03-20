@@ -345,7 +345,8 @@ static CODE_QUALITY_PATTERNS: LazyLock<Vec<PatternSet>> = LazyLock::new(|| {
             suggestion: "Use subprocess.run() with a list of arguments instead",
         },
         PatternSet {
-            regex: Regex::new(r#"(?i)subprocess\s*\.\s*(call|run|Popen)\s*\(\s*['"]"#).expect("valid regex"),
+            regex: Regex::new(r#"(?i)subprocess\s*\.\s*(call|run|Popen)\s*\(\s*['"]"#)
+                .expect("valid regex"),
             description: "Output uses subprocess with a shell string instead of argument list",
             suggestion: "Pass arguments as a list, not a shell string",
         },
@@ -421,7 +422,8 @@ static SECURITY_RISK_PATTERNS: LazyLock<Vec<PatternSet>> = LazyLock::new(|| {
             suggestion: "Never expose private keys in output",
         },
         PatternSet {
-            regex: Regex::new(r"(?i)disable[\s_-]*(firewall|antivirus|security|auth)").expect("valid regex"),
+            regex: Regex::new(r"(?i)disable[\s_-]*(firewall|antivirus|security|auth)")
+                .expect("valid regex"),
             description: "Output suggests disabling security measures",
             suggestion: "Do not recommend disabling security features",
         },
@@ -726,10 +728,7 @@ mod tests {
         // Build the fake key at runtime so GitHub secret scanning doesn't flag it.
         let fake_key = format!("sk-{}", "aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890abcd");
         let output = format!("Here is an example: api_key = {fake_key}");
-        let result = guardian.validate(
-            "Show me how to use the OpenAI API",
-            &output,
-        );
+        let result = guardian.validate("Show me how to use the OpenAI API", &output);
         assert!(!result.passed);
         let data_leak_issues: Vec<_> = result
             .issues
@@ -748,10 +747,7 @@ mod tests {
         // Build the fake key at runtime so GitHub secret scanning doesn't flag it.
         let fake_key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
         let output = format!("Set your access key to {fake_key} and secret to ...");
-        let result = guardian.validate(
-            "How do I configure AWS?",
-            &output,
-        );
+        let result = guardian.validate("How do I configure AWS?", &output);
         assert!(!result.passed);
         assert!(
             result
@@ -989,10 +985,7 @@ cursor.execute(query)"#,
              Then use eval(user_input) to process requests.\n\
              Connect to http://example.com/api for the endpoint."
         );
-        let result = guardian.validate(
-            "How do I set up my API?",
-            &output,
-        );
+        let result = guardian.validate("How do I set up my API?", &output);
         assert!(!result.passed);
         // Should have at least: DataLeak (API key), CodeQuality (eval), SecurityRisk (http://)
         let categories: HashSet<IssueCategory> = result.issues.iter().map(|i| i.category).collect();

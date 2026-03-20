@@ -18,6 +18,7 @@ use hive_ai::types::{
     ChatMessage as AiChatMessage, ChatRequest, MessageRole as AiMessageRole, StopReason,
     StreamChunk, TokenUsage, ToolCall as AiToolCall,
 };
+use hive_core::context::{ContextMessage, ContextWindow};
 use hive_core::conversations::{
     Conversation, ConversationStore, ConversationSummary, StoredMessage, generate_title,
 };
@@ -86,6 +87,10 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<AiToolCall>>,
     /// For tool result messages: the ID of the tool call this responds to.
     pub tool_call_id: Option<String>,
+    /// Whether this message is a compaction summary replacing earlier content.
+    pub is_compacted: bool,
+    /// Indices of the visible messages replaced by a compaction summary.
+    pub compacted_from: Option<Vec<usize>>,
 }
 
 impl ChatMessage {
@@ -100,6 +105,8 @@ impl ChatMessage {
             tokens: None,
             tool_calls: None,
             tool_call_id: None,
+            is_compacted: false,
+            compacted_from: None,
         }
     }
 
@@ -133,8 +140,8 @@ impl ChatMessage {
             cost: self.cost,
             tokens: total_tokens,
             thinking: None,
-            is_compacted: false,
-            compacted_from: None,
+            is_compacted: self.is_compacted,
+            compacted_from: self.compacted_from.clone(),
         }
     }
 
@@ -154,7 +161,29 @@ impl ChatMessage {
             tokens,
             tool_calls: None,
             tool_call_id: None,
+            is_compacted: stored.is_compacted,
+            compacted_from: stored.compacted_from.clone(),
         }
+    }
+
+    fn to_context_message(&self) -> Option<ContextMessage> {
+        let role = match self.role {
+            MessageRole::User => "user",
+            MessageRole::Assistant => "assistant",
+            MessageRole::System => "system",
+            _ => return None,
+        };
+
+        let mut msg = ContextMessage::new(role, &self.content);
+        msg.is_compacted = self.is_compacted;
+        msg.original_count = self
+            .compacted_from
+            .as_ref()
+            .map(|indices| indices.len() as u32);
+        if self.is_compacted {
+            msg.pinned = true;
+        }
+        Some(msg)
     }
 }
 
@@ -274,6 +303,9 @@ pub struct ChatService {
     pub pending_approval: Option<PendingToolApproval>,
     /// Sender to resume the tool loop after approval/rejection.
     approval_tx: Option<oneshot::Sender<bool>>,
+    /// Context window tracking token usage across conversation messages.
+    /// Used to trigger proactive compaction before exceeding model limits.
+    context_window: ContextWindow,
 }
 
 /// Route any "Unknown tool" results through the MCP integration server.
@@ -303,8 +335,7 @@ fn route_unknown_to_mcp(
             }) {
                 match mcp_result {
                     Ok(value) => {
-                        result.content =
-                            serde_json::to_string_pretty(&value).unwrap_or_default();
+                        result.content = serde_json::to_string_pretty(&value).unwrap_or_default();
                         result.is_error = false;
                     }
                     Err(e) => {
@@ -330,6 +361,7 @@ impl ChatService {
             generation: 0,
             pending_approval: None,
             approval_tx: None,
+            context_window: ContextWindow::new(128_000),
         }
     }
 
@@ -372,6 +404,110 @@ impl ChatService {
         self.current_model = model;
     }
 
+    // -- Context Window -----------------------------------------------------
+
+    /// Whether the conversation context has grown enough to trigger compaction.
+    pub fn needs_compaction(&self) -> bool {
+        self.context_window.needs_compaction()
+    }
+
+    /// Context window usage as a percentage (0.0 to 1.0+).
+    pub fn context_usage_pct(&self) -> f64 {
+        self.context_window.usage_pct()
+    }
+
+    /// Returns the messages eligible for compaction (oldest non-pinned).
+    /// The caller should summarize these and pass the result to [`apply_compaction`].
+    pub fn messages_for_compaction(&self) -> Vec<ContextMessage> {
+        self.context_window.compaction_candidates()
+    }
+
+    /// Apply a pre-computed compaction summary to the conversation.
+    ///
+    /// This replaces the oldest non-pinned messages in both the context window
+    /// and the visible message list with a single system summary.
+    pub fn apply_compaction(&mut self, summary: String, compacted_messages: &[ContextMessage]) {
+        let Some(remove_indices) = self.find_visible_compaction_indices(compacted_messages) else {
+            warn!("ChatService: compaction candidates no longer match visible messages");
+            return;
+        };
+
+        let compaction = match self
+            .context_window
+            .apply_compaction_summary(compacted_messages, summary.clone())
+        {
+            Ok(compaction) => compaction,
+            Err(e) => {
+                warn!("ChatService: failed to apply compaction summary: {e}");
+                return;
+            }
+        };
+
+        let insert_at = remove_indices[0];
+        let compacted_from = remove_indices.clone();
+        for idx in remove_indices.into_iter().rev() {
+            self.messages.remove(idx);
+        }
+
+        let mut summary_msg = ChatMessage::system(format!(
+            "[Conversation compacted: {} messages summarized]\n\n{}",
+            compaction.messages_compacted, summary
+        ));
+        summary_msg.is_compacted = true;
+        summary_msg.compacted_from = Some(compacted_from);
+        self.messages.insert(insert_at, summary_msg);
+        self.generation += 1;
+
+        info!(
+            "ChatService: compacted {} messages, freed {} tokens, usage now {:.0}%",
+            compaction.messages_compacted,
+            compaction.tokens_freed,
+            compaction.usage_after * 100.0,
+        );
+
+        if self.conversation_id.is_some()
+            && let Err(e) = self.save_conversation()
+        {
+            warn!("ChatService: failed to save compacted conversation: {e}");
+        }
+    }
+
+    fn matches_context_snapshot(message: &ChatMessage, snapshot: &ContextMessage) -> bool {
+        matches!(
+            (message.role, snapshot.role.as_str()),
+            (MessageRole::User, "user")
+                | (MessageRole::Assistant, "assistant")
+                | (MessageRole::System, "system")
+        ) && message.content == snapshot.content
+            && message.is_compacted == snapshot.is_compacted
+            && message
+                .compacted_from
+                .as_ref()
+                .map(|indices| indices.len() as u32)
+                == snapshot.original_count
+    }
+
+    fn find_visible_compaction_indices(
+        &self,
+        compacted_messages: &[ContextMessage],
+    ) -> Option<Vec<usize>> {
+        let mut indices = Vec::with_capacity(compacted_messages.len());
+        let mut search_start = 0usize;
+
+        for snapshot in compacted_messages {
+            let (idx, _) = self
+                .messages
+                .iter()
+                .enumerate()
+                .skip(search_start)
+                .find(|(_, message)| Self::matches_context_snapshot(message, snapshot))?;
+            indices.push(idx);
+            search_start = idx + 1;
+        }
+
+        Some(indices)
+    }
+
     pub fn clear(&mut self) {
         self.messages.clear();
         self.streaming_content.clear();
@@ -380,6 +516,7 @@ impl ChatService {
         self._stream_task = None;
         self.pending_approval = None;
         self.approval_tx = None;
+        self.context_window = ContextWindow::new(self.context_window.max_tokens());
         self.generation += 1;
     }
 
@@ -503,10 +640,19 @@ impl ChatService {
         self._stream_task = None;
         self.generation += 1;
 
+        // Rebuild the context window from loaded messages.
+        self.context_window = ContextWindow::new(self.context_window.max_tokens());
+        for msg in &self.messages {
+            if let Some(ctx_msg) = msg.to_context_message() {
+                self.context_window.push(ctx_msg);
+            }
+        }
+
         info!(
-            "ChatService: loaded conversation {} ({} messages)",
+            "ChatService: loaded conversation {} ({} messages, ctx_usage={:.0}%)",
             id,
-            self.messages.len()
+            self.messages.len(),
+            self.context_window.usage_pct() * 100.0,
         );
 
         Ok(())
@@ -578,10 +724,15 @@ impl ChatService {
             let secrets = shield.scan_secrets(&content);
             if !secrets.is_empty() {
                 let count = secrets.len();
-                let types: Vec<String> = secrets.iter().map(|s| s.secret_type.to_string()).collect();
+                let types: Vec<String> =
+                    secrets.iter().map(|s| s.secret_type.to_string()).collect();
                 let unique_types: Vec<&str> = {
                     let mut seen = std::collections::HashSet::new();
-                    types.iter().filter(|t| seen.insert(t.as_str())).map(|t| t.as_str()).collect()
+                    types
+                        .iter()
+                        .filter(|t| seen.insert(t.as_str()))
+                        .map(|t| t.as_str())
+                        .collect()
                 };
                 warn!(
                     "Shield: detected {} secret(s) in outgoing message: [{}]",
@@ -605,6 +756,15 @@ impl ChatService {
         // 1. Record the user message.
         let user_msg = ChatMessage::user(&content);
         self.messages.push(user_msg);
+
+        // Track in context window for token budget management.
+        if let Some(ctx_msg) = self
+            .messages
+            .last()
+            .and_then(ChatMessage::to_context_message)
+        {
+            self.context_window.push(ctx_msg);
+        }
 
         // 2. Prepare streaming state.
         self.is_streaming = true;
@@ -1156,15 +1316,23 @@ impl ChatService {
             }
         }
 
+        // Track assistant response in context window.
+        if let Some(msg) = self.messages.get(assistant_idx)
+            && let Some(ctx_msg) = msg.to_context_message()
+        {
+            self.context_window.push(ctx_msg);
+        }
+
         self.streaming_content.clear();
         self.is_streaming = false;
         self._stream_task = None;
         self.generation += 1;
 
         info!(
-            "ChatService: stream finalized ({} messages, model={})",
+            "ChatService: stream finalized ({} messages, model={}, ctx_usage={:.0}%)",
             self.messages.len(),
-            model
+            model,
+            self.context_window.usage_pct() * 100.0,
         );
 
         // Auto-save after finalization. Fire-and-forget: log on error but
@@ -1188,9 +1356,11 @@ impl ChatService {
                 let config = cx.global::<crate::AppConfig>().0.get();
                 if config.tts_auto_speak {
                     let tts = cx.global::<crate::AppTts>().0.clone();
-                    cx.spawn(|_this: gpui::WeakEntity<Self>, _app: &mut gpui::AsyncApp| async move {
-                        let _ = tts.speak_auto(&text).await;
-                    })
+                    cx.spawn(
+                        |_this: gpui::WeakEntity<Self>, _app: &mut gpui::AsyncApp| async move {
+                            let _ = tts.speak_auto(&text).await;
+                        },
+                    )
                     .detach();
                 }
             }
@@ -1214,7 +1384,11 @@ impl ChatService {
         self._stream_task = None;
 
         // Remove the placeholder assistant message (last entry) if it is empty.
-        if self.messages.last().is_some_and(|last| last.role == MessageRole::Assistant && last.content.is_empty()) {
+        if self
+            .messages
+            .last()
+            .is_some_and(|last| last.role == MessageRole::Assistant && last.content.is_empty())
+        {
             self.messages.pop();
         }
 
@@ -1241,3 +1415,82 @@ pub struct StreamCompleted {
 }
 
 impl EventEmitter<StreamCompleted> for ChatService {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_message_round_trips_compaction_metadata() {
+        let mut message = ChatMessage::system("Compacted summary");
+        message.is_compacted = true;
+        message.compacted_from = Some(vec![0, 1, 2]);
+
+        let stored = message.to_stored();
+        assert!(stored.is_compacted);
+        assert_eq!(stored.compacted_from.as_deref(), Some(&[0, 1, 2][..]));
+
+        let restored = ChatMessage::from_stored(&stored);
+        assert!(restored.is_compacted);
+        assert_eq!(restored.compacted_from.as_deref(), Some(&[0, 1, 2][..]));
+    }
+
+    #[test]
+    fn apply_compaction_removes_exact_visible_messages() {
+        let mut service = ChatService::new("auto".into());
+        service.context_window = ContextWindow::new(1_000);
+
+        let pinned = ChatMessage::system("Pinned context");
+        service.context_window.push(
+            pinned
+                .to_context_message()
+                .expect("system messages should map to context"),
+        );
+        service.messages.push(pinned);
+
+        let user_a = ChatMessage::user("a".repeat(400));
+        service
+            .context_window
+            .push(user_a.to_context_message().expect("user message"));
+        service.messages.push(user_a);
+
+        let assistant_b = ChatMessage::new(MessageRole::Assistant, "b".repeat(400));
+        service
+            .context_window
+            .push(assistant_b.to_context_message().expect("assistant message"));
+        service.messages.push(assistant_b);
+
+        let mut tool_msg = ChatMessage::new(MessageRole::Tool, "tool output");
+        tool_msg.tool_call_id = Some("call-1".into());
+        service.messages.push(tool_msg);
+
+        let user_c = ChatMessage::user("c".repeat(400));
+        service
+            .context_window
+            .push(user_c.to_context_message().expect("user message"));
+        service.messages.push(user_c);
+
+        let assistant_d = ChatMessage::new(MessageRole::Assistant, "d".repeat(400));
+        service
+            .context_window
+            .push(assistant_d.to_context_message().expect("assistant message"));
+        service.messages.push(assistant_d);
+
+        let selected = vec![
+            service.context_window.messages()[1].clone(),
+            service.context_window.messages()[2].clone(),
+        ];
+        service.apply_compaction("Summary".into(), &selected);
+
+        assert_eq!(service.messages.len(), 5);
+        assert_eq!(service.messages[0].content, "Pinned context");
+        assert!(service.messages[1].is_compacted);
+        assert_eq!(
+            service.messages[1].compacted_from.as_deref(),
+            Some(&[1, 2][..])
+        );
+        assert_eq!(service.messages[2].role, MessageRole::Tool);
+        assert_eq!(service.messages[3].content, "c".repeat(400));
+        assert_eq!(service.messages[4].content, "d".repeat(400));
+    }
+}

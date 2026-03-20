@@ -3,7 +3,7 @@ use gpui_component::{Icon, IconName, Sizable as _};
 use std::path::Path;
 
 use hive_ui_core::{
-    HiveTheme, OpenWorkspaceDirectory, ToggleProjectDropdown,
+    HiveTheme, OpenWorkspaceDirectory, ToggleCommandPalette, ToggleProjectDropdown,
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -66,7 +66,8 @@ impl Titlebar {
                         .overflow_hidden()
                         .pl(MAC_TRAFFIC_LIGHT_SPACING)
                         .child(branding(theme))
-                        .child(workspace_chip(theme, current_workspace_root)),
+                        .child(workspace_chip(theme, current_workspace_root))
+                        .child(jump_chip(theme)),
                 )
                 .child(
                     div()
@@ -89,10 +90,8 @@ impl Titlebar {
                         .gap(theme.space_3)
                         .px(theme.space_2)
                         .child(branding(theme))
-                        .child(workspace_chip(
-                            theme,
-                            current_workspace_root,
-                        )),
+                        .child(workspace_chip(theme, current_workspace_root))
+                        .child(jump_chip(theme)),
                 )
                 .child(window_controls(theme, is_maximized));
         }
@@ -122,61 +121,100 @@ fn workspace_chip(theme: &HiveTheme, current_workspace_root: &Path) -> impl Into
         .overflow_hidden()
         .line_clamp(1);
 
-    chip = chip.child(
-        div()
-            .px(theme.space_2)
-            .py(px(3.0))
-            .flex()
-            .items_center()
-            .gap(theme.space_1)
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                cx.stop_propagation();
-                window.dispatch_action(Box::new(ToggleProjectDropdown), cx);
-            })
-            .child(
-                div()
-                    .w(px(6.0))
-                    .h(px(6.0))
-                    .rounded(theme.radius_full)
-                    .bg(theme.accent_green),
-            )
-            .child(
-                div()
-                    .text_size(theme.font_size_xs)
-                    .truncate()
-                    .child(format!("Project Space: {current_label}")),
-            )
-            .child(
-                Icon::new(IconName::ChevronDown).with_size(px(10.0))
-            ),
-    )
-    .child(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(theme.space_1)
-            .px(theme.space_1)
-            .py(px(3.0))
-            .rounded(theme.radius_full)
-            .bg(theme.bg_tertiary)
-            .hover(|s| s.bg(theme.bg_secondary))
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                cx.stop_propagation();
-                window.dispatch_action(Box::new(OpenWorkspaceDirectory), cx);
-            })
-            .child(Icon::new(IconName::FolderOpen).small())
-            .child(
-                div()
-                    .text_size(theme.font_size_xs)
-                    .text_color(theme.text_secondary)
-                    .child("Open"),
-            ),
-    );
+    chip = chip
+        .child(
+            div()
+                .px(theme.space_2)
+                .py(px(3.0))
+                .flex()
+                .items_center()
+                .gap(theme.space_1)
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    cx.stop_propagation();
+                    window.dispatch_action(Box::new(ToggleProjectDropdown), cx);
+                })
+                .child(
+                    div()
+                        .w(px(6.0))
+                        .h(px(6.0))
+                        .rounded(theme.radius_full)
+                        .bg(theme.accent_green),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .truncate()
+                        .child(format!("Project Space: {current_label}")),
+                )
+                .child(Icon::new(IconName::ChevronDown).with_size(px(10.0))),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_1)
+                .px(theme.space_1)
+                .py(px(3.0))
+                .rounded(theme.radius_full)
+                .bg(theme.bg_tertiary)
+                .hover(|s| s.bg(theme.bg_secondary))
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    cx.stop_propagation();
+                    window.dispatch_action(Box::new(OpenWorkspaceDirectory), cx);
+                })
+                .child(Icon::new(IconName::FolderOpen).small())
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_secondary)
+                        .child("Open"),
+                ),
+        );
 
     chip
+}
+
+fn jump_chip(theme: &HiveTheme) -> impl IntoElement {
+    let shortcut = if cfg!(target_os = "macos") {
+        "Cmd+K"
+    } else {
+        "Ctrl+K"
+    };
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_1)
+        .px(theme.space_2)
+        .py(px(4.0))
+        .rounded(theme.radius_full)
+        .bg(theme.bg_primary)
+        .border_1()
+        .border_color(theme.border)
+        .cursor_pointer()
+        .hover(|s| s.bg(theme.bg_tertiary))
+        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+            cx.stop_propagation();
+            window.dispatch_action(Box::new(ToggleCommandPalette), cx);
+        })
+        .child(Icon::new(IconName::Search).small().text_color(theme.accent_aqua))
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_primary)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("Jump"),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(shortcut),
+        )
 }
 
 /// Bee icon + "Hive" + version badge.
@@ -288,10 +326,7 @@ fn window_controls(theme: &HiveTheme, is_maximized: bool) -> impl IntoElement {
                 .content_center()
                 .items_center()
                 .text_color(fg)
-                .hover(|s| {
-                    s.bg(close_hover_bg)
-                        .text_color(hsla(0.0, 0.0, 1.0, 1.0))
-                })
+                .hover(|s| s.bg(close_hover_bg).text_color(hsla(0.0, 0.0, 1.0, 1.0)))
                 .active(|s| s.bg(close_hover_bg))
                 .window_control_area(WindowControlArea::Close)
                 .child(Icon::new(IconName::WindowClose).small()),

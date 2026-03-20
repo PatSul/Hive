@@ -259,9 +259,7 @@ mod tests {
 
         let mut store = NotificationStore::new();
         store.push(AppNotification::new(NotificationType::Info, "msg1"));
-        store.push(
-            AppNotification::new(NotificationType::Error, "msg2").with_title("Alert"),
-        );
+        store.push(AppNotification::new(NotificationType::Error, "msg2").with_title("Alert"));
         store.mark_read(&store.all()[0].id.clone());
 
         store.save_to_file(&path).unwrap();

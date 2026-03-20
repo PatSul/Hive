@@ -65,7 +65,10 @@ Conversation to analyze:
     }
 
     /// Filter extracted memories to only include those above the importance threshold.
-    pub fn filter_by_importance(memories: Vec<ExtractedMemory>, threshold: f32) -> Vec<ExtractedMemory> {
+    pub fn filter_by_importance(
+        memories: Vec<ExtractedMemory>,
+        threshold: f32,
+    ) -> Vec<ExtractedMemory> {
         memories
             .into_iter()
             .filter(|m| m.importance >= threshold)

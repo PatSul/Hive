@@ -1,6 +1,6 @@
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, Utc};
-use gpui::*;
 use gpui::prelude::FluentBuilder;
+use gpui::*;
 use gpui_component::{Icon, IconName};
 
 use hive_core::ConversationSummary;
@@ -8,8 +8,8 @@ use hive_core::persistence::ConversationRow;
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
-    HistoryClearAll, HistoryClearAllCancel, HistoryClearAllConfirm,
-    HistoryDeleteConversation, HistoryLoadConversation, HistoryRefresh,
+    HistoryClearAll, HistoryClearAllCancel, HistoryClearAllConfirm, HistoryDeleteConversation,
+    HistoryLoadConversation, HistoryRefresh,
 };
 
 // ---------------------------------------------------------------------------
@@ -194,7 +194,12 @@ impl HistoryPanel {
                     .bg(theme.bg_surface)
                     .border_1()
                     .border_color(theme.border)
-                    .child(render_header(&data.search_query, data.confirming_clear, !data.conversations.is_empty(), theme))
+                    .child(render_header(
+                        &data.search_query,
+                        data.confirming_clear,
+                        !data.conversations.is_empty(),
+                        theme,
+                    ))
                     .child(render_conversation_list(
                         &filtered,
                         data.selected_id.as_deref(),
@@ -265,11 +270,7 @@ fn render_header(
                         .p(theme.space_1)
                         .rounded(theme.radius_sm)
                         .hover(move |style: StyleRefinement| style.bg(bg_tertiary))
-                        .child(
-                            Icon::new(IconName::Redo2)
-                                .size_3p5()
-                                .text_color(text_muted),
-                        )
+                        .child(Icon::new(IconName::Redo2).size_3p5().text_color(text_muted))
                         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                             window.dispatch_action(Box::new(HistoryRefresh), cx);
                         }),
@@ -319,9 +320,7 @@ fn render_clear_confirmation(theme: &HiveTheme) -> impl IntoElement {
                 .text_size(theme.font_size_xs)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.text_primary)
-                .hover(move |style: StyleRefinement| {
-                    style.bg(accent_red).opacity(0.8)
-                })
+                .hover(move |style: StyleRefinement| style.bg(accent_red).opacity(0.8))
                 .child("Yes, delete all")
                 .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                     window.dispatch_action(Box::new(HistoryClearAllConfirm), cx);

@@ -263,11 +263,7 @@ end tell"#
                 let date_raw: i64 = parts[3].parse().unwrap_or(0);
                 let handle = parts[4].to_string();
 
-                let author = if is_from_me {
-                    "me".to_string()
-                } else {
-                    handle
-                };
+                let author = if is_from_me { "me".to_string() } else { handle };
 
                 Some(IncomingMessage {
                     id,
@@ -282,12 +278,7 @@ end tell"#
             .collect())
     }
 
-    async fn add_reaction(
-        &self,
-        _channel: &str,
-        _message_id: &str,
-        _emoji: &str,
-    ) -> Result<()> {
+    async fn add_reaction(&self, _channel: &str, _message_id: &str, _emoji: &str) -> Result<()> {
         // iMessage reactions (Tapbacks) are not programmatically accessible
         // via AppleScript or the SQLite database in a writable manner.
         anyhow::bail!("iMessage does not support programmatic reactions (tapbacks)")
@@ -333,11 +324,7 @@ end tell"#
                 let handle = parts[4].to_string();
                 let channel_id = parts[5].to_string();
 
-                let author = if is_from_me {
-                    "me".to_string()
-                } else {
-                    handle
-                };
+                let author = if is_from_me { "me".to_string() } else { handle };
 
                 Some(IncomingMessage {
                     id,

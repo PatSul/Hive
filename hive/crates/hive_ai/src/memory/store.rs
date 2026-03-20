@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use arrow_array::{
-    types::Float32Type, BooleanArray, FixedSizeListArray, Float32Array,
-    RecordBatch, RecordBatchIterator, StringArray, UInt32Array,
+    BooleanArray, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray,
+    UInt32Array, types::Float32Type,
 };
 use arrow_schema::{DataType, Field, Schema};
 use lancedb::connect;
@@ -103,9 +103,7 @@ impl MemoryStore {
 
     fn make_embedding_array(&self, embedding: &[f32]) -> FixedSizeListArray {
         FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
-            vec![Some(
-                embedding.iter().map(|v| Some(*v)).collect::<Vec<_>>(),
-            )],
+            vec![Some(embedding.iter().map(|v| Some(*v)).collect::<Vec<_>>())],
             self.vector_dim as i32,
         )
     }
@@ -113,8 +111,10 @@ impl MemoryStore {
     async fn create_chunks_table(&self) -> Result<(), BoxErr> {
         let schema = self.chunks_schema();
         let batch = RecordBatch::new_empty(schema.clone());
-        let batches: RecordBatchIterator<_> =
-            RecordBatchIterator::new(vec![Ok(batch) as Result<RecordBatch, arrow_schema::ArrowError>], schema);
+        let batches: RecordBatchIterator<_> = RecordBatchIterator::new(
+            vec![Ok(batch) as Result<RecordBatch, arrow_schema::ArrowError>],
+            schema,
+        );
         self.db
             .create_table("chunks", Box::new(batches))
             .execute()
@@ -125,8 +125,10 @@ impl MemoryStore {
     async fn create_memories_table(&self) -> Result<(), BoxErr> {
         let schema = self.memories_schema();
         let batch = RecordBatch::new_empty(schema.clone());
-        let batches: RecordBatchIterator<_> =
-            RecordBatchIterator::new(vec![Ok(batch) as Result<RecordBatch, arrow_schema::ArrowError>], schema);
+        let batches: RecordBatchIterator<_> = RecordBatchIterator::new(
+            vec![Ok(batch) as Result<RecordBatch, arrow_schema::ArrowError>],
+            schema,
+        );
         self.db
             .create_table("memories", Box::new(batches))
             .execute()
@@ -134,11 +136,7 @@ impl MemoryStore {
         Ok(())
     }
 
-    pub async fn remember(
-        &self,
-        entry: MemoryEntry,
-        embedding: &[f32],
-    ) -> Result<(), BoxErr> {
+    pub async fn remember(&self, entry: MemoryEntry, embedding: &[f32]) -> Result<(), BoxErr> {
         let table = self.db.open_table("memories").execute().await?;
         let id = uuid::Uuid::new_v4().to_string();
         let timestamp = chrono::Utc::now().to_rfc3339();
@@ -268,8 +266,7 @@ impl MemoryStore {
             let end = u32_col(batch, "end_line");
             let dist = f32_col(batch, "_distance");
 
-            if let (Some(file), Some(content), Some(start), Some(end)) =
-                (file, content, start, end)
+            if let (Some(file), Some(content), Some(start), Some(end)) = (file, content, start, end)
             {
                 for i in 0..batch.num_rows() {
                     let score = dist.map(|d| 1.0 - d.value(i)).unwrap_or(0.0);

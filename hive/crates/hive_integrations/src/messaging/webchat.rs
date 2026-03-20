@@ -244,7 +244,10 @@ impl MessagingProvider for WebChatProvider {
 
     async fn get_messages(&self, channel: &str, limit: u32) -> Result<Vec<IncomingMessage>> {
         // Return messages from the in-memory inbox filtered by channel.
-        let inbox = self.inbox.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let inbox = self
+            .inbox
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let messages: Vec<IncomingMessage> = inbox
             .iter()
             .filter(|m| m.channel_id == channel)
@@ -285,7 +288,10 @@ impl MessagingProvider for WebChatProvider {
 
     async fn search_messages(&self, query: &str, limit: u32) -> Result<Vec<IncomingMessage>> {
         // Search the in-memory inbox client-side.
-        let inbox = self.inbox.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let inbox = self
+            .inbox
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let query_lower = query.to_lowercase();
 
         let messages: Vec<IncomingMessage> = inbox

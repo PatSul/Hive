@@ -1,3 +1,4 @@
+pub mod autoresearch;
 pub mod learning_bridge;
 pub mod outcome_tracker;
 pub mod pattern_library;
@@ -6,7 +7,6 @@ pub mod prompt_evolver;
 pub mod routing_learner;
 pub mod self_evaluator;
 pub mod storage;
-pub mod autoresearch;
 pub mod types;
 
 use std::sync::Arc;
