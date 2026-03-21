@@ -73,7 +73,7 @@ pub(super) fn resolve_project_root_from_session(session: &SessionState) -> PathB
     } else {
         fallback
     };
-    discover_project_root(&requested)
+    normalize_workspace_path(&requested)
 }
 
 pub(super) fn load_recent_workspace_roots(
@@ -81,7 +81,7 @@ pub(super) fn load_recent_workspace_roots(
     current_project_root: &Path,
 ) -> Vec<PathBuf> {
     let mut recents = Vec::new();
-    let current_root = discover_project_root(current_project_root);
+    let current_root = normalize_workspace_path(current_project_root);
     recents.push(current_root);
 
     for path in &session.recent_workspaces {
@@ -90,7 +90,7 @@ pub(super) fn load_recent_workspace_roots(
             continue;
         }
 
-        let root = discover_project_root(&path);
+        let root = normalize_workspace_path(&path);
         if !recents.contains(&root) {
             recents.push(root);
         }
@@ -121,7 +121,7 @@ pub(super) fn record_recent_workspace(
         return;
     }
 
-    let project_root = discover_project_root(workspace_root);
+    let project_root = normalize_workspace_path(workspace_root);
     let mut changed = false;
 
     if let Some(existing) = workspace
@@ -154,21 +154,13 @@ pub(super) fn record_recent_workspace(
     cx.notify();
 }
 
-pub(super) fn discover_project_root(path: &Path) -> PathBuf {
+pub(super) fn normalize_workspace_path(path: &Path) -> PathBuf {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut current = canonical.as_path();
-
-    while let Some(parent) = current.parent() {
-        if current.join(".git").exists() {
-            return current.to_path_buf();
+    if canonical.is_file() {
+        if let Some(parent) = canonical.parent() {
+            return parent.to_path_buf();
         }
-        current = parent;
     }
-
-    if canonical.join(".git").exists() {
-        return canonical;
-    }
-
     canonical
 }
 
@@ -262,12 +254,25 @@ pub(super) fn start_background_project_indexing(
         .ok();
 }
 
+pub(super) fn schedule_background_project_indexing(cx: &mut Context<HiveWorkspace>) {
+    cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+        app.background_executor()
+            .timer(std::time::Duration::from_millis(1500))
+            .await;
+
+        let _ = this.update(app, |this, cx| {
+            start_background_project_indexing(this, cx);
+        });
+    })
+    .detach();
+}
+
 pub(super) fn apply_project_context(
     workspace: &mut HiveWorkspace,
     cwd: &Path,
     cx: &mut Context<HiveWorkspace>,
 ) {
-    let project_root = discover_project_root(cwd);
+    let project_root = normalize_workspace_path(cwd);
     if project_root != workspace.current_project_root {
         workspace.current_project_root = project_root;
         workspace.current_project_name = project_name_from_path(&workspace.current_project_root);
@@ -315,6 +320,7 @@ pub(super) fn apply_project_context(
                         let _ = this.update(app, |this, cx| {
                             this.quick_index = Some(qi.clone());
                             cx.set_global(AppQuickIndex(qi));
+                            schedule_background_project_indexing(cx);
                             cx.notify();
                         });
                         break;
@@ -325,7 +331,6 @@ pub(super) fn apply_project_context(
                 }
             },
         ));
-        start_background_project_indexing(workspace, cx);
 
         // Start incremental file watcher for RAG indexing.
         let rag_for_watcher = cx
@@ -406,4 +411,39 @@ pub(super) fn apply_project_context(
 
     let project_root = workspace.current_project_root.clone();
     record_recent_workspace(workspace, &project_root, cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_workspace_path, resolve_project_root_from_session};
+    use hive_core::session::SessionState;
+
+    #[test]
+    fn normalize_workspace_path_keeps_nested_workspace_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        let nested_workspace = repo_root.join("hive");
+        std::fs::create_dir_all(&nested_workspace).expect("create nested workspace");
+        std::fs::create_dir(repo_root.join(".git")).expect("create fake git dir");
+
+        let resolved = normalize_workspace_path(&nested_workspace);
+        assert_eq!(resolved, nested_workspace);
+    }
+
+    #[test]
+    fn resolve_project_root_from_session_preserves_saved_workspace_scope() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let repo_root = temp.path().join("repo");
+        let nested_workspace = repo_root.join("hive");
+        std::fs::create_dir_all(&nested_workspace).expect("create nested workspace");
+        std::fs::create_dir(repo_root.join(".git")).expect("create fake git dir");
+
+        let session = SessionState {
+            working_directory: Some(nested_workspace.to_string_lossy().to_string()),
+            ..SessionState::default()
+        };
+
+        let resolved = resolve_project_root_from_session(&session);
+        assert_eq!(resolved, nested_workspace);
+    }
 }

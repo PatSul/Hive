@@ -26,7 +26,8 @@ const MAX_SYMBOLS: usize = 500;
 const MAX_FILE_SIZE_FOR_SYMBOLS: u64 = 100_000;
 
 /// Directories to always skip during file-tree walks.
-const SKIP_DIRS: &[&str] = &[
+/// Shared between QuickIndex and BackgroundIndexer.
+pub const SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     "target",
@@ -44,6 +45,16 @@ const SKIP_DIRS: &[&str] = &[
     ".idea",
     ".vscode",
 ];
+
+/// Returns `true` if a directory entry should be skipped during file-tree walks.
+/// Shared between QuickIndex and BackgroundIndexer.
+pub fn should_skip_dir(name: &str) -> bool {
+    name.starts_with('.')
+        || SKIP_DIRS.contains(&name)
+        || name.starts_with("target-")
+        || name.starts_with("dist-")
+        || name.starts_with("build-")
+}
 
 /// Extensions worth scanning for symbols.
 const SYMBOL_EXTENSIONS: &[&str] = &[
@@ -498,7 +509,7 @@ impl QuickIndex {
                 let path = entry.path();
                 if path.is_dir() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_str()) {
+                    if !should_skip_dir(&name) {
                         key_dirs.push(format!("{name}/"));
                     }
                 }
@@ -533,7 +544,7 @@ impl QuickIndex {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if path.is_dir() {
-                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                if should_skip_dir(&name) {
                     continue;
                 }
                 Self::walk_for_tree(root, &path, total_files, by_extension);
@@ -688,7 +699,7 @@ impl QuickIndex {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if path.is_dir() {
-                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                if should_skip_dir(&name) {
                     continue;
                 }
                 Self::collect_symbol_candidates(root, &path, candidates);

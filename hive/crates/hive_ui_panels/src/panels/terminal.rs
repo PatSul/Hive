@@ -218,7 +218,7 @@ impl TerminalPanel {
                     .flex_row()
                     .px(theme.space_4)
                     .py(px(1.0))
-                    .font_family("Consolas, Menlo, monospace")
+                    .font_family(theme.font_mono.clone())
                     .text_size(theme.font_size_sm)
                     .text_color(color)
                     .child(format!("{}{}", prefix, line.content))

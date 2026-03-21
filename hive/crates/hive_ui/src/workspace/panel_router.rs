@@ -86,7 +86,7 @@ pub(super) fn render_active_panel(
                         div()
                             .text_size(theme.font_size_sm)
                             .text_color(theme.accent_cyan)
-                            .font_family("Consolas, Menlo, monospace")
+                            .font_family(theme.font_mono.clone())
                             .child("$"),
                     )
                     .child(div().flex_1().child(workspace.terminal_input.clone())),

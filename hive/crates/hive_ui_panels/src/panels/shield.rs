@@ -581,7 +581,7 @@ impl ShieldView {
                         div()
                             .text_size(theme.font_size_xs)
                             .text_color(theme.text_muted)
-                            .font_family("monospace")
+                            .font_family(theme.font_mono.clone())
                             .child(rule.pattern.clone()),
                     ),
             )

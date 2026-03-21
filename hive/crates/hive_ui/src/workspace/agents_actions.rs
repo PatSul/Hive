@@ -6,7 +6,7 @@ use super::{
     AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents, AgentsReloadWorkflows,
     AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent, AgentsSelectRemoteSkill,
     AppA2aClient, AppAutomation, AppNotification, AppNotifications, HiveWorkspace,
-    NotificationType,
+    NotificationType, workflow_actions,
 };
 
 pub(super) fn refresh_agents_data(workspace: &mut HiveWorkspace, cx: &App) {
@@ -302,7 +302,7 @@ pub(super) fn handle_agents_reload_workflows(
         return;
     }
 
-    let workspace_root = std::env::current_dir().unwrap_or_default();
+    let workspace_root = workspace.current_project_root.clone();
     let report = {
         let automation = &mut cx.global_mut::<AppAutomation>().0;
         automation.ensure_builtin_workflows();
@@ -334,6 +334,7 @@ pub(super) fn handle_agents_reload_workflows(
     }
 
     refresh_agents_data(workspace, cx);
+    workflow_actions::refresh_workflow_builder(workspace, cx);
     cx.notify();
 }
 

@@ -143,7 +143,7 @@ pub const BUILTIN_DOGFOOD_WORKFLOW_ID: &str = "builtin:hive-dogfood-v1";
 pub const USER_WORKFLOW_DIR: &str = ".hive/workflows";
 
 /// Minimal JSON shape for user-defined workflows.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowTemplate {
     pub name: String,
     #[serde(default)]
@@ -156,7 +156,7 @@ pub struct WorkflowTemplate {
 }
 
 /// Minimal JSON shape for user-defined workflow steps.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowStepTemplate {
     pub name: String,
     pub action: ActionType,

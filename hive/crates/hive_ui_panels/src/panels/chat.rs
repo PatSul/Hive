@@ -725,7 +725,7 @@ fn render_tool_calls(calls: &[ToolCallDisplay], theme: &HiveTheme) -> AnyElement
                 div()
                     .text_size(theme.font_size_xs)
                     .text_color(theme.text_muted)
-                    .font_family("monospace")
+                    .font_family(theme.font_mono.clone())
                     .overflow_hidden()
                     .max_h(px(80.0))
                     .child(call.args.clone()),

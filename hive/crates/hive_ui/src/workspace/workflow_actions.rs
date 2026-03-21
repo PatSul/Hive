@@ -1,21 +1,26 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use chrono::Utc;
 use gpui::*;
 use tracing::{error, info, warn};
 
+use hive_agents::automation::{
+    USER_WORKFLOW_DIR, Workflow, WorkflowStepTemplate, WorkflowTemplate,
+};
+
 use super::{
     agents_actions, AiProvider, AppAiService, AppAutomation, AppChannels, AppNotification,
     AppNotifications, AppPersonas, ChannelMessageSent, ChatRequest, HiveWorkspace,
-    NotificationType,
+    NotificationType, WorkflowBuilderLoadWorkflow,
 };
+use hive_ui_panels::panels::workflow_builder::{WorkflowCanvasState, WorkflowListEntry};
 
 pub(super) fn refresh_workflow_builder(
     workspace: &mut HiveWorkspace,
     cx: &mut Context<HiveWorkspace>,
 ) {
-    use hive_ui_panels::panels::workflow_builder::WorkflowListEntry;
-
     if cx.has_global::<AppAutomation>() {
         let automation = &cx.global::<AppAutomation>().0;
         let workflows = automation.list_workflows();
@@ -32,6 +37,106 @@ pub(super) fn refresh_workflow_builder(
         workspace.workflow_builder_view.update(cx, |view, cx| {
             view.refresh_workflow_list(entries, cx);
         });
+    }
+}
+
+pub(super) fn handle_workflow_saved(
+    workspace: &mut HiveWorkspace,
+    canvas_workflow_id: &str,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    info!("Workflow saved: {}", canvas_workflow_id);
+
+    let workflow = workspace.workflow_builder_view.read(cx).to_executable_workflow();
+    if workflow.steps.is_empty() {
+        push_workflow_notification(
+            cx,
+            NotificationType::Warning,
+            "Workflow Canvas Saved",
+            format!(
+                "Saved the canvas for '{}', but it still needs at least one Action node before Hive can register it as an executable workflow.",
+                workflow.name
+            ),
+        );
+        return;
+    }
+
+    match persist_workflow_template(&workspace.current_project_root, &workflow) {
+        Ok(path) => {
+            let report = reload_workspace_workflows(workspace, cx);
+            workspace.workflow_builder_view.update(cx, |view, cx| {
+                view.set_active_workflow_id(Some(format!("file:{}", workflow.id)), cx);
+            });
+            refresh_workflow_builder(workspace, cx);
+            agents_actions::refresh_agents_data(workspace, cx);
+
+            let (notif_type, summary) = if let Some(report) = &report {
+                (
+                    if report.failed > 0 {
+                        NotificationType::Warning
+                    } else {
+                        NotificationType::Success
+                    },
+                    format!(
+                        "Saved '{}' to {} and reloaded {} workflow file(s).",
+                        workflow.name,
+                        path.display(),
+                        report.loaded
+                    ),
+                )
+            } else {
+                (
+                    NotificationType::Success,
+                    format!("Saved '{}' to {}.", workflow.name, path.display()),
+                )
+            };
+            push_workflow_notification(cx, notif_type, "Workflow Saved", summary);
+        }
+        Err(err) => {
+            warn!(
+                workflow_id = %workflow.id,
+                error = %err,
+                "WorkflowBuilder: failed to persist workflow template"
+            );
+            push_workflow_notification(
+                cx,
+                NotificationType::Error,
+                "Workflow Save Failed",
+                format!(
+                    "Saved the canvas, but Hive could not write the executable workflow file: {err}"
+                ),
+            );
+        }
+    }
+}
+
+pub(super) fn handle_workflow_builder_load(
+    workspace: &mut HiveWorkspace,
+    action: &WorkflowBuilderLoadWorkflow,
+    _window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let workflow_id = action.workflow_id.clone();
+    let canvas = workflow_canvas_for_id(workspace, &workflow_id, cx);
+
+    match canvas {
+        Some(canvas) => {
+            workspace.workflow_builder_view.update(cx, |view, cx| {
+                view.load_canvas(canvas, Some(workflow_id.clone()), cx);
+            });
+            info!("WorkflowBuilder: loaded workflow '{workflow_id}'");
+        }
+        None => {
+            warn!("WorkflowBuilder: failed to load workflow '{workflow_id}'");
+            push_workflow_notification(
+                cx,
+                NotificationType::Error,
+                "Workflow Load Failed",
+                format!(
+                    "Hive couldn't load '{workflow_id}'. The workflow file or saved canvas may be missing."
+                ),
+            );
+        }
     }
 }
 
@@ -203,6 +308,182 @@ pub(super) fn handle_workflow_run_requested(
         }
     })
     .detach();
+}
+
+fn push_workflow_notification(
+    cx: &mut Context<HiveWorkspace>,
+    notification_type: NotificationType,
+    title: impl Into<String>,
+    message: impl Into<String>,
+) {
+    if cx.has_global::<AppNotifications>() {
+        cx.global_mut::<AppNotifications>()
+            .0
+            .push(AppNotification::new(notification_type, message.into()).with_title(title));
+    }
+}
+
+fn reload_workspace_workflows(
+    workspace: &HiveWorkspace,
+    cx: &mut Context<HiveWorkspace>,
+) -> Option<hive_agents::automation::WorkflowLoadReport> {
+    if !cx.has_global::<AppAutomation>() {
+        return None;
+    }
+
+    let workspace_root = workspace.current_project_root.clone();
+    Some({
+        let automation = &mut cx.global_mut::<AppAutomation>().0;
+        automation.ensure_builtin_workflows();
+        automation.reload_user_workflows(&workspace_root)
+    })
+}
+
+fn workflow_canvas_for_id(
+    _workspace: &HiveWorkspace,
+    workflow_id: &str,
+    cx: &Context<HiveWorkspace>,
+) -> Option<WorkflowCanvasState> {
+    if let Some(canvas_id) = workflow_file_stem(workflow_id)
+        && let Ok(canvas) = WorkflowCanvasState::load_from_disk(canvas_id)
+    {
+        return Some(canvas);
+    }
+
+    if !cx.has_global::<AppAutomation>() {
+        return None;
+    }
+
+    let workflow = cx
+        .global::<AppAutomation>()
+        .0
+        .get_workflow(workflow_id)
+        .cloned()?;
+    Some(WorkflowCanvasState::from_workflow(
+        &workflow,
+        generated_canvas_id(workflow_id),
+    ))
+}
+
+fn persist_workflow_template(workspace_root: &Path, workflow: &Workflow) -> anyhow::Result<PathBuf> {
+    let workflow_dir = workspace_root.join(USER_WORKFLOW_DIR);
+    std::fs::create_dir_all(&workflow_dir).with_context(|| {
+        format!(
+            "failed to create workflow directory {}",
+            workflow_dir.display()
+        )
+    })?;
+
+    let safe_id = sanitize_workflow_id(&workflow.id);
+    let path = workflow_dir.join(format!("{safe_id}.json"));
+    let tmp_path = workflow_dir.join(format!("{safe_id}.json.tmp"));
+    let template = workflow_to_template(workflow);
+    let json = serde_json::to_string_pretty(&template)
+        .context("failed to serialize workflow template to JSON")?;
+    std::fs::write(&tmp_path, &json)
+        .with_context(|| format!("failed to write workflow file {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, &path)
+        .with_context(|| format!("failed to finalize workflow file {}", path.display()))?;
+    Ok(path)
+}
+
+fn workflow_to_template(workflow: &Workflow) -> WorkflowTemplate {
+    WorkflowTemplate {
+        name: workflow.name.clone(),
+        description: workflow.description.clone(),
+        trigger: Some(workflow.trigger.clone()),
+        enabled: workflow.status != hive_agents::automation::WorkflowStatus::Paused,
+        steps: workflow
+            .steps
+            .iter()
+            .map(|step| WorkflowStepTemplate {
+                name: step.name.clone(),
+                action: step.action.clone(),
+                conditions: step.conditions.clone(),
+                timeout_secs: step.timeout_secs,
+                retry_count: step.retry_count,
+            })
+            .collect(),
+    }
+}
+
+/// Strip path separators and traversal sequences from a workflow ID so it
+/// cannot escape its target directory when used in a filename.
+fn sanitize_workflow_id(id: &str) -> String {
+    id.replace(['/', '\\', ':', '\0'], "_")
+        .replace("..", "_")
+}
+
+fn workflow_file_stem(workflow_id: &str) -> Option<&str> {
+    workflow_id.strip_prefix("file:")
+}
+
+fn generated_canvas_id(workflow_id: &str) -> String {
+    workflow_file_stem(workflow_id)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use hive_agents::automation::{ActionType, TriggerType, WorkflowStatus, WorkflowStep};
+
+    fn sample_workflow() -> Workflow {
+        Workflow {
+            id: "1234-test".into(),
+            name: "Ship It".into(),
+            description: "Run checks and notify".into(),
+            trigger: TriggerType::ManualTrigger,
+            steps: vec![WorkflowStep {
+                id: "step-1".into(),
+                name: "Cargo check".into(),
+                action: ActionType::RunCommand {
+                    command: "cargo check --quiet".into(),
+                },
+                conditions: Vec::new(),
+                timeout_secs: Some(300),
+                retry_count: 1,
+            }],
+            status: WorkflowStatus::Active,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_run: None,
+            run_count: 0,
+        }
+    }
+
+    #[test]
+    fn workflow_to_template_preserves_step_shape() {
+        let template = workflow_to_template(&sample_workflow());
+        assert_eq!(template.name, "Ship It");
+        assert_eq!(template.steps.len(), 1);
+        assert!(template.enabled);
+        match &template.steps[0].action {
+            ActionType::RunCommand { command } => assert_eq!(command, "cargo check --quiet"),
+            action => panic!("unexpected action: {action:?}"),
+        }
+    }
+
+    #[test]
+    fn persist_workflow_template_writes_workspace_json() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = persist_workflow_template(temp_dir.path(), &sample_workflow()).unwrap();
+
+        assert_eq!(
+            path,
+            temp_dir
+                .path()
+                .join(USER_WORKFLOW_DIR)
+                .join("1234-test.json")
+        );
+
+        let raw = std::fs::read_to_string(path).unwrap();
+        let parsed: WorkflowTemplate = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed.name, "Ship It");
+        assert_eq!(parsed.steps.len(), 1);
+    }
 }
 
 pub(super) fn handle_channel_message_sent(

@@ -1057,7 +1057,7 @@ impl ActivityPanel {
                         .border_color(theme.border)
                         .text_size(theme.font_size_xs)
                         .text_color(theme.text_secondary)
-                        .font_family("Consolas, Menlo, monospace")
+                        .font_family(theme.font_mono.clone())
                         .child(detail_json.unwrap_or_default()),
                 )
             })

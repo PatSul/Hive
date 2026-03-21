@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::hive_memory::HiveMemory;
+use crate::quick_index::should_skip_dir;
 use tracing;
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
@@ -100,12 +101,7 @@ impl BackgroundIndexer {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             if path.is_dir() {
-                // Skip hidden dirs, node_modules, target, .git, etc.
-                if name.starts_with('.')
-                    || name == "node_modules"
-                    || name == "target"
-                    || name == "__pycache__"
-                {
+                if should_skip_dir(name) {
                     continue;
                 }
                 self.walk_dir_entries(&path, files)?;
@@ -137,11 +133,7 @@ impl BackgroundIndexer {
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if path.is_dir() {
-                if name.starts_with('.')
-                    || name == "node_modules"
-                    || name == "target"
-                    || name == "__pycache__"
-                {
+                if should_skip_dir(name) {
                     continue;
                 }
                 Self::walk_static(&path, files);

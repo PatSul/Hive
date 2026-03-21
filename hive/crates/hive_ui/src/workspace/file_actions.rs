@@ -4,10 +4,9 @@ use gpui::*;
 use tracing::{error, info, warn};
 
 use super::{
-    project_context, AppContextSelection, AppSemanticSearch, FilesClearChecked, FilesCloseViewer,
-    FilesData, FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile,
-    FilesNewFolder, FilesOpenEntry, FilesRefresh, FilesSetSearchQuery, FilesToggleCheck,
-    HiveWorkspace,
+    AppContextSelection, AppSemanticSearch, FilesClearChecked, FilesCloseViewer, FilesData,
+    FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile, FilesNewFolder,
+    FilesOpenEntry, FilesRefresh, FilesSetSearchQuery, FilesToggleCheck, HiveWorkspace,
 };
 
 pub(super) fn handle_files_navigate_back(
@@ -19,7 +18,6 @@ pub(super) fn handle_files_navigate_back(
     if let Some(parent) = workspace.files_data.current_path.parent() {
         let parent = parent.to_path_buf();
         info!("Files: navigate back to {}", parent.display());
-        project_context::apply_project_context(workspace, &parent, cx);
         workspace.files_data = FilesData::from_path(&parent);
         cx.notify();
     }
@@ -33,7 +31,6 @@ pub(super) fn handle_files_navigate_to(
 ) {
     let path = PathBuf::from(&action.path);
     info!("Files: navigate to {}", path.display());
-    project_context::apply_project_context(workspace, &path, cx);
     workspace.files_data = FilesData::from_path(&path);
     cx.notify();
 }
@@ -47,7 +44,6 @@ pub(super) fn handle_files_open_entry(
     if action.is_directory {
         let new_path = workspace.files_data.current_path.join(&action.name);
         info!("Files: open directory {}", new_path.display());
-        project_context::apply_project_context(workspace, &new_path, cx);
         workspace.files_data = FilesData::from_path(&new_path);
     } else {
         let file_path = workspace.files_data.current_path.join(&action.name);

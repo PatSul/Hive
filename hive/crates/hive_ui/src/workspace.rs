@@ -375,6 +375,8 @@ pub struct HiveWorkspace {
     quick_index: Option<Arc<hive_ai::quick_index::QuickIndex>>,
     /// Background task rebuilding the QuickIndex after a project switch.
     _quick_index_task: Option<Task<()>>,
+    /// Background task loading startup data (files, prompts, knowledge).
+    _bootstrap_task: Option<Task<()>>,
 }
 
 const MAX_RECENT_WORKSPACES: usize = 8;
@@ -384,7 +386,6 @@ struct StartupProjectSnapshot {
     files_data: FilesData,
     prompt_library_data: hive_ui_panels::panels::prompt_library::PromptLibraryData,
     knowledge_sources: Vec<hive_ai::knowledge_files::KnowledgeSource>,
-    quick_index: Arc<hive_ai::quick_index::QuickIndex>,
 }
 
 impl HiveWorkspace {
@@ -827,8 +828,7 @@ impl HiveWorkspace {
             &workflow_builder_view,
             window,
             |this, _view, event: &WorkflowSaved, _window, cx| {
-                info!("Workflow saved: {}", event.0);
-                agents_actions::refresh_agents_data(this, cx);
+                workflow_actions::handle_workflow_saved(this, &event.0, cx);
             },
         )
         .detach();
@@ -1036,6 +1036,7 @@ impl HiveWorkspace {
             seen_notification_ids: HashSet::new(),
             quick_index: None,
             _quick_index_task: None,
+            _bootstrap_task: None,
         };
 
         workspace.bootstrap_startup_snapshot(cx);
@@ -1043,85 +1044,175 @@ impl HiveWorkspace {
     }
 
     fn bootstrap_startup_snapshot(&mut self, cx: &mut Context<Self>) {
+        /// Maximum poll iterations before giving up (300 * 100ms = 30s).
+        const MAX_POLL_ATTEMPTS: u32 = 300;
+
         let project_root = self.current_project_root.clone();
         let memory = cx
             .has_global::<hive_ui_core::AppCollectiveMemory>()
             .then(|| Arc::clone(&cx.global::<hive_ui_core::AppCollectiveMemory>().0));
-        let result_slot: Arc<std::sync::Mutex<Option<StartupProjectSnapshot>>> =
-            Arc::new(std::sync::Mutex::new(None));
-        let slot_for_thread = Arc::clone(&result_slot);
 
-        let _ = std::thread::Builder::new()
+        type BootstrapSlot = Arc<std::sync::Mutex<Option<Result<StartupProjectSnapshot, String>>>>;
+        type QuickIndexSlot =
+            Arc<std::sync::Mutex<Option<Result<Arc<hive_ai::quick_index::QuickIndex>, String>>>>;
+
+        let startup_slot: BootstrapSlot = Arc::new(std::sync::Mutex::new(None));
+        let startup_slot_for_thread = Arc::clone(&startup_slot);
+
+        let quick_index_slot: QuickIndexSlot = Arc::new(std::sync::Mutex::new(None));
+        let quick_index_slot_for_thread = Arc::clone(&quick_index_slot);
+
+        if let Err(e) = std::thread::Builder::new()
             .name("hive-workspace-bootstrap".into())
             .spawn(move || {
-                let files_data = FilesData::from_path(&project_root);
-                let prompt_library_data =
-                    hive_ui_panels::panels::prompt_library::PromptLibraryData::load();
-                let knowledge_sources = hive_ai::KnowledgeFileScanner::scan(&project_root);
-                let quick_index = Arc::new(hive_ai::quick_index::QuickIndex::build(&project_root));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let files_data = FilesData::from_path(&project_root);
+                    let prompt_library_data =
+                        hive_ui_panels::panels::prompt_library::PromptLibraryData::load();
+                    let knowledge_sources = hive_ai::KnowledgeFileScanner::scan(&project_root);
 
-                if let Some(memory) = memory {
-                    match memory.maintenance(0.98, 0.1, 0.85) {
-                        Ok(report) => {
-                            if report.pruned > 0 || report.deduplicated > 0 {
-                                tracing::info!(
-                                    "Memory maintenance: decayed={}, pruned={}, deduplicated={}",
-                                    report.decayed,
-                                    report.pruned,
-                                    report.deduplicated,
-                                );
+                    if let Some(memory) = memory {
+                        match memory.maintenance(0.98, 0.1, 0.85) {
+                            Ok(report) => {
+                                if report.pruned > 0 || report.deduplicated > 0 {
+                                    tracing::info!(
+                                        "Memory maintenance: decayed={}, pruned={}, deduplicated={}",
+                                        report.decayed,
+                                        report.pruned,
+                                        report.deduplicated,
+                                    );
+                                }
                             }
+                            Err(e) => tracing::warn!("Memory maintenance failed: {e}"),
                         }
-                        Err(e) => tracing::warn!("Memory maintenance failed: {e}"),
                     }
-                }
 
-                *slot_for_thread.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some(StartupProjectSnapshot {
+                    StartupProjectSnapshot {
                         files_data,
                         prompt_library_data,
                         knowledge_sources,
-                        quick_index,
-                    });
-            });
+                    }
+                }));
 
-        let slot_for_poll = Arc::clone(&result_slot);
-        self._quick_index_task = Some(cx.spawn(
+                *startup_slot_for_thread
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(
+                    result.map_err(|_| "bootstrap thread panicked".to_string()),
+                );
+            })
+        {
+            error!("Failed to spawn bootstrap thread: {e}");
+        }
+
+        let quick_index_root = self.current_project_root.clone();
+        if let Err(e) = std::thread::Builder::new()
+            .name("hive-workspace-quick-index".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    Arc::new(hive_ai::quick_index::QuickIndex::build(&quick_index_root))
+                }));
+
+                *quick_index_slot_for_thread
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = Some(
+                    result.map_err(|_| "quick-index thread panicked".to_string()),
+                );
+            })
+        {
+            error!("Failed to spawn quick-index thread: {e}");
+        }
+
+        let startup_slot_for_poll = Arc::clone(&startup_slot);
+        self._bootstrap_task = Some(cx.spawn(
             async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+                let mut attempts: u32 = 0;
                 loop {
-                    if let Some(snapshot) = slot_for_poll
+                    attempts += 1;
+                    if attempts > MAX_POLL_ATTEMPTS {
+                        tracing::error!(
+                            "Bootstrap thread did not complete within {}s, giving up",
+                            MAX_POLL_ATTEMPTS / 10
+                        );
+                        break;
+                    }
+                    if let Some(result) = startup_slot_for_poll
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .take()
                     {
-                        let _ = this.update(app, |this, cx| {
-                            if !snapshot.knowledge_sources.is_empty() {
-                                info!(
-                                    "Loaded {} project knowledge file(s) from {}",
-                                    snapshot.knowledge_sources.len(),
-                                    this.current_project_root.display()
-                                );
-                            }
-                            info!(
-                                "QuickIndex: {} files, {} symbols, {} deps in {:?}",
-                                snapshot.quick_index.file_tree.total_files,
-                                snapshot.quick_index.key_symbols.len(),
-                                snapshot.quick_index.dependencies.len(),
-                                snapshot.quick_index.indexed_at.elapsed()
-                            );
+                        match result {
+                            Ok(snapshot) => {
+                                let _ = this.update(app, |this, cx| {
+                                    if !snapshot.knowledge_sources.is_empty() {
+                                        info!(
+                                            "Loaded {} project knowledge file(s) from {}",
+                                            snapshot.knowledge_sources.len(),
+                                            this.current_project_root.display()
+                                        );
+                                    }
 
-                            this.files_data = snapshot.files_data;
-                            this.prompt_library_data = snapshot.prompt_library_data;
-                            this.quick_index = Some(snapshot.quick_index.clone());
-                            this.code_map_data =
-                                hive_ui_panels::panels::code_map::CodeMapData::from_quick_index(
-                                    &snapshot.quick_index,
-                                );
-                            cx.set_global(AppKnowledgeFiles(snapshot.knowledge_sources));
-                            cx.set_global(AppQuickIndex(snapshot.quick_index));
-                            project_context::start_background_project_indexing(this, cx);
-                            cx.notify();
-                        });
+                                    this.files_data = snapshot.files_data;
+                                    this.prompt_library_data = snapshot.prompt_library_data;
+                                    cx.set_global(AppKnowledgeFiles(snapshot.knowledge_sources));
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                tracing::error!("Bootstrap thread failed: {e}");
+                            }
+                        }
+                        break;
+                    }
+                    app.background_executor()
+                        .timer(std::time::Duration::from_millis(100))
+                        .await;
+                }
+            },
+        ));
+
+        let quick_index_slot_for_poll = Arc::clone(&quick_index_slot);
+        self._quick_index_task = Some(cx.spawn(
+            async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+                let mut attempts: u32 = 0;
+                loop {
+                    attempts += 1;
+                    if attempts > MAX_POLL_ATTEMPTS {
+                        tracing::error!(
+                            "QuickIndex thread did not complete within {}s, giving up",
+                            MAX_POLL_ATTEMPTS / 10
+                        );
+                        break;
+                    }
+                    if let Some(result) = quick_index_slot_for_poll
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .take()
+                    {
+                        match result {
+                            Ok(quick_index) => {
+                                let _ = this.update(app, |this, cx| {
+                                    info!(
+                                        "QuickIndex: {} files, {} symbols, {} deps in {:?}",
+                                        quick_index.file_tree.total_files,
+                                        quick_index.key_symbols.len(),
+                                        quick_index.dependencies.len(),
+                                        quick_index.indexed_at.elapsed()
+                                    );
+
+                                    this.quick_index = Some(quick_index.clone());
+                                    this.code_map_data =
+                                        hive_ui_panels::panels::code_map::CodeMapData::from_quick_index(
+                                            &quick_index,
+                                        );
+                                    cx.set_global(AppQuickIndex(quick_index));
+                                    project_context::schedule_background_project_indexing(cx);
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                tracing::error!("QuickIndex thread failed: {e}");
+                            }
+                        }
                         break;
                     }
                     app.background_executor()
@@ -1604,6 +1695,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(agents_actions::handle_agents_discover_remote_agent))
             .on_action(cx.listener(agents_actions::handle_agents_run_remote_agent))
             .on_action(cx.listener(agents_actions::handle_agents_run_workflow))
+            .on_action(cx.listener(workflow_actions::handle_workflow_builder_load))
             // Connected Accounts
             .on_action(cx.listener(account_actions::handle_account_connect_platform))
             .on_action(cx.listener(account_actions::handle_account_disconnect_platform))
