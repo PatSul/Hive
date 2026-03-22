@@ -1350,7 +1350,7 @@ impl ChatService {
         let tokens = last_msg.and_then(|m| m.tokens);
         let content = last_msg.map(|m| m.content.clone());
 
-        // TTS Auto-Speak
+        // TTS Auto-Speak — synthesize + play audio when auto_speak is enabled.
         if let Some(text) = content {
             if cx.has_global::<crate::AppConfig>() && cx.has_global::<crate::AppTts>() {
                 let config = cx.global::<crate::AppConfig>().0.get();
@@ -1358,7 +1358,9 @@ impl ChatService {
                     let tts = cx.global::<crate::AppTts>().0.clone();
                     cx.spawn(
                         |_this: gpui::WeakEntity<Self>, _app: &mut gpui::AsyncApp| async move {
-                            let _ = tts.speak_auto(&text).await;
+                            if let Err(e) = tts.speak_auto_and_play(&text).await {
+                                tracing::warn!("TTS auto-speak playback failed: {e}");
+                            }
                         },
                     )
                     .detach();

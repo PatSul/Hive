@@ -3,6 +3,7 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::input::{Input, InputEvent, InputState};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use tracing::{error, info};
@@ -163,6 +164,18 @@ fn action_type_label(action: &ActionType) -> &'static str {
         ActionType::CreateTask { .. } => "Create Task",
         ActionType::SendNotification { .. } => "Send Notification",
         ActionType::ExecuteSkill { .. } => "Execute Skill",
+    }
+}
+
+/// Human-readable label for a `TriggerType` (variant name only).
+fn trigger_type_label(trigger: &TriggerType) -> &'static str {
+    match trigger {
+        TriggerType::Schedule { .. } => "Schedule",
+        TriggerType::FileChange { .. } => "File Change",
+        TriggerType::WebhookReceived { .. } => "Webhook",
+        TriggerType::ManualTrigger => "Manual",
+        TriggerType::OnMessage { .. } => "On Message",
+        TriggerType::OnError { .. } => "On Error",
     }
 }
 
@@ -391,18 +404,66 @@ pub struct WorkflowBuilderView {
 
     // Dirty flag
     is_dirty: bool,
+
+    // Property editor inputs
+    prop_label_input: Entity<InputState>,
+    prop_timeout_input: Entity<InputState>,
+    prop_retry_input: Entity<InputState>,
+    prop_field1_input: Entity<InputState>,
+    prop_field2_input: Entity<InputState>,
+    prop_synced_node_id: Option<String>,
 }
 
 impl EventEmitter<WorkflowSaved> for WorkflowBuilderView {}
 impl EventEmitter<WorkflowRunRequested> for WorkflowBuilderView {}
 
 impl WorkflowBuilderView {
-    pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
-        let theme = if _cx.has_global::<AppTheme>() {
-            _cx.global::<AppTheme>().0.clone()
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let theme = if cx.has_global::<AppTheme>() {
+            cx.global::<AppTheme>().0.clone()
         } else {
             HiveTheme::dark()
         };
+
+        // Create property editor input states
+        let prop_label_input = cx.new(|cx| {
+            let mut s = InputState::new(window, cx);
+            s.set_placeholder("Node label...", window, cx);
+            s
+        });
+        let prop_timeout_input = cx.new(|cx| {
+            let mut s = InputState::new(window, cx);
+            s.set_placeholder("seconds", window, cx);
+            s
+        });
+        let prop_retry_input = cx.new(|cx| {
+            let mut s = InputState::new(window, cx);
+            s.set_placeholder("0", window, cx);
+            s
+        });
+        let prop_field1_input = cx.new(|cx| {
+            let mut s = InputState::new(window, cx);
+            s.set_placeholder("", window, cx);
+            s
+        });
+        let prop_field2_input = cx.new(|cx| {
+            let mut s = InputState::new(window, cx);
+            s.set_placeholder("", window, cx);
+            s
+        });
+
+        // Subscribe all property inputs to apply changes on Enter / Blur
+        let all_prop_inputs = [
+            &prop_label_input,
+            &prop_timeout_input,
+            &prop_retry_input,
+            &prop_field1_input,
+            &prop_field2_input,
+        ];
+        for input in all_prop_inputs {
+            cx.subscribe_in(input, window, Self::on_property_input_event)
+                .detach();
+        }
 
         Self {
             theme,
@@ -419,6 +480,12 @@ impl WorkflowBuilderView {
             workflow_list: Vec::new(),
             active_workflow_id: None,
             is_dirty: false,
+            prop_label_input,
+            prop_timeout_input,
+            prop_retry_input,
+            prop_field1_input,
+            prop_field2_input,
+            prop_synced_node_id: None,
         }
     }
 
@@ -450,6 +517,7 @@ impl WorkflowBuilderView {
         self.canvas = canvas;
         self.active_workflow_id = workflow_entry_id;
         self.selected_node_id = None;
+        self.prop_synced_node_id = None;
         self.connecting_from = None;
         self.connection_preview_pos = None;
         self.dragging_node = None;
@@ -473,6 +541,7 @@ impl WorkflowBuilderView {
             .retain(|e| e.from_node_id != node_id && e.to_node_id != node_id);
         if self.selected_node_id.as_deref() == Some(node_id) {
             self.selected_node_id = None;
+            self.prop_synced_node_id = None;
         }
         self.is_dirty = true;
         cx.notify();
@@ -1370,7 +1439,7 @@ impl WorkflowBuilderView {
                 .cursor_pointer()
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, _w, cx| {
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                         cx.stop_propagation();
                         // If we're in connect mode and click a node body, finish connect
                         // to its input port
@@ -1379,6 +1448,7 @@ impl WorkflowBuilderView {
                             return;
                         }
                         this.selected_node_id = Some(node_id.clone());
+                        this.sync_property_inputs(window, cx);
                         let pos = event.position;
                         this.start_drag(&node_id, f64::from(pos.x), f64::from(pos.y));
                         cx.notify();
@@ -1470,6 +1540,275 @@ impl WorkflowBuilderView {
         elements
     }
 
+    // -----------------------------------------------------------------------
+    // Property editor — sync, apply, event handler
+    // -----------------------------------------------------------------------
+
+    /// Populate the property editor input fields from the currently selected node.
+    /// Called when selection changes.
+    fn sync_property_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let node_id = match &self.selected_node_id {
+            Some(id) => id.clone(),
+            None => {
+                self.prop_synced_node_id = None;
+                return;
+            }
+        };
+
+        // Skip re-sync if already showing this node
+        if self.prop_synced_node_id.as_deref() == Some(&node_id) {
+            return;
+        }
+        self.prop_synced_node_id = Some(node_id.clone());
+
+        let node = self.canvas.nodes.iter().find(|n| n.id == node_id);
+        let Some(node) = node else { return };
+
+        // Common fields
+        let label = node.label.clone();
+        let timeout = node
+            .timeout_secs
+            .map(|t| t.to_string())
+            .unwrap_or_default();
+        let retry = node.retry_count.to_string();
+
+        self.prop_label_input.update(cx, |s, cx| {
+            s.set_value(label, window, cx);
+        });
+        self.prop_timeout_input.update(cx, |s, cx| {
+            s.set_value(timeout, window, cx);
+        });
+        self.prop_retry_input.update(cx, |s, cx| {
+            s.set_value(retry, window, cx);
+        });
+
+        // Type-specific fields
+        let (f1, f1_ph, f2, f2_ph) = Self::type_field_values(node);
+        self.prop_field1_input.update(cx, |s, cx| {
+            s.set_placeholder(f1_ph, window, cx);
+            s.set_value(f1, window, cx);
+        });
+        self.prop_field2_input.update(cx, |s, cx| {
+            s.set_placeholder(f2_ph, window, cx);
+            s.set_value(f2, window, cx);
+        });
+    }
+
+    /// Extract (field1_value, field1_placeholder, field2_value, field2_placeholder)
+    /// from a node's action or trigger type.
+    fn type_field_values(node: &CanvasNode) -> (String, &'static str, String, &'static str) {
+        if let Some(ref action) = node.action {
+            match action {
+                ActionType::RunCommand { command } => {
+                    (command.clone(), "Command...", String::new(), "")
+                }
+                ActionType::SendMessage { channel, content } => {
+                    (channel.clone(), "Channel...", content.clone(), "Content...")
+                }
+                ActionType::CallApi { url, method } => {
+                    (url.clone(), "URL...", method.clone(), "Method (GET, POST...)")
+                }
+                ActionType::CreateTask { title } => {
+                    (title.clone(), "Task title...", String::new(), "")
+                }
+                ActionType::SendNotification { title, body } => {
+                    (title.clone(), "Title...", body.clone(), "Body...")
+                }
+                ActionType::ExecuteSkill {
+                    skill_trigger,
+                    input,
+                } => (
+                    skill_trigger.clone(),
+                    "Skill trigger...",
+                    input.clone(),
+                    "Input...",
+                ),
+            }
+        } else if let Some(ref trigger) = node.trigger {
+            match trigger {
+                TriggerType::Schedule { cron } => {
+                    (cron.clone(), "Cron expression...", String::new(), "")
+                }
+                TriggerType::FileChange { path } => {
+                    (path.clone(), "Watch path...", String::new(), "")
+                }
+                TriggerType::WebhookReceived { event } => {
+                    (event.clone(), "Event name...", String::new(), "")
+                }
+                TriggerType::ManualTrigger => (String::new(), "", String::new(), ""),
+                TriggerType::OnMessage { pattern } => {
+                    (pattern.clone(), "Pattern...", String::new(), "")
+                }
+                TriggerType::OnError { source } => {
+                    (source.clone(), "Error source...", String::new(), "")
+                }
+            }
+        } else {
+            (String::new(), "", String::new(), "")
+        }
+    }
+
+    /// Return the human-readable label pair (field1_label, field2_label) for a node's
+    /// action or trigger type.  Returns None for fields that don't exist.
+    fn type_field_labels(node: &CanvasNode) -> (Option<&'static str>, Option<&'static str>) {
+        if let Some(ref action) = node.action {
+            match action {
+                ActionType::RunCommand { .. } => (Some("Command"), None),
+                ActionType::SendMessage { .. } => (Some("Channel"), Some("Content")),
+                ActionType::CallApi { .. } => (Some("URL"), Some("Method")),
+                ActionType::CreateTask { .. } => (Some("Title"), None),
+                ActionType::SendNotification { .. } => (Some("Title"), Some("Body")),
+                ActionType::ExecuteSkill { .. } => (Some("Skill Trigger"), Some("Input")),
+            }
+        } else if let Some(ref trigger) = node.trigger {
+            match trigger {
+                TriggerType::Schedule { .. } => (Some("Cron Expression"), None),
+                TriggerType::FileChange { .. } => (Some("Watch Path"), None),
+                TriggerType::WebhookReceived { .. } => (Some("Event Name"), None),
+                TriggerType::ManualTrigger => (None, None),
+                TriggerType::OnMessage { .. } => (Some("Pattern"), None),
+                TriggerType::OnError { .. } => (Some("Error Source"), None),
+            }
+        } else {
+            (None, None)
+        }
+    }
+
+    /// Read all property inputs and apply them to the currently selected node.
+    fn apply_property_edits(&mut self, cx: &mut Context<Self>) {
+        let Some(ref node_id) = self.selected_node_id else {
+            return;
+        };
+        let node_id = node_id.clone();
+
+        let label = self.prop_label_input.read(cx).value().to_string();
+        let timeout_str = self.prop_timeout_input.read(cx).value().to_string();
+        let retry_str = self.prop_retry_input.read(cx).value().to_string();
+        let f1 = self.prop_field1_input.read(cx).value().to_string();
+        let f2 = self.prop_field2_input.read(cx).value().to_string();
+
+        let Some(node) = self.canvas.nodes.iter_mut().find(|n| n.id == node_id) else {
+            return;
+        };
+
+        // Apply common fields
+        if !label.is_empty() {
+            node.label = label;
+        }
+        node.timeout_secs = timeout_str.trim().parse::<u64>().ok();
+        node.retry_count = retry_str.trim().parse::<u32>().unwrap_or(0);
+
+        // Apply type-specific fields
+        if let Some(ref mut action) = node.action {
+            match action {
+                ActionType::RunCommand { command } => {
+                    *command = f1;
+                }
+                ActionType::SendMessage { channel, content } => {
+                    *channel = f1;
+                    *content = f2;
+                }
+                ActionType::CallApi { url, method } => {
+                    *url = f1;
+                    *method = f2;
+                }
+                ActionType::CreateTask { title } => {
+                    *title = f1;
+                }
+                ActionType::SendNotification { title, body } => {
+                    *title = f1;
+                    *body = f2;
+                }
+                ActionType::ExecuteSkill {
+                    skill_trigger,
+                    input,
+                } => {
+                    *skill_trigger = f1;
+                    *input = f2;
+                }
+            }
+        } else if let Some(ref mut trigger) = node.trigger {
+            match trigger {
+                TriggerType::Schedule { cron } => {
+                    *cron = f1;
+                }
+                TriggerType::FileChange { path } => {
+                    *path = f1;
+                }
+                TriggerType::WebhookReceived { event } => {
+                    *event = f1;
+                }
+                TriggerType::ManualTrigger => {}
+                TriggerType::OnMessage { pattern } => {
+                    *pattern = f1;
+                }
+                TriggerType::OnError { source } => {
+                    *source = f1;
+                }
+            }
+        }
+
+        self.is_dirty = true;
+        cx.notify();
+    }
+
+    /// Input event handler for all property editor fields.
+    /// Applies changes on Enter press or when focus leaves the field.
+    fn on_property_input_event(
+        &mut self,
+        _state: &Entity<InputState>,
+        event: &InputEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                self.apply_property_edits(cx);
+            }
+            _ => {}
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Properties panel rendering
+    // -----------------------------------------------------------------------
+
+    /// Render a single labeled input field for the properties panel.
+    fn render_prop_field(
+        theme: &HiveTheme,
+        label: &str,
+        input: &Entity<InputState>,
+    ) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(label.to_string()),
+            )
+            .child(
+                div().child(
+                    Input::new(input)
+                        .text_size(theme.font_size_sm)
+                        .cleanable(false)
+                        .appearance(false),
+                ),
+            )
+    }
+
+    /// Render a section header inside the properties panel.
+    fn render_prop_section(theme: &HiveTheme, title: &str) -> impl IntoElement {
+        div()
+            .text_size(theme.font_size_xs)
+            .text_color(theme.accent_cyan)
+            .font_weight(FontWeight::BOLD)
+            .mt(px(6.0))
+            .child(title.to_string())
+    }
+
     fn render_properties_panel(
         &self,
         theme: &HiveTheme,
@@ -1495,7 +1834,7 @@ impl WorkflowBuilderView {
             .map(|node| self.node_messages(node, connected_ids))
             .unwrap_or_default();
 
-        div()
+        let mut panel = div()
             .w(px(280.0))
             .min_w(px(280.0))
             .border_l_1()
@@ -1510,45 +1849,106 @@ impl WorkflowBuilderView {
                     .text_color(theme.text_muted)
                     .font_weight(FontWeight::BOLD)
                     .child("PROPERTIES"),
-            )
-            .when_some(node, |el, node| {
-                el.child(
-                    div()
-                        .text_size(theme.font_size_sm)
-                        .text_color(theme.text_primary)
-                        .font_weight(FontWeight::BOLD)
-                        .child(node.label.clone()),
-                )
-                .child(
-                    div()
-                        .text_size(theme.font_size_xs)
-                        .text_color(theme.text_muted)
-                        .child(format!("Type: {}", node_kind_label(node.kind))),
-                )
-                .when_some(node.action.as_ref(), |el, action| {
-                    el.child(
-                        div()
-                            .text_size(theme.font_size_xs)
-                            .text_color(theme.text_secondary)
-                            .child(format!("Action: {}", action_type_label(action))),
-                    )
-                })
-                .when_some(node.persona.as_ref(), |el, persona| {
-                    el.child(
-                        div()
-                            .text_size(theme.font_size_xs)
-                            .text_color(theme.accent_aqua)
-                            .child(format!("Agent: {}", persona_kind_label(persona))),
-                    )
-                })
-                .children(node_messages.into_iter().map(|(message, color)| {
+            );
+
+        if let Some(node) = node {
+            // Node type badge
+            panel = panel.child(
+                div()
+                    .text_size(theme.font_size_xs)
+                    .text_color(theme.text_muted)
+                    .child(format!("Type: {}", node_kind_label(node.kind))),
+            );
+
+            // Action type badge (if action node)
+            if let Some(ref action) = node.action {
+                panel = panel.child(
                     div()
                         .text_size(theme.font_size_xs)
-                        .text_color(color)
-                        .child(message)
-                        .into_any_element()
-                }))
-            })
+                        .text_color(theme.text_secondary)
+                        .child(format!("Action: {}", action_type_label(action))),
+                );
+            }
+
+            // Trigger type badge (if trigger node)
+            if let Some(ref trigger) = node.trigger {
+                panel = panel.child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_secondary)
+                        .child(format!("Trigger: {}", trigger_type_label(trigger))),
+                );
+            }
+
+            // Persona badge
+            if let Some(ref persona) = node.persona {
+                panel = panel.child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.accent_aqua)
+                        .child(format!("Agent: {}", persona_kind_label(persona))),
+                );
+            }
+
+            // --- Node Settings section ---
+            panel = panel
+                .child(Self::render_prop_section(theme, "NODE SETTINGS"))
+                .child(Self::render_prop_field(
+                    theme,
+                    "Label",
+                    &self.prop_label_input,
+                ))
+                .child(Self::render_prop_field(
+                    theme,
+                    "Timeout (seconds)",
+                    &self.prop_timeout_input,
+                ))
+                .child(Self::render_prop_field(
+                    theme,
+                    "Retry Count",
+                    &self.prop_retry_input,
+                ));
+
+            // --- Type-specific fields ---
+            let (f1_label, f2_label) = Self::type_field_labels(node);
+
+            if let Some(label) = f1_label {
+                let section_title = if node.action.is_some() {
+                    "ACTION PROPERTIES"
+                } else {
+                    "TRIGGER PROPERTIES"
+                };
+                panel = panel
+                    .child(Self::render_prop_section(theme, section_title))
+                    .child(Self::render_prop_field(
+                        theme,
+                        label,
+                        &self.prop_field1_input,
+                    ));
+            }
+            if let Some(label) = f2_label {
+                panel = panel.child(Self::render_prop_field(
+                    theme,
+                    label,
+                    &self.prop_field2_input,
+                ));
+            }
+
+            // Validation messages
+            if !node_messages.is_empty() {
+                panel = panel.child(Self::render_prop_section(theme, "VALIDATION"));
+                for (message, color) in node_messages {
+                    panel = panel.child(
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(color)
+                            .child(message),
+                    );
+                }
+            }
+        }
+
+        panel
     }
 }
 
@@ -1557,7 +1957,10 @@ impl WorkflowBuilderView {
 // ---------------------------------------------------------------------------
 
 impl Render for WorkflowBuilderView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Sync property editor inputs if selected node changed
+        self.sync_property_inputs(window, cx);
+
         let theme = &self.theme;
         let node_count = self.canvas.nodes.len();
         let edge_count = self.canvas.edges.len();
@@ -1881,6 +2284,7 @@ impl Render for WorkflowBuilderView {
                     this.start_pan(f64::from(pos.x), f64::from(pos.y));
                     // Deselect node
                     this.selected_node_id = None;
+                    this.prop_synced_node_id = None;
                     cx.notify();
                 }),
             )

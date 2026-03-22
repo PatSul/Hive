@@ -174,6 +174,145 @@ pub struct AudioData {
     pub sample_rate: u32,
 }
 
+impl AudioData {
+    /// Play the audio data using the platform's native audio playback.
+    ///
+    /// Writes the audio bytes to a temporary file and shells out to a
+    /// platform command. This is a blocking call — run on a background
+    /// thread to avoid stalling the UI.
+    pub fn play(&self) -> Result<(), TtsError> {
+        play_audio_data(self)
+    }
+}
+
+/// Play synthesized audio bytes via the platform's native audio command.
+///
+/// The audio is written to a temp file under `~/.hive/tts_cache/` (or the
+/// system temp dir as fallback) and played with a platform command:
+/// - **Windows**: `powershell -c (New-Object Media.SoundPlayer '<path>').PlaySync()`
+///   for WAV, or `Start-Process` for other formats via the default media player.
+/// - **macOS**: `afplay`
+/// - **Linux**: `aplay` (WAV) or `ffplay`/`paplay` (other formats)
+///
+/// This function blocks until playback finishes. Call from a background
+/// thread to avoid blocking the UI.
+pub fn play_audio_data(audio: &AudioData) -> Result<(), TtsError> {
+    use std::io::Write;
+
+    // Write to a temp file.
+    let cache_dir = hive_core::config::HiveConfig::base_dir()
+        .map(|d| d.join("tts_cache"))
+        .unwrap_or_else(|_| std::env::temp_dir().join("hive_tts"));
+    let _ = std::fs::create_dir_all(&cache_dir);
+
+    let file_name = format!("playback_{}.{}", std::process::id(), audio.format.extension());
+    let file_path = cache_dir.join(&file_name);
+
+    {
+        let mut f = std::fs::File::create(&file_path).map_err(|e| {
+            TtsError::Other(format!("Failed to create temp audio file: {e}"))
+        })?;
+        f.write_all(&audio.bytes).map_err(|e| {
+            TtsError::Other(format!("Failed to write audio data: {e}"))
+        })?;
+    }
+
+    let path_str = file_path.to_string_lossy().to_string();
+    tracing::debug!("Playing TTS audio: {path_str}");
+
+    let result = play_file_platform(&path_str, &audio.format);
+
+    // Clean up temp file (best-effort).
+    let _ = std::fs::remove_file(&file_path);
+
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn play_file_platform(path: &str, format: &AudioFormat) -> Result<(), TtsError> {
+    // For WAV files, use SoundPlayer which blocks until done.
+    // For other formats, use Start-Process with the default media handler.
+    let status = match format {
+        AudioFormat::Wav => std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "(New-Object Media.SoundPlayer '{}').PlaySync()",
+                    path.replace('\'', "''")
+                ),
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status(),
+        _ => {
+            // For mp3/opus/etc., use Windows Media Player via wmplayer or
+            // ffplay if available; fall back to Start-Process.
+            std::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!(
+                        "Add-Type -AssemblyName presentationCore; \
+                         $p = New-Object System.Windows.Media.MediaPlayer; \
+                         $p.Open([Uri]'{}'); \
+                         $p.Play(); \
+                         Start-Sleep -Milliseconds 500; \
+                         while ($p.Position -lt $p.NaturalDuration.TimeSpan) {{ Start-Sleep -Milliseconds 200 }}; \
+                         $p.Close()",
+                        path.replace('\'', "''")
+                    ),
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+        }
+    };
+
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(TtsError::Other(format!("Audio player exited with {s}"))),
+        Err(e) => Err(TtsError::Other(format!("Failed to launch audio player: {e}"))),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn play_file_platform(path: &str, _format: &AudioFormat) -> Result<(), TtsError> {
+    let status = std::process::Command::new("afplay")
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(TtsError::Other(format!("afplay exited with {s}"))),
+        Err(e) => Err(TtsError::Other(format!("Failed to run afplay: {e}"))),
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn play_file_platform(path: &str, format: &AudioFormat) -> Result<(), TtsError> {
+    // Try aplay for WAV, then ffplay, then paplay.
+    let cmd = match format {
+        AudioFormat::Wav => ("aplay", vec![path.to_string()]),
+        _ => ("ffplay", vec!["-nodisp".into(), "-autoexit".into(), path.to_string()]),
+    };
+    let status = std::process::Command::new(cmd.0)
+        .args(&cmd.1)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(TtsError::Other(format!("{} exited with {s}", cmd.0))),
+        Err(e) => Err(TtsError::Other(format!("Failed to run {}: {e}", cmd.0))),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Trait
 // ---------------------------------------------------------------------------

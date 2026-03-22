@@ -56,7 +56,9 @@ pub(super) fn handle_chat_read_aloud(
         let tts = cx.global::<AppTts>().0.clone();
         let text = action.content.clone();
         cx.spawn(async move |_this, _app: &mut AsyncApp| {
-            let _ = tts.speak(&text).await;
+            if let Err(e) = tts.speak_and_play(&text).await {
+                tracing::warn!("TTS read-aloud playback failed: {e}");
+            }
         })
         .detach();
     }

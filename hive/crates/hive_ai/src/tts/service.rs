@@ -199,6 +199,25 @@ impl TtsService {
         self.synthesize(cfg.default_provider, &request).await
     }
 
+    /// Synthesize and play audio using the default provider.
+    ///
+    /// Combines `speak()` + `AudioData::play()`. The playback step is
+    /// blocking (it shells out to the platform audio player), so call this
+    /// from a background thread / executor.
+    pub async fn speak_and_play(&self, text: &str) -> Result<(), TtsError> {
+        let audio = self.speak(text).await?;
+        audio.play()
+    }
+
+    /// Synthesize and play audio if both TTS and auto-speak are enabled.
+    ///
+    /// Combines `speak_auto()` + `AudioData::play()`. Returns
+    /// `Err` if TTS or auto-speak is disabled. Blocking on the play step.
+    pub async fn speak_auto_and_play(&self, text: &str) -> Result<(), TtsError> {
+        let audio = self.speak_auto(text).await?;
+        audio.play()
+    }
+
     /// Synthesize speech with a specific provider.
     pub async fn synthesize(
         &self,
