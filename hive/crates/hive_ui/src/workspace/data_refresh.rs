@@ -241,6 +241,11 @@ pub(super) fn refresh_routing_data(workspace: &mut HiveWorkspace, cx: &App) {
     if cx.has_global::<AppAiService>() {
         workspace.routing_data = RoutingData::from_router(cx.global::<AppAiService>().0.router());
     }
+    // Restore persisted custom rules (from_router starts with an empty list).
+    let saved_rules = load_routing_rules();
+    if !saved_rules.is_empty() {
+        workspace.routing_data.custom_rules = saved_rules;
+    }
 }
 
 pub(super) fn refresh_monitor_data(workspace: &mut HiveWorkspace, cx: &App) {
@@ -407,6 +412,40 @@ pub(super) fn save_kanban_data(workspace: &HiveWorkspace) {
         Err(e) => {
             warn!("Failed to serialize kanban data: {e}");
         }
+    }
+}
+
+pub(super) fn save_routing_rules(workspace: &HiveWorkspace) {
+    let path = match hive_core::config::HiveConfig::base_dir() {
+        Ok(d) => d.join("routing_rules.json"),
+        Err(e) => {
+            warn!("Cannot save routing rules: {e}");
+            return;
+        }
+    };
+    match serde_json::to_string_pretty(&workspace.routing_data.custom_rules) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                warn!("Failed to write routing_rules.json: {e}");
+            }
+        }
+        Err(e) => {
+            warn!("Failed to serialize routing rules: {e}");
+        }
+    }
+}
+
+pub(super) fn load_routing_rules() -> Vec<hive_ui_panels::panels::routing::RoutingRule> {
+    let path = match hive_core::config::HiveConfig::base_dir() {
+        Ok(d) => d.join("routing_rules.json"),
+        Err(_) => return Vec::new(),
+    };
+    if !path.exists() {
+        return Vec::new();
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => Vec::new(),
     }
 }
 

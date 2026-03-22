@@ -1374,6 +1374,14 @@ impl ChatService {
         });
     }
 
+    /// Push a system message into the conversation (e.g. assistant briefing
+    /// results, email summaries, calendar events).
+    pub fn push_system_message(&mut self, content: impl Into<String>, cx: &mut Context<Self>) {
+        self.messages.push(ChatMessage::system(content));
+        self.generation += 1;
+        cx.notify();
+    }
+
     /// Record an error from the streaming task.
     pub fn set_error(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
         let msg = message.into();

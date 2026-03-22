@@ -19,13 +19,8 @@ pub enum Platform {
     Slack,
     Discord,
     Telegram,
-    WhatsApp,
     Teams,
-    Signal,
-    Matrix,
     GoogleChat,
-    WebChat,
-    IMessage,
 }
 
 impl fmt::Display for Platform {
@@ -34,13 +29,8 @@ impl fmt::Display for Platform {
             Platform::Slack => write!(f, "slack"),
             Platform::Discord => write!(f, "discord"),
             Platform::Telegram => write!(f, "telegram"),
-            Platform::WhatsApp => write!(f, "whatsapp"),
             Platform::Teams => write!(f, "teams"),
-            Platform::Signal => write!(f, "signal"),
-            Platform::Matrix => write!(f, "matrix"),
             Platform::GoogleChat => write!(f, "google_chat"),
-            Platform::WebChat => write!(f, "web_chat"),
-            Platform::IMessage => write!(f, "imessage"),
         }
     }
 }
@@ -121,13 +111,8 @@ mod tests {
         assert_eq!(Platform::Slack.to_string(), "slack");
         assert_eq!(Platform::Discord.to_string(), "discord");
         assert_eq!(Platform::Telegram.to_string(), "telegram");
-        assert_eq!(Platform::WhatsApp.to_string(), "whatsapp");
         assert_eq!(Platform::Teams.to_string(), "teams");
-        assert_eq!(Platform::Signal.to_string(), "signal");
-        assert_eq!(Platform::Matrix.to_string(), "matrix");
         assert_eq!(Platform::GoogleChat.to_string(), "google_chat");
-        assert_eq!(Platform::WebChat.to_string(), "web_chat");
-        assert_eq!(Platform::IMessage.to_string(), "imessage");
     }
 
     #[test]
@@ -148,13 +133,8 @@ mod tests {
             Platform::Slack,
             Platform::Discord,
             Platform::Telegram,
-            Platform::WhatsApp,
             Platform::Teams,
-            Platform::Signal,
-            Platform::Matrix,
             Platform::GoogleChat,
-            Platform::WebChat,
-            Platform::IMessage,
         ] {
             let json = serde_json::to_string(&platform).unwrap();
             let back: Platform = serde_json::from_str(&json).unwrap();

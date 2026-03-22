@@ -1,7 +1,7 @@
 use gpui::*;
 use tracing::info;
 
-use super::{HiveWorkspace, RoutingAddRule};
+use super::{HiveWorkspace, RoutingAddRule, data_refresh};
 
 pub(super) fn handle_routing_add_rule(
     workspace: &mut HiveWorkspace,
@@ -11,12 +11,16 @@ pub(super) fn handle_routing_add_rule(
 ) {
     use hive_ui_panels::panels::routing::RoutingRule;
 
-    info!("Routing: add rule");
+    let rule_number = workspace.routing_data.custom_rules.len() + 1;
+    let name = format!("Rule {rule_number}");
+    info!("Routing: add rule '{name}'");
+
     workspace.routing_data.custom_rules.push(RoutingRule {
-        name: "New Rule".to_string(),
-        condition: "task_type == \"code\"".to_string(),
+        name,
+        condition: String::new(),
         target_model: "auto".to_string(),
         enabled: true,
     });
+    data_refresh::save_routing_rules(workspace);
     cx.notify();
 }

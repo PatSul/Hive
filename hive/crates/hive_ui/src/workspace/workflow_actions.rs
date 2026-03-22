@@ -30,7 +30,7 @@ pub(super) fn refresh_workflow_builder(
                 id: workflow.id.clone(),
                 name: workflow.name.clone(),
                 is_builtin: workflow.id.starts_with("builtin:"),
-                status: format!("{:?}", workflow.status),
+                status: workflow.status.to_string(),
             })
             .collect();
 

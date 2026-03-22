@@ -460,7 +460,7 @@ mod tests {
     fn test_list_channel_links() {
         let svc = make_service();
         svc.link_channels(Platform::Slack, "C01", Platform::Discord, "D01");
-        svc.link_channels(Platform::Telegram, "T01", Platform::Matrix, "M01");
+        svc.link_channels(Platform::Telegram, "T01", Platform::GoogleChat, "G01");
         let links = svc.list_channel_links();
         assert_eq!(links.len(), 2);
     }

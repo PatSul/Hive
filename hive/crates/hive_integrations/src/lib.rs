@@ -49,12 +49,10 @@ pub use kubernetes::{
     ClusterInfo, Deployment, K8sContext, K8sEvent, K8sService, KubernetesClient,
     Namespace as K8sNamespace, Pod,
 };
-#[cfg(target_os = "macos")]
-pub use messaging::IMessageProvider;
 pub use messaging::{
     Attachment, Channel, CrossChannelService, DiscordProvider, GoogleChatProvider, IncomingMessage,
-    MatrixProvider, MessagingHub, MessagingProvider, Platform, SentMessage, SignalProvider,
-    SlackProvider, TeamsProvider, TelegramProvider, WebChatProvider, WhatsAppProvider,
+    MessagingHub, MessagingProvider, Platform, SentMessage, SlackProvider, TeamsProvider,
+    TelegramProvider,
 };
 pub use microsoft::outlook_calendar::OutlookCalendarClient;
 pub use microsoft::outlook_email::OutlookEmailClient;

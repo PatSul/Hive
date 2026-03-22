@@ -86,9 +86,10 @@ pub use hive_ui_core::{
     ActivitySetView,
     AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents, AgentsReloadWorkflows,
     AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent, AgentsSelectRemoteSkill,
-    AppPluginManager, ApplyAllEdits, ApplyCodeBlock, ChannelSelect, ChatReadAloud, ClearChat,
+    AppPluginManager, ApplyAllEdits, ApplyCodeBlock, ChannelSelect, CheckCalendar, CheckEmail,
+    ChatReadAloud, ClearChat,
     ContextFormatChanged, CopyFullPrompt, CopyToClipboard, CostsClearHistory, CostsExportCsv,
-    CostsResetToday, ExportConfig, ExportPrompt, FilesClearChecked, FilesCloseViewer,
+    CostsResetToday, DailyBriefing, ExportConfig, ExportPrompt, FilesClearChecked, FilesCloseViewer,
     FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile, FilesNewFolder,
     FilesOpenEntry, FilesRefresh, FilesSetSearchQuery, FilesToggleCheck, HistoryClearAll,
     HistoryClearAllCancel, HistoryClearAllConfirm, HistoryDeleteConversation,
@@ -157,6 +158,7 @@ use hive_ui_panels::panels::{
 mod activity_actions;
 mod account_actions;
 mod agents_actions;
+mod assistant_actions;
 mod approval_actions;
 mod assistant_refresh;
 mod chat_actions;
@@ -1699,6 +1701,10 @@ impl Render for HiveWorkspace {
             // Connected Accounts
             .on_action(cx.listener(account_actions::handle_account_connect_platform))
             .on_action(cx.listener(account_actions::handle_account_disconnect_platform))
+            // Assistant actions
+            .on_action(cx.listener(assistant_actions::handle_daily_briefing))
+            .on_action(cx.listener(assistant_actions::handle_check_email))
+            .on_action(cx.listener(assistant_actions::handle_check_calendar))
             // Voice
             .on_action(cx.listener(utility_actions::handle_voice_process_text))
             // Auto-update

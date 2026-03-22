@@ -2328,11 +2328,11 @@ pub struct IntegrationServices {
 fn send_message_tool() -> McpTool {
     McpTool {
         name: "send_message".into(),
-        description: "Send a message via Slack, Discord, Teams, Telegram, Matrix, WebChat, WhatsApp, Signal, Google Chat, or iMessage".into(),
+        description: "Send a message via Slack, Discord, Teams, Telegram, or Google Chat".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] },
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "google_chat"] },
                 "channel": { "type": "string", "description": "Channel name or ID" },
                 "message": { "type": "string", "description": "Message content" }
             },

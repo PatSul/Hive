@@ -134,6 +134,10 @@ actions!(
         // Clipboard/export
         ExportPrompt,
         CopyFullPrompt,
+        // Assistant actions
+        DailyBriefing,
+        CheckEmail,
+        CheckCalendar,
     ]
 );
 

@@ -87,6 +87,18 @@ pub enum WorkflowStatus {
     Failed,
 }
 
+impl std::fmt::Display for WorkflowStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Draft => write!(f, "Draft"),
+            Self::Active => write!(f, "Active"),
+            Self::Paused => write!(f, "Paused"),
+            Self::Completed => write!(f, "Completed"),
+            Self::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Data Types
 // ---------------------------------------------------------------------------
