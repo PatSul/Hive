@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 use hive_ai::service::AiServiceConfig;
 use hive_ai::tts::TtsProviderType;
 use hive_ai::tts::service::TtsServiceConfig;
-use hive_core::config::{ConfigManager, HiveConfig};
+use hive_core::config::{AccountPlatform, ConfigManager, HiveConfig};
 use hive_core::logging;
 use hive_core::notifications::{AppNotification, NotificationType};
 use hive_core::persistence::Database;
@@ -21,8 +21,9 @@ use hive_core::updater::UpdateService;
 use hive_ui::globals::{
     AppA2aClient, AppActivityService, AppAgentNotifications, AppAiService, AppApprovalGate,
     AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser, AppChannels, AppCli,
-    AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppContextEngine, AppDatabase,
-    AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppHeartbeatScheduler,
+    AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppContextEngine, AppCrossChannel,
+    AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab,
+    AppHeartbeatScheduler,
     AppHiveMemory, AppHueClient, AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes,
     AppLearning, AppLocalAiDetection, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork,
     AppNotifications, AppOllamaManager, AppPersonas, AppPluginManager, AppProjectManagement,
@@ -765,10 +766,121 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     // --- Integration hubs (conditionally initialized) ---
 
-    // Messaging hub — always create, providers added when tokens configured.
-    let messaging = std::sync::Arc::new(hive_integrations::messaging::MessagingHub::new());
+    // Messaging hub — register configured providers, then wrap in Arc.
+    let mut messaging = hive_integrations::messaging::MessagingHub::new();
+
+    if let Some(token) = &config.slack_bot_token {
+        match hive_integrations::messaging::SlackProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Slack messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Slack provider: {e}"),
+        }
+    }
+    if let (Some(token), Some(guild_id)) = (&config.discord_bot_token, &config.discord_guild_id) {
+        match hive_integrations::messaging::DiscordProvider::new(token, guild_id) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Discord messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Discord provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.telegram_bot_token {
+        match hive_integrations::messaging::TelegramProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Telegram messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Telegram provider: {e}"),
+        }
+    }
+    if let (Some(phone_id), Some(token)) =
+        (&config.whatsapp_phone_id, &config.whatsapp_access_token)
+    {
+        match hive_integrations::messaging::WhatsAppProvider::new(phone_id, token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("WhatsApp messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create WhatsApp provider: {e}"),
+        }
+    }
+    if let Some(number) = &config.signal_number {
+        match hive_integrations::messaging::SignalProvider::new(number) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Signal messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Signal provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.matrix_access_token {
+        match hive_integrations::messaging::MatrixProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Matrix messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Matrix provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.google_chat_access_token {
+        match hive_integrations::messaging::GoogleChatProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Google Chat messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Google Chat provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.webchat_api_token {
+        match hive_integrations::messaging::WebChatProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("WebChat messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create WebChat provider: {e}"),
+        }
+    }
+    // Teams uses Microsoft OAuth token from connected accounts.
+    if let Some(acct) = config
+        .connected_accounts
+        .iter()
+        .find(|a| a.platform == AccountPlatform::Microsoft)
+    {
+        // Retrieve the OAuth token from SecureStorage via ConfigManager.
+        if let Some(oauth) = cx.global::<AppConfig>().0.get_oauth_token(acct.platform) {
+            match hive_integrations::messaging::TeamsProvider::new(&oauth.access_token, "default") {
+                Ok(p) => {
+                    messaging.register_provider(Box::new(p));
+                    info!("Teams messaging provider registered");
+                }
+                Err(e) => warn!("Failed to create Teams provider: {e}"),
+            }
+        }
+    }
+
+    info!(
+        "MessagingHub initialized with {} provider(s)",
+        messaging.provider_count()
+    );
+    let messaging = std::sync::Arc::new(messaging);
     cx.set_global(AppMessaging(messaging));
-    info!("MessagingHub initialized");
+
+    // Cross-channel memory service — load persisted state if available.
+    let cross_channel = match HiveConfig::base_dir() {
+        Ok(dir) => {
+            let path = dir.join("cross_channel.json");
+            hive_integrations::messaging::CrossChannelService::load_from_file(&path)
+                .unwrap_or_else(|_| hive_integrations::messaging::CrossChannelService::new())
+        }
+        Err(_) => hive_integrations::messaging::CrossChannelService::new(),
+    };
+    cx.set_global(AppCrossChannel(std::sync::Arc::new(std::sync::Mutex::new(
+        cross_channel,
+    ))));
+    info!("CrossChannelService initialized");
 
     // Project management hub — always create, providers added when tokens configured.
     let pm =

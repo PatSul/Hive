@@ -427,6 +427,57 @@ pub(super) fn handle_settings_save_from_view(
             cfg.slack_oauth_client_id = snapshot.slack_oauth_client_id.clone();
             cfg.discord_oauth_client_id = snapshot.discord_oauth_client_id.clone();
             cfg.telegram_oauth_client_id = snapshot.telegram_oauth_client_id.clone();
+            // Messaging bot tokens
+            cfg.slack_bot_token = if snapshot.slack_bot_token.is_empty() {
+                None
+            } else {
+                Some(snapshot.slack_bot_token.clone())
+            };
+            cfg.discord_bot_token = if snapshot.discord_bot_token.is_empty() {
+                None
+            } else {
+                Some(snapshot.discord_bot_token.clone())
+            };
+            cfg.telegram_bot_token = if snapshot.telegram_bot_token.is_empty() {
+                None
+            } else {
+                Some(snapshot.telegram_bot_token.clone())
+            };
+            cfg.whatsapp_phone_id = if snapshot.whatsapp_phone_id.is_empty() {
+                None
+            } else {
+                Some(snapshot.whatsapp_phone_id.clone())
+            };
+            cfg.whatsapp_access_token = if snapshot.whatsapp_access_token.is_empty() {
+                None
+            } else {
+                Some(snapshot.whatsapp_access_token.clone())
+            };
+            cfg.signal_api_url = if snapshot.signal_api_url.is_empty() {
+                None
+            } else {
+                Some(snapshot.signal_api_url.clone())
+            };
+            cfg.matrix_homeserver = if snapshot.matrix_homeserver.is_empty() {
+                None
+            } else {
+                Some(snapshot.matrix_homeserver.clone())
+            };
+            cfg.matrix_access_token = if snapshot.matrix_access_token.is_empty() {
+                None
+            } else {
+                Some(snapshot.matrix_access_token.clone())
+            };
+            cfg.google_chat_sa_key = if snapshot.google_chat_sa_key.is_empty() {
+                None
+            } else {
+                Some(snapshot.google_chat_sa_key.clone())
+            };
+            cfg.webchat_api_token = if snapshot.webchat_api_token.is_empty() {
+                None
+            } else {
+                Some(snapshot.webchat_api_token.clone())
+            };
         }) {
             warn!("Settings: failed to save config: {e}");
         }

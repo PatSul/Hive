@@ -197,6 +197,18 @@ const KEY_VENICE: &str = "api_key_venice";
 const KEY_HUE: &str = "api_key_hue";
 const KEY_CLOUD_JWT: &str = "cloud_jwt";
 
+// Messaging provider token storage keys
+const KEY_SLACK_BOT_TOKEN: &str = "messaging_slack_bot_token";
+const KEY_DISCORD_BOT_TOKEN: &str = "messaging_discord_bot_token";
+const KEY_DISCORD_GUILD_ID: &str = "messaging_discord_guild_id";
+const KEY_TELEGRAM_BOT_TOKEN: &str = "messaging_telegram_bot_token";
+const KEY_WHATSAPP_PHONE_ID: &str = "messaging_whatsapp_phone_id";
+const KEY_WHATSAPP_ACCESS_TOKEN: &str = "messaging_whatsapp_access_token";
+const KEY_SIGNAL_NUMBER: &str = "messaging_signal_number";
+const KEY_MATRIX_ACCESS_TOKEN: &str = "messaging_matrix_access_token";
+const KEY_GOOGLE_CHAT_ACCESS_TOKEN: &str = "messaging_google_chat_access_token";
+const KEY_WEBCHAT_API_TOKEN: &str = "messaging_webchat_api_token";
+
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
 const KEY_OAUTH_MICROSOFT: &str = "oauth_microsoft";
@@ -363,6 +375,34 @@ pub struct HiveConfig {
     #[serde(skip)]
     pub venice_api_key: Option<String>,
 
+    // Messaging provider tokens — stored in SecureStorage
+    #[serde(skip)]
+    pub slack_bot_token: Option<String>,
+    #[serde(skip)]
+    pub discord_bot_token: Option<String>,
+    #[serde(skip)]
+    pub discord_guild_id: Option<String>,
+    #[serde(skip)]
+    pub telegram_bot_token: Option<String>,
+    #[serde(skip)]
+    pub whatsapp_phone_id: Option<String>,
+    #[serde(skip)]
+    pub whatsapp_access_token: Option<String>,
+    #[serde(skip)]
+    pub signal_number: Option<String>,
+    #[serde(default)]
+    pub signal_api_url: Option<String>,
+    #[serde(default)]
+    pub matrix_homeserver: Option<String>,
+    #[serde(skip)]
+    pub matrix_access_token: Option<String>,
+    #[serde(skip)]
+    pub google_chat_access_token: Option<String>,
+    #[serde(default)]
+    pub google_chat_sa_key: Option<String>,
+    #[serde(skip)]
+    pub webchat_api_token: Option<String>,
+
     // OAuth client IDs — user-provided per-platform
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,
@@ -446,6 +486,19 @@ impl Default for HiveConfig {
             log_level: "info".into(),
             close_to_tray_notice_seen: false,
             connected_accounts: Vec::new(),
+            slack_bot_token: None,
+            discord_bot_token: None,
+            discord_guild_id: None,
+            telegram_bot_token: None,
+            whatsapp_phone_id: None,
+            whatsapp_access_token: None,
+            signal_number: None,
+            signal_api_url: None,
+            matrix_homeserver: None,
+            matrix_access_token: None,
+            google_chat_access_token: None,
+            google_chat_sa_key: None,
+            webchat_api_token: None,
             google_oauth_client_id: None,
             microsoft_oauth_client_id: None,
             github_oauth_client_id: None,
@@ -784,6 +837,20 @@ impl ConfigManager {
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
             config.cloud_jwt = get_secure_key(ss, &key_map, KEY_CLOUD_JWT);
+
+            // Messaging provider tokens
+            config.slack_bot_token = get_secure_key(ss, &key_map, KEY_SLACK_BOT_TOKEN);
+            config.discord_bot_token = get_secure_key(ss, &key_map, KEY_DISCORD_BOT_TOKEN);
+            config.discord_guild_id = get_secure_key(ss, &key_map, KEY_DISCORD_GUILD_ID);
+            config.telegram_bot_token = get_secure_key(ss, &key_map, KEY_TELEGRAM_BOT_TOKEN);
+            config.whatsapp_phone_id = get_secure_key(ss, &key_map, KEY_WHATSAPP_PHONE_ID);
+            config.whatsapp_access_token =
+                get_secure_key(ss, &key_map, KEY_WHATSAPP_ACCESS_TOKEN);
+            config.signal_number = get_secure_key(ss, &key_map, KEY_SIGNAL_NUMBER);
+            config.matrix_access_token = get_secure_key(ss, &key_map, KEY_MATRIX_ACCESS_TOKEN);
+            config.google_chat_access_token =
+                get_secure_key(ss, &key_map, KEY_GOOGLE_CHAT_ACCESS_TOKEN);
+            config.webchat_api_token = get_secure_key(ss, &key_map, KEY_WEBCHAT_API_TOKEN);
         }
     }
 
@@ -820,6 +887,17 @@ impl ConfigManager {
             "mistral" => config.mistral_api_key.clone(),
             "venice" => config.venice_api_key.clone(),
             "hue" => config.hue_api_key.clone(),
+            // Messaging provider tokens
+            "slack_bot" => config.slack_bot_token.clone(),
+            "discord_bot" => config.discord_bot_token.clone(),
+            "discord_guild" => config.discord_guild_id.clone(),
+            "telegram_bot" => config.telegram_bot_token.clone(),
+            "whatsapp_phone" => config.whatsapp_phone_id.clone(),
+            "whatsapp_access" => config.whatsapp_access_token.clone(),
+            "signal_number" => config.signal_number.clone(),
+            "matrix_access" => config.matrix_access_token.clone(),
+            "google_chat_access" => config.google_chat_access_token.clone(),
+            "webchat" => config.webchat_api_token.clone(),
             _ => None,
         }
     }
@@ -843,6 +921,17 @@ impl ConfigManager {
                 "mistral" => config.mistral_api_key = key.clone(),
                 "venice" => config.venice_api_key = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
+                // Messaging provider tokens
+                "slack_bot" => config.slack_bot_token = key.clone(),
+                "discord_bot" => config.discord_bot_token = key.clone(),
+                "discord_guild" => config.discord_guild_id = key.clone(),
+                "telegram_bot" => config.telegram_bot_token = key.clone(),
+                "whatsapp_phone" => config.whatsapp_phone_id = key.clone(),
+                "whatsapp_access" => config.whatsapp_access_token = key.clone(),
+                "signal_number" => config.signal_number = key.clone(),
+                "matrix_access" => config.matrix_access_token = key.clone(),
+                "google_chat_access" => config.google_chat_access_token = key.clone(),
+                "webchat" => config.webchat_api_token = key.clone(),
                 _ => anyhow::bail!("Unknown provider: {provider}"),
             }
         }
@@ -877,6 +966,39 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_CLOUD_JWT, &config.cloud_jwt)?;
+
+        // Messaging provider tokens
+        set_secure_key(ss, &mut key_map, KEY_SLACK_BOT_TOKEN, &config.slack_bot_token)?;
+        set_secure_key(ss, &mut key_map, KEY_DISCORD_BOT_TOKEN, &config.discord_bot_token)?;
+        set_secure_key(ss, &mut key_map, KEY_DISCORD_GUILD_ID, &config.discord_guild_id)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_TELEGRAM_BOT_TOKEN,
+            &config.telegram_bot_token,
+        )?;
+        set_secure_key(ss, &mut key_map, KEY_WHATSAPP_PHONE_ID, &config.whatsapp_phone_id)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_WHATSAPP_ACCESS_TOKEN,
+            &config.whatsapp_access_token,
+        )?;
+        set_secure_key(ss, &mut key_map, KEY_SIGNAL_NUMBER, &config.signal_number)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_MATRIX_ACCESS_TOKEN,
+            &config.matrix_access_token,
+        )?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_GOOGLE_CHAT_ACCESS_TOKEN,
+            &config.google_chat_access_token,
+        )?;
+        set_secure_key(ss, &mut key_map, KEY_WEBCHAT_API_TOKEN, &config.webchat_api_token)?;
+
         save_key_map(&self.keys_path, &key_map)
     }
 

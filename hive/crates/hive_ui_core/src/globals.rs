@@ -47,6 +47,7 @@ use hive_integrations::gitlab::GitLabClient;
 use hive_integrations::ide::IdeIntegrationService;
 use hive_integrations::knowledge::KnowledgeHub;
 use hive_integrations::kubernetes::KubernetesClient;
+use hive_integrations::messaging::CrossChannelService;
 use hive_integrations::messaging::MessagingHub;
 use hive_integrations::project_management::ProjectManagementHub;
 use hive_integrations::smart_home::PhilipsHueClient;
@@ -166,6 +167,11 @@ impl Global for AppNetwork {}
 /// Global wrapper for the messaging hub (Slack, Discord, Teams, etc.).
 pub struct AppMessaging(pub Arc<MessagingHub>);
 impl Global for AppMessaging {}
+
+/// Global wrapper for the cross-channel memory service (channel/thread linking,
+/// conversation tracking, unified search across messaging platforms).
+pub struct AppCrossChannel(pub Arc<Mutex<CrossChannelService>>);
+impl Global for AppCrossChannel {}
 
 /// Global wrapper for project management (Jira, Linear, Asana).
 pub struct AppProjectManagement(pub Arc<ProjectManagementHub>);

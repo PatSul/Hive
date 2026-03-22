@@ -65,6 +65,18 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
             send_message_tool(),
             stub("Connect a messaging platform in Settings to send messages"),
         ),
+        (
+            list_channels_tool(),
+            stub("Connect a messaging platform in Settings to list channels"),
+        ),
+        (
+            get_messages_tool(),
+            stub("Connect a messaging platform in Settings to get messages"),
+        ),
+        (
+            search_messages_tool(),
+            stub("Connect a messaging platform in Settings to search messages"),
+        ),
         // --- Project Management ---
         (
             create_issue_tool(),
@@ -429,6 +441,126 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
                             "timestamp": sent.timestamp
                         })),
                         Err(e) => Err(format!("Failed to send message: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.messaging);
+        tools.push((
+            list_channels_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.list_channels(plat).await {
+                        Ok(channels) => {
+                            let items: Vec<serde_json::Value> = channels
+                                .iter()
+                                .map(|c| json!({
+                                    "id": c.id,
+                                    "name": c.name,
+                                    "platform": format!("{}", c.platform),
+                                }))
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "count": items.len(),
+                                "channels": items,
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to list channels: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.messaging);
+        tools.push((
+            get_messages_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let channel = args["channel"].as_str().unwrap_or("").to_string();
+                let limit = args["limit"].as_u64().unwrap_or(20) as u32;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.get_messages(plat, &channel, limit).await {
+                        Ok(messages) => {
+                            let items: Vec<serde_json::Value> = messages
+                                .iter()
+                                .map(|m| json!({
+                                    "id": m.id,
+                                    "channel_id": m.channel_id,
+                                    "author": m.author,
+                                    "content": m.content,
+                                    "timestamp": m.timestamp,
+                                    "attachments": m.attachments.iter().map(|a| json!({
+                                        "name": a.name,
+                                        "url": a.url,
+                                        "mime_type": a.mime_type,
+                                        "size": a.size,
+                                    })).collect::<Vec<_>>(),
+                                    "platform": format!("{}", m.platform),
+                                }))
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "channel": channel,
+                                "count": items.len(),
+                                "messages": items,
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to get messages: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.messaging);
+        tools.push((
+            search_messages_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let query = args["query"].as_str().unwrap_or("").to_string();
+                let limit = args["limit"].as_u64().unwrap_or(10) as u32;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.search_messages(plat, &query, limit).await {
+                        Ok(messages) => {
+                            let items: Vec<serde_json::Value> = messages
+                                .iter()
+                                .map(|m| json!({
+                                    "id": m.id,
+                                    "channel_id": m.channel_id,
+                                    "author": m.author,
+                                    "content": m.content,
+                                    "timestamp": m.timestamp,
+                                    "attachments": m.attachments.iter().map(|a| json!({
+                                        "name": a.name,
+                                        "url": a.url,
+                                        "mime_type": a.mime_type,
+                                        "size": a.size,
+                                    })).collect::<Vec<_>>(),
+                                    "platform": format!("{}", m.platform),
+                                }))
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "query": query,
+                                "count": items.len(),
+                                "messages": items,
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to search messages: {e}")),
                     }
                 })
             }) as ToolHandler,
@@ -2341,6 +2473,52 @@ fn send_message_tool() -> McpTool {
     }
 }
 
+fn list_channels_tool() -> McpTool {
+    McpTool {
+        name: "list_channels".into(),
+        description: "List available channels/conversations on a messaging platform".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] }
+            },
+            "required": ["platform"]
+        }),
+    }
+}
+
+fn get_messages_tool() -> McpTool {
+    McpTool {
+        name: "get_messages".into(),
+        description: "Get recent messages from a channel on a messaging platform".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] },
+                "channel": { "type": "string", "description": "Channel name or ID" },
+                "limit": { "type": "integer", "description": "Maximum number of messages to retrieve (default 20)", "default": 20 }
+            },
+            "required": ["platform", "channel"]
+        }),
+    }
+}
+
+fn search_messages_tool() -> McpTool {
+    McpTool {
+        name: "search_messages".into(),
+        description: "Search messages across a messaging platform".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] },
+                "query": { "type": "string", "description": "Search query" },
+                "limit": { "type": "integer", "description": "Maximum number of results to return (default 10)", "default": 10 }
+            },
+            "required": ["platform", "query"]
+        }),
+    }
+}
+
 fn create_issue_tool() -> McpTool {
     McpTool {
         name: "create_issue".into(),
@@ -4101,10 +4279,19 @@ fn encode_base64(input: &[u8]) -> String {
 }
 
 fn parse_messaging_platform(s: &str) -> hive_integrations::messaging::Platform {
+    use hive_integrations::messaging::Platform;
     match s {
-        "discord" => hive_integrations::messaging::Platform::Discord,
-        "teams" => hive_integrations::messaging::Platform::Teams,
-        _ => hive_integrations::messaging::Platform::Slack,
+        "slack" => Platform::Slack,
+        "discord" => Platform::Discord,
+        "teams" => Platform::Teams,
+        "telegram" => Platform::Telegram,
+        "whatsapp" => Platform::WhatsApp,
+        "signal" => Platform::Signal,
+        "matrix" => Platform::Matrix,
+        "google_chat" => Platform::GoogleChat,
+        "web_chat" | "webchat" => Platform::WebChat,
+        "imessage" | "i_message" => Platform::IMessage,
+        _ => Platform::Slack,
     }
 }
 

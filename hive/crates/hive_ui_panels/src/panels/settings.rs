@@ -82,6 +82,17 @@ pub struct SettingsData {
     pub tts_provider: String,
     pub tts_speed: f32,
     pub clawdtalk_enabled: bool,
+    // Messaging bot tokens
+    pub slack_bot_token: String,
+    pub discord_bot_token: String,
+    pub telegram_bot_token: String,
+    pub whatsapp_phone_id: String,
+    pub whatsapp_access_token: String,
+    pub signal_api_url: String,
+    pub matrix_homeserver: String,
+    pub matrix_access_token: String,
+    pub google_chat_sa_key: String,
+    pub webchat_api_token: String,
     // Cloud account
     pub cloud_logged_in: bool,
     pub cloud_email: Option<String>,
@@ -127,6 +138,16 @@ impl Default for SettingsData {
             tts_provider: "qwen3".into(),
             tts_speed: 1.0,
             clawdtalk_enabled: false,
+            slack_bot_token: String::new(),
+            discord_bot_token: String::new(),
+            telegram_bot_token: String::new(),
+            whatsapp_phone_id: String::new(),
+            whatsapp_access_token: String::new(),
+            signal_api_url: String::new(),
+            matrix_homeserver: String::new(),
+            matrix_access_token: String::new(),
+            google_chat_sa_key: String::new(),
+            webchat_api_token: String::new(),
             cloud_logged_in: false,
             cloud_email: None,
             cloud_tier: None,
@@ -187,6 +208,16 @@ impl SettingsData {
             tts_provider: cfg.tts_provider.clone(),
             tts_speed: cfg.tts_speed,
             clawdtalk_enabled: cfg.clawdtalk_enabled,
+            slack_bot_token: cfg.slack_bot_token.clone().unwrap_or_default(),
+            discord_bot_token: cfg.discord_bot_token.clone().unwrap_or_default(),
+            telegram_bot_token: cfg.telegram_bot_token.clone().unwrap_or_default(),
+            whatsapp_phone_id: cfg.whatsapp_phone_id.clone().unwrap_or_default(),
+            whatsapp_access_token: cfg.whatsapp_access_token.clone().unwrap_or_default(),
+            signal_api_url: cfg.signal_api_url.clone().unwrap_or_default(),
+            matrix_homeserver: cfg.matrix_homeserver.clone().unwrap_or_default(),
+            matrix_access_token: cfg.matrix_access_token.clone().unwrap_or_default(),
+            google_chat_sa_key: cfg.google_chat_sa_key.clone().unwrap_or_default(),
+            webchat_api_token: cfg.webchat_api_token.clone().unwrap_or_default(),
             cloud_logged_in: cfg.cloud_jwt.as_ref().is_some_and(|t| !t.is_empty()),
             cloud_email: None,
             cloud_tier: cfg.cloud_tier.clone(),
@@ -1273,6 +1304,33 @@ impl SettingsView {
             // Knowledge base — read from config (no UI inputs yet)
             notion_key: None,
             obsidian_vault_path: None,
+            // Messaging bot tokens — read from config (no UI inputs yet)
+            slack_bot_token: self.read_config_string(cx, |cfg| &cfg.slack_bot_token),
+            discord_bot_token: self.read_config_string(cx, |cfg| &cfg.discord_bot_token),
+            telegram_bot_token: self.read_config_string(cx, |cfg| &cfg.telegram_bot_token),
+            whatsapp_phone_id: self.read_config_string(cx, |cfg| &cfg.whatsapp_phone_id),
+            whatsapp_access_token: self.read_config_string(cx, |cfg| &cfg.whatsapp_access_token),
+            signal_api_url: self.read_config_string(cx, |cfg| &cfg.signal_api_url),
+            matrix_homeserver: self.read_config_string(cx, |cfg| &cfg.matrix_homeserver),
+            matrix_access_token: self.read_config_string(cx, |cfg| &cfg.matrix_access_token),
+            google_chat_sa_key: self.read_config_string(cx, |cfg| &cfg.google_chat_sa_key),
+            webchat_api_token: self.read_config_string(cx, |cfg| &cfg.webchat_api_token),
+        }
+    }
+
+    /// Read an optional string field from the global config, returning empty
+    /// string if the config is unavailable or the field is `None`.
+    fn read_config_string(
+        &self,
+        cx: &App,
+        field: fn(&hive_core::HiveConfig) -> &Option<String>,
+    ) -> String {
+        if cx.has_global::<AppConfig>() {
+            field(&cx.global::<AppConfig>().0.get())
+                .clone()
+                .unwrap_or_default()
+        } else {
+            String::new()
         }
     }
 
@@ -1423,6 +1481,17 @@ pub struct SettingsSnapshot {
     // Knowledge base
     pub notion_key: Option<String>,
     pub obsidian_vault_path: Option<String>,
+    // Messaging bot tokens
+    pub slack_bot_token: String,
+    pub discord_bot_token: String,
+    pub telegram_bot_token: String,
+    pub whatsapp_phone_id: String,
+    pub whatsapp_access_token: String,
+    pub signal_api_url: String,
+    pub matrix_homeserver: String,
+    pub matrix_access_token: String,
+    pub google_chat_sa_key: String,
+    pub webchat_api_token: String,
     // OAuth client IDs
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,
