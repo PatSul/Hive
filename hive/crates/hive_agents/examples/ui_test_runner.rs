@@ -1,20 +1,28 @@
 //! UI test runner - brings Hive to front, clicks sidebar panels, captures screenshots.
 //! Uses Win32 APIs for window management and enigo for mouse input.
 //! Windows-only — this example relies on Win32 FFI.
-#![allow(unsafe_op_in_unsafe_fn, dead_code)]
-#![cfg(target_os = "windows")]
 
-use enigo::{Button, Coordinate, Direction, Enigo, Mouse, Settings};
-use std::env;
-use std::ffi::OsStr;
-use std::os::windows::ffi::OsStrExt;
-use std::ptr;
-use std::thread;
-use std::time::Duration;
+// On non-Windows, provide a stub main so the example compiles.
+#[cfg(not(target_os = "windows"))]
+fn main() {
+    eprintln!("ui_test_runner is Windows-only");
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_op_in_unsafe_fn, dead_code)]
+mod runner {
+
+pub use enigo::{Button, Coordinate, Direction, Enigo, Mouse, Settings};
+pub use std::env;
+pub use std::ffi::OsStr;
+pub use std::os::windows::ffi::OsStrExt;
+pub use std::ptr;
+pub use std::thread;
+pub use std::time::Duration;
 
 // Win32 FFI
 #[allow(non_snake_case)]
-mod win32 {
+pub mod win32 {
     use std::ffi::c_void;
 
     #[repr(C)]
@@ -72,16 +80,16 @@ mod win32 {
     }
 }
 
-fn to_wide(s: &str) -> Vec<u16> {
+pub fn to_wide(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(Some(0)).collect()
 }
 
-fn find_hive_window() -> *mut std::ffi::c_void {
+pub fn find_hive_window() -> *mut std::ffi::c_void {
     let class_name = to_wide("Zed::Window");
     unsafe { win32::FindWindowW(class_name.as_ptr(), ptr::null()) }
 }
 
-fn click_at(enigo: &mut Enigo, x: i32, y: i32) {
+pub fn click_at(enigo: &mut Enigo, x: i32, y: i32) {
     enigo
         .move_mouse(x, y, Coordinate::Abs)
         .expect("move failed");
@@ -91,7 +99,7 @@ fn click_at(enigo: &mut Enigo, x: i32, y: i32) {
         .expect("click failed");
 }
 
-fn main() {
+pub fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Commands:");
@@ -236,4 +244,11 @@ fn main() {
         }
         _ => eprintln!("Unknown command"),
     }
+}
+
+} // mod runner
+
+#[cfg(target_os = "windows")]
+fn main() {
+    runner::main();
 }
