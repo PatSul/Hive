@@ -124,6 +124,11 @@ impl ContextWindow {
         self.compaction_threshold
     }
 
+    /// Get the maximum token budget for this context window.
+    pub fn max_tokens(&self) -> usize {
+        self.max_tokens
+    }
+
     /// Set the system prompt (counts toward the token budget).
     pub fn set_system_prompt(&mut self, prompt: &str) {
         self.system_prompt_tokens = estimate_tokens(prompt);

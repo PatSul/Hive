@@ -756,6 +756,7 @@ impl ChatService {
         // 1. Record the user message.
         let user_msg = ChatMessage::user(&content);
         self.messages.push(user_msg);
+        self.context_window.push(ContextMessage::new("user", &content));
 
         // Track in context window for token budget management.
         if let Some(ctx_msg) = self
@@ -1327,6 +1328,7 @@ impl ChatService {
         self.is_streaming = false;
         self._stream_task = None;
         self.generation += 1;
+        self.context_window.push(ContextMessage::new("assistant", content));
 
         info!(
             "ChatService: stream finalized ({} messages, model={}, ctx_usage={:.0}%)",

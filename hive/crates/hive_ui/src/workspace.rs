@@ -573,6 +573,22 @@ impl HiveWorkspace {
         })
         .detach();
 
+        // Phase 3: Run memory maintenance on workspace startup.
+        if cx.has_global::<hive_ui_core::AppCollectiveMemory>() {
+            let mem = &cx.global::<hive_ui_core::AppCollectiveMemory>().0;
+            match mem.maintenance(0.98, 0.1, 0.85) {
+                Ok(report) => {
+                    if report.decayed > 0 || report.pruned > 0 || report.deduplicated > 0 {
+                        tracing::info!(
+                            "Memory maintenance: {} decayed, {} pruned, {} deduplicated",
+                            report.decayed, report.pruned, report.deduplicated
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!("Memory maintenance failed: {e}"),
+            }
+        }
+
         // Build initial status bar from config + providers.
         let mut status_bar = StatusBar::new();
         if cx.has_global::<AppConfig>() {
@@ -1304,6 +1320,7 @@ impl HiveWorkspace {
 
     // -- Send flow -----------------------------------------------------------
 
+
     // -- Rendering -----------------------------------------------------------
 
     fn render_active_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -1392,6 +1409,7 @@ impl HiveWorkspace {
     // -- Plugin action handlers -----------------------------------------------
 
     // -- Routing panel handlers ----------------------------------------------
+
 
     // -- Monitor panel handlers ----------------------------------------------
 
