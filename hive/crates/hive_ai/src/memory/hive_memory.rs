@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::embeddings::EmbeddingProvider;
 use super::store::MemoryStore;
 use super::types::*;
+use crate::embeddings::EmbeddingProvider;
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
@@ -19,25 +19,21 @@ pub struct HiveMemory {
 }
 
 impl HiveMemory {
-    pub async fn open(
-        path: &str,
-        embedder: Arc<dyn EmbeddingProvider>,
-    ) -> Result<Self, BoxErr> {
+    pub async fn open(path: &str, embedder: Arc<dyn EmbeddingProvider>) -> Result<Self, BoxErr> {
         let dim = embedder.dimensions();
         let store = MemoryStore::open(path).await?.with_dimensions(dim);
         Ok(Self { store, embedder })
     }
 
     /// Index a file's content as searchable chunks
-    pub async fn index_file(
-        &self,
-        path: &str,
-        content: &str,
-    ) -> Result<(), BoxErr> {
+    pub async fn index_file(&self, path: &str, content: &str) -> Result<(), BoxErr> {
         let chunks = self.chunk_content(content, 50, 10);
 
         for (i, chunk) in chunks.iter().enumerate() {
-            let embedding = self.embedder.embed(&[chunk.as_str()]).await
+            let embedding = self
+                .embedder
+                .embed(&[chunk.as_str()])
+                .await
                 .map_err(|e| -> BoxErr { Box::new(e) })?;
             if let Some(emb) = embedding.first() {
                 let start = (i * 40) as u32;
@@ -49,14 +45,15 @@ impl HiveMemory {
     }
 
     /// Query both chunks and memories
-    pub async fn query(
-        &self,
-        text: &str,
-        max_results: usize,
-    ) -> Result<QueryResult, BoxErr> {
-        let embedding = self.embedder.embed(&[text]).await
+    pub async fn query(&self, text: &str, max_results: usize) -> Result<QueryResult, BoxErr> {
+        let embedding = self
+            .embedder
+            .embed(&[text])
+            .await
             .map_err(|e| -> BoxErr { Box::new(e) })?;
-        let emb = embedding.first().ok_or::<BoxErr>("Failed to embed query".into())?;
+        let emb = embedding
+            .first()
+            .ok_or::<BoxErr>("Failed to embed query".into())?;
 
         let chunks = self.store.search_chunks(emb, max_results).await?;
         let memories = self.store.recall(emb, max_results).await?;
@@ -65,11 +62,11 @@ impl HiveMemory {
     }
 
     /// Store a durable memory
-    pub async fn remember(
-        &self,
-        entry: MemoryEntry,
-    ) -> Result<(), BoxErr> {
-        let embedding = self.embedder.embed(&[entry.content.as_str()]).await
+    pub async fn remember(&self, entry: MemoryEntry) -> Result<(), BoxErr> {
+        let embedding = self
+            .embedder
+            .embed(&[entry.content.as_str()])
+            .await
             .map_err(|e| -> BoxErr { Box::new(e) })?;
         if let Some(emb) = embedding.first() {
             self.store.remember(entry, emb).await?;
@@ -78,14 +75,15 @@ impl HiveMemory {
     }
 
     /// Recall memories relevant to a query
-    pub async fn recall(
-        &self,
-        text: &str,
-        limit: usize,
-    ) -> Result<Vec<MemoryResult>, BoxErr> {
-        let embedding = self.embedder.embed(&[text]).await
+    pub async fn recall(&self, text: &str, limit: usize) -> Result<Vec<MemoryResult>, BoxErr> {
+        let embedding = self
+            .embedder
+            .embed(&[text])
+            .await
             .map_err(|e| -> BoxErr { Box::new(e) })?;
-        let emb = embedding.first().ok_or::<BoxErr>("Failed to embed query".into())?;
+        let emb = embedding
+            .first()
+            .ok_or::<BoxErr>("Failed to embed query".into())?;
         self.store.recall(emb, limit).await
     }
 

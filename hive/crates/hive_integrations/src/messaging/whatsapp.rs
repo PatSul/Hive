@@ -175,12 +175,7 @@ impl MessagingProvider for WhatsAppProvider {
         Ok(vec![])
     }
 
-    async fn add_reaction(
-        &self,
-        _channel: &str,
-        message_id: &str,
-        emoji: &str,
-    ) -> Result<()> {
+    async fn add_reaction(&self, _channel: &str, message_id: &str, emoji: &str) -> Result<()> {
         let url = self.messages_url();
         let payload = serde_json::json!({
             "messaging_product": "whatsapp",
@@ -234,8 +229,7 @@ mod tests {
     use super::*;
 
     fn make_provider() -> WhatsAppProvider {
-        WhatsAppProvider::with_base_url("123456789", "test-access-token", DEFAULT_BASE_URL)
-            .unwrap()
+        WhatsAppProvider::with_base_url("123456789", "test-access-token", DEFAULT_BASE_URL).unwrap()
     }
 
     #[test]
@@ -268,10 +262,7 @@ mod tests {
     fn test_messages_url_construction() {
         let provider = make_provider();
         let url = provider.messages_url();
-        assert_eq!(
-            url,
-            "https://graph.facebook.com/v18.0/123456789/messages"
-        );
+        assert_eq!(url, "https://graph.facebook.com/v18.0/123456789/messages");
     }
 
     #[test]

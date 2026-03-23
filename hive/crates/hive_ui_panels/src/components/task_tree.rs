@@ -96,13 +96,7 @@ impl TaskTreeState {
     }
 
     /// Mark a task as Completed with execution details.
-    pub fn mark_completed(
-        &mut self,
-        task_id: &str,
-        duration_ms: u64,
-        cost: f64,
-        output: String,
-    ) {
+    pub fn mark_completed(&mut self, task_id: &str, duration_ms: u64, cost: f64, output: String) {
         if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
             task.status = TaskDisplayStatus::Completed;
             task.duration_ms = Some(duration_ms);
@@ -169,11 +163,7 @@ impl TaskTreeState {
     pub fn model_overrides(&self) -> Vec<(String, String)> {
         self.tasks
             .iter()
-            .filter_map(|t| {
-                t.model_override
-                    .as_ref()
-                    .map(|m| (t.id.clone(), m.clone()))
-            })
+            .filter_map(|t| t.model_override.as_ref().map(|m| (t.id.clone(), m.clone())))
             .collect()
     }
 }
@@ -277,9 +267,7 @@ impl Render for TaskTreeView {
                                 .text_size(theme.font_size_xs)
                                 .text_color(theme.text_muted)
                                 .child(format!("@{}", task.persona))
-                                .children(task.model_override.as_ref().map(|m| {
-                                    format!("[{}]", m)
-                                }))
+                                .children(task.model_override.as_ref().map(|m| format!("[{}]", m)))
                                 .children(task.duration_ms.map(|ms| format!("{}ms", ms)))
                                 .children(task.cost.map(|c| format!("${:.4}", c))),
                         ),
@@ -290,33 +278,25 @@ impl Render for TaskTreeView {
                     TaskDisplayStatus::Failed(e) => Some(e.clone()),
                     _ => None,
                 } {
-                    div()
-                        .w_full()
-                        .flex_col()
-                        .child(row)
-                        .child(
-                            div()
-                                .w_full()
-                                .p(theme.space_2)
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.accent_red)
-                                .bg(theme.bg_surface)
-                                .child(err),
-                        )
+                    div().w_full().flex_col().child(row).child(
+                        div()
+                            .w_full()
+                            .p(theme.space_2)
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.accent_red)
+                            .bg(theme.bg_surface)
+                            .child(err),
+                    )
                 } else if let Some(preview) = &task.output_preview {
-                    div()
-                        .w_full()
-                        .flex_col()
-                        .child(row)
-                        .child(
-                            div()
-                                .w_full()
-                                .p(theme.space_2)
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.text_muted)
-                                .bg(theme.bg_surface)
-                                .child(preview.clone()),
-                        )
+                    div().w_full().flex_col().child(row).child(
+                        div()
+                            .w_full()
+                            .p(theme.space_2)
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.text_muted)
+                            .bg(theme.bg_surface)
+                            .child(preview.clone()),
+                    )
                 } else {
                     row
                 }
@@ -342,4 +322,3 @@ impl Render for TaskTreeView {
             )
     }
 }
-

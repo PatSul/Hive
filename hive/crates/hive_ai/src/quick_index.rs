@@ -26,7 +26,8 @@ const MAX_SYMBOLS: usize = 500;
 const MAX_FILE_SIZE_FOR_SYMBOLS: u64 = 100_000;
 
 /// Directories to always skip during file-tree walks.
-const SKIP_DIRS: &[&str] = &[
+/// Shared between QuickIndex and BackgroundIndexer.
+pub const SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     "target",
@@ -45,10 +46,20 @@ const SKIP_DIRS: &[&str] = &[
     ".vscode",
 ];
 
+/// Returns `true` if a directory entry should be skipped during file-tree walks.
+/// Shared between QuickIndex and BackgroundIndexer.
+pub fn should_skip_dir(name: &str) -> bool {
+    name.starts_with('.')
+        || SKIP_DIRS.contains(&name)
+        || name.starts_with("target-")
+        || name.starts_with("dist-")
+        || name.starts_with("build-")
+}
+
 /// Extensions worth scanning for symbols.
 const SYMBOL_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "kt", "rb", "cpp", "c", "h", "hpp",
-    "cs", "swift",
+    "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "kt", "rb", "cpp", "c", "h", "hpp", "cs",
+    "swift",
 ];
 
 // ---------------------------------------------------------------------------
@@ -498,7 +509,7 @@ impl QuickIndex {
                 let path = entry.path();
                 if path.is_dir() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_str()) {
+                    if !should_skip_dir(&name) {
                         key_dirs.push(format!("{name}/"));
                     }
                 }
@@ -533,7 +544,7 @@ impl QuickIndex {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if path.is_dir() {
-                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                if should_skip_dir(&name) {
                     continue;
                 }
                 Self::walk_for_tree(root, &path, total_files, by_extension);
@@ -585,9 +596,15 @@ impl QuickIndex {
             let ts_count = by_extension.get("ts").copied().unwrap_or(0)
                 + by_extension.get("tsx").copied().unwrap_or(0);
             if ts_count > 0 {
-                project_type.push(format!("TypeScript project with {} .ts/.tsx files", ts_count));
+                project_type.push(format!(
+                    "TypeScript project with {} .ts/.tsx files",
+                    ts_count
+                ));
             } else if js_count > 0 {
-                project_type.push(format!("JavaScript project with {} .js/.jsx files", js_count));
+                project_type.push(format!(
+                    "JavaScript project with {} .js/.jsx files",
+                    js_count
+                ));
             } else {
                 project_type.push("Node.js project".to_string());
             }
@@ -602,9 +619,7 @@ impl QuickIndex {
         }
 
         if project_type.is_empty() {
-            format!(
-                "Project \"{project_name}\" with {total_files} files"
-            )
+            format!("Project \"{project_name}\" with {total_files} files")
         } else {
             format!(
                 "\"{project_name}\": {} ({total_files} total files)",
@@ -684,7 +699,7 @@ impl QuickIndex {
             let name = entry.file_name().to_string_lossy().to_string();
 
             if path.is_dir() {
-                if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                if should_skip_dir(&name) {
                     continue;
                 }
                 Self::collect_symbol_candidates(root, &path, candidates);
@@ -795,9 +810,9 @@ impl QuickIndex {
         }
 
         // Non-exported top-level function/class declarations
-        let re_decl = Regex::new(
-            r"(?m)^(?:async\s+)?(?:function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)"
-        ).unwrap();
+        let re_decl =
+            Regex::new(r"(?m)^(?:async\s+)?(?:function|class)\s+([A-Za-z_$][A-Za-z0-9_$]*)")
+                .unwrap();
         for cap in re_decl.captures_iter(content) {
             let name = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let line = cap.get(0).map(|m| m.as_str()).unwrap_or("");
@@ -820,9 +835,8 @@ impl QuickIndex {
 
     fn extract_go_symbols(content: &str, file: &str) -> Vec<SymbolEntry> {
         let mut symbols = Vec::new();
-        let re = Regex::new(
-            r"(?m)^(?:func|type)\s+(?:\([^)]*\)\s+)?([A-Za-z_][A-Za-z0-9_]*)"
-        ).unwrap();
+        let re =
+            Regex::new(r"(?m)^(?:func|type)\s+(?:\([^)]*\)\s+)?([A-Za-z_][A-Za-z0-9_]*)").unwrap();
         for cap in re.captures_iter(content) {
             let name = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let line = cap.get(0).map(|m| m.as_str()).unwrap_or("");
@@ -867,9 +881,8 @@ impl QuickIndex {
     fn extract_c_cpp_symbols(content: &str, file: &str) -> Vec<SymbolEntry> {
         let mut symbols = Vec::new();
         // Struct/class/enum declarations
-        let re = Regex::new(
-            r"(?m)^[[:space:]]*(struct|class|enum)\s+([A-Za-z_][A-Za-z0-9_]*)"
-        ).unwrap();
+        let re =
+            Regex::new(r"(?m)^[[:space:]]*(struct|class|enum)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
         for cap in re.captures_iter(content) {
             let kind_str = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let name = cap.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -914,7 +927,8 @@ impl QuickIndex {
 
     fn extract_ruby_symbols(content: &str, file: &str) -> Vec<SymbolEntry> {
         let mut symbols = Vec::new();
-        let re = Regex::new(r"(?m)^[[:space:]]*(class|module|def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
+        let re =
+            Regex::new(r"(?m)^[[:space:]]*(class|module|def)\s+([A-Za-z_][A-Za-z0-9_]*)").unwrap();
         for cap in re.captures_iter(content) {
             let kind_str = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let name = cap.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -936,8 +950,9 @@ impl QuickIndex {
     fn extract_swift_symbols(content: &str, file: &str) -> Vec<SymbolEntry> {
         let mut symbols = Vec::new();
         let re = Regex::new(
-            r"(?m)^[[:space:]]*(class|struct|enum|protocol|func)\s+([A-Za-z_][A-Za-z0-9_]*)"
-        ).unwrap();
+            r"(?m)^[[:space:]]*(class|struct|enum|protocol|func)\s+([A-Za-z_][A-Za-z0-9_]*)",
+        )
+        .unwrap();
         for cap in re.captures_iter(content) {
             let kind_str = cap.get(1).map(|m| m.as_str()).unwrap_or("");
             let name = cap.get(2).map(|m| m.as_str()).unwrap_or("");
@@ -1021,15 +1036,12 @@ impl QuickIndex {
             if let Some(start) = content.find(section) {
                 let after = &content[start + section.len()..];
                 // Read until next section header or end
-                let end = after
-                    .find("\n[")
-                    .unwrap_or(after.len());
+                let end = after.find("\n[").unwrap_or(after.len());
                 let block = &after[..end];
 
                 // Match `name = "version"` or `name = { version = "x" }` or `name.workspace = true`
-                let re_simple = Regex::new(
-                    r#"(?m)^[[:space:]]*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)""#
-                ).unwrap();
+                let re_simple =
+                    Regex::new(r#"(?m)^[[:space:]]*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)""#).unwrap();
                 let re_table = Regex::new(
                     r#"(?m)^[[:space:]]*([A-Za-z0-9_-]+)\s*=\s*\{[^}]*version\s*=\s*"([^"]*)"[^}]*\}"#
                 ).unwrap();
@@ -1198,7 +1210,13 @@ impl QuickIndex {
 
             entries.push(GitEntry {
                 hash: oid.to_string(),
-                message: commit.message().unwrap_or("").lines().next().unwrap_or("").to_string(),
+                message: commit
+                    .message()
+                    .unwrap_or("")
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
                 author: commit.author().name().unwrap_or("unknown").to_string(),
                 days_ago,
             });
@@ -1595,7 +1613,11 @@ function helper() {}
         let ctx = index.to_context_string();
 
         // Should be well under 8000 chars (~2000 tokens)
-        assert!(ctx.len() < 8000, "Context string too large: {} chars", ctx.len());
+        assert!(
+            ctx.len() < 8000,
+            "Context string too large: {} chars",
+            ctx.len()
+        );
     }
 
     // -- Git log (requires git init) -----------------------------------------

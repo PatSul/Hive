@@ -102,19 +102,14 @@ impl PeerConnection {
 #[derive(Debug)]
 pub enum TransportEvent {
     /// A new inbound connection was accepted from the given address.
-    InboundConnection {
-        addr: SocketAddr,
-        peer_id: PeerId,
-    },
+    InboundConnection { addr: SocketAddr, peer_id: PeerId },
     /// An envelope was received from a peer.
     Message {
         from_addr: SocketAddr,
         envelope: Envelope,
     },
     /// A peer disconnected.
-    Disconnected {
-        addr: SocketAddr,
-    },
+    Disconnected { addr: SocketAddr },
 }
 
 /// Start the WebSocket server on the given address.
@@ -250,21 +245,19 @@ pub async fn connect_to_peer(
     tokio::spawn(async move {
         while let Some(msg) = stream.next().await {
             match msg {
-                Ok(Message::Text(text)) => {
-                    match Envelope::from_json(&text) {
-                        Ok(envelope) => {
-                            let _ = event_tx
-                                .send(TransportEvent::Message {
-                                    from_addr: peer_addr,
-                                    envelope,
-                                })
-                                .await;
-                        }
-                        Err(e) => {
-                            warn!("Bad envelope from {peer_addr}: {e}");
-                        }
+                Ok(Message::Text(text)) => match Envelope::from_json(&text) {
+                    Ok(envelope) => {
+                        let _ = event_tx
+                            .send(TransportEvent::Message {
+                                from_addr: peer_addr,
+                                envelope,
+                            })
+                            .await;
                     }
-                }
+                    Err(e) => {
+                        warn!("Bad envelope from {peer_addr}: {e}");
+                    }
+                },
                 Ok(Message::Close(_)) => {
                     debug!("Remote {peer_addr} sent close");
                     break;
@@ -347,19 +340,12 @@ mod tests {
 
         // Server should receive the connection and message.
         // Wait for inbound connection event.
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            event_rx.recv(),
-        )
-        .await;
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), event_rx.recv()).await;
         assert!(event.is_ok());
 
         // Wait for server-side connection handle.
-        let server_conn = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            conn_rx.recv(),
-        )
-        .await;
+        let server_conn =
+            tokio::time::timeout(std::time::Duration::from_secs(2), conn_rx.recv()).await;
         assert!(server_conn.is_ok());
 
         // Cleanup.

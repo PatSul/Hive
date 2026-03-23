@@ -911,10 +911,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             context_window: 131_072,
             input_price_per_mtok: 0.30,
             output_price_per_mtok: 0.50,
-            capabilities: caps(&[
-                ModelCapability::ToolUse,
-                ModelCapability::LongContext,
-            ]),
+            capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
             release_date: Some("2025-02-17".into()),
         },
         ModelInfo {
@@ -926,10 +923,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             context_window: 131_072,
             input_price_per_mtok: 2.00,
             output_price_per_mtok: 10.00,
-            capabilities: caps(&[
-                ModelCapability::ToolUse,
-                ModelCapability::LongContext,
-            ]),
+            capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::LongContext]),
             release_date: Some("2024-12-12".into()),
         },
         // ---- Mistral (direct API) ----
@@ -959,10 +953,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             context_window: 32_000,
             input_price_per_mtok: 0.1,
             output_price_per_mtok: 0.3,
-            capabilities: caps(&[
-                ModelCapability::ToolUse,
-                ModelCapability::StructuredOutput,
-            ]),
+            capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::StructuredOutput]),
             release_date: None,
         },
         ModelInfo {
@@ -1024,10 +1015,7 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             context_window: 128_000,
             input_price_per_mtok: 0.3,
             output_price_per_mtok: 0.6,
-            capabilities: caps(&[
-                ModelCapability::ToolUse,
-                ModelCapability::StructuredOutput,
-            ]),
+            capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::StructuredOutput]),
             release_date: None,
         },
         // ---- Hugging Face ----

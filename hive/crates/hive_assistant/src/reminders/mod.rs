@@ -194,26 +194,24 @@ impl ReminderService {
                         });
                     }
                 }
-                ReminderTrigger::Recurring(cron_expr) => {
-                    match CronSchedule::parse(cron_expr) {
-                        Ok(cron) => {
-                            if cron.matches(&now) {
-                                triggered.push(TriggeredReminder {
-                                    reminder_id: reminder.id.clone(),
-                                    title: reminder.title.clone(),
-                                    triggered_at: now.to_rfc3339(),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                reminder_id = %reminder.id,
-                                cron_expr = %cron_expr,
-                                "Failed to parse cron expression, skipping: {e}"
-                            );
+                ReminderTrigger::Recurring(cron_expr) => match CronSchedule::parse(cron_expr) {
+                    Ok(cron) => {
+                        if cron.matches(&now) {
+                            triggered.push(TriggeredReminder {
+                                reminder_id: reminder.id.clone(),
+                                title: reminder.title.clone(),
+                                triggered_at: now.to_rfc3339(),
+                            });
                         }
                     }
-                }
+                    Err(e) => {
+                        warn!(
+                            reminder_id = %reminder.id,
+                            cron_expr = %cron_expr,
+                            "Failed to parse cron expression, skipping: {e}"
+                        );
+                    }
+                },
                 ReminderTrigger::OnEvent(_) => {
                     // Event-based reminders fire via check_event() method,
                     // not during periodic tick().
@@ -236,13 +234,14 @@ impl ReminderService {
 
         for reminder in &active {
             if let ReminderTrigger::OnEvent(ref trigger_event) = reminder.trigger
-                && trigger_event == event_name {
-                    triggered.push(TriggeredReminder {
-                        reminder_id: reminder.id.clone(),
-                        title: reminder.title.clone(),
-                        triggered_at: now.to_rfc3339(),
-                    });
-                }
+                && trigger_event == event_name
+            {
+                triggered.push(TriggeredReminder {
+                    reminder_id: reminder.id.clone(),
+                    title: reminder.title.clone(),
+                    triggered_at: now.to_rfc3339(),
+                });
+            }
         }
 
         Ok(triggered)

@@ -1,5 +1,5 @@
-use anyhow::Context;
 use crate::relay::RelayFrame;
+use anyhow::Context;
 use futures::{SinkExt, StreamExt};
 use hive_core::config::HiveConfig;
 use tokio::sync::mpsc;
@@ -21,9 +21,7 @@ impl RelayClient {
             && !url.starts_with("ws://localhost")
             && !url.starts_with("ws://127.0.0.1")
         {
-            return Err(
-                "Relay URL must use wss:// (except localhost for development)".into(),
-            );
+            return Err("Relay URL must use wss:// (except localhost for development)".into());
         }
         Ok(Self {
             server_url: url.to_string(),
@@ -49,7 +47,9 @@ impl RelayClient {
             std::env::var("HIVE_SESSION_TOKEN").ok(),
             std::env::var("HIVE_CLOUD_JWT").ok().or(config_token),
         )
-        .context("No relay session token configured. Set HIVE_SESSION_TOKEN or log in to Hive Cloud.")?;
+        .context(
+            "No relay session token configured. Set HIVE_SESSION_TOKEN or log in to Hive Cloud.",
+        )?;
 
         self.connect_with_token(node_id, &session_token).await
     }

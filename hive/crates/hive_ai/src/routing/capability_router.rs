@@ -563,8 +563,13 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Vision,
             vec![
-                "image", "picture", "screenshot", "photo",
-                "look at this", "what's in this", "describe this image",
+                "image",
+                "picture",
+                "screenshot",
+                "photo",
+                "look at this",
+                "what's in this",
+                "describe this image",
                 "what do you see",
             ],
         ),
@@ -573,8 +578,13 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::ToolUse,
             vec![
-                "use the tool", "call the function", "invoke", "api call",
-                "run the command", "execute the tool", "tool_call",
+                "use the tool",
+                "call the function",
+                "invoke",
+                "api call",
+                "run the command",
+                "execute the tool",
+                "tool_call",
                 "function_call",
             ],
         ),
@@ -582,11 +592,20 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Agentic,
             vec![
-                "multi-step", "autonomous", "agent",
-                "plan and execute", "workflow", "pipeline",
-                "do all of", "complete the entire", "automate",
-                "multi-file", "across files", "whole project",
-                "refactor the entire", "migrate",
+                "multi-step",
+                "autonomous",
+                "agent",
+                "plan and execute",
+                "workflow",
+                "pipeline",
+                "do all of",
+                "complete the entire",
+                "automate",
+                "multi-file",
+                "across files",
+                "whole project",
+                "refactor the entire",
+                "migrate",
             ],
         ),
         // Math -- before coding because math problems can contain words
@@ -594,10 +613,24 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Math,
             vec![
-                "calculate", "compute", "solve", "equation", "proof",
-                "prove", "theorem", "integral", "derivative", "matrix",
-                "algebra", "probability", "statistics", "mathematical",
-                "formula", "arithmetic", "calculus", "irrational",
+                "calculate",
+                "compute",
+                "solve",
+                "equation",
+                "proof",
+                "prove",
+                "theorem",
+                "integral",
+                "derivative",
+                "matrix",
+                "algebra",
+                "probability",
+                "statistics",
+                "mathematical",
+                "formula",
+                "arithmetic",
+                "calculus",
+                "irrational",
             ],
         ),
         // Translation -- before reasoning because "explain in french"
@@ -605,10 +638,20 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Translation,
             vec![
-                "translate", "translation", "in french", "in spanish",
-                "in german", "in japanese", "in chinese", "in korean",
-                "to english", "from english", "localize", "localization",
-                "multilingual", "en espanol",
+                "translate",
+                "translation",
+                "in french",
+                "in spanish",
+                "in german",
+                "in japanese",
+                "in chinese",
+                "in korean",
+                "to english",
+                "from english",
+                "localize",
+                "localization",
+                "multilingual",
+                "en espanol",
             ],
         ),
         // Summarization -- before creative writing because "article" is
@@ -617,9 +660,16 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Summarization,
             vec![
-                "summarize", "summary", "tl;dr", "tldr",
-                "condense", "recap", "key points", "main points",
-                "outline", "digest",
+                "summarize",
+                "summary",
+                "tl;dr",
+                "tldr",
+                "condense",
+                "recap",
+                "key points",
+                "main points",
+                "outline",
+                "digest",
             ],
         ),
         // Creative writing -- before coding because "write a story" should
@@ -627,9 +677,20 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::CreativeWriting,
             vec![
-                "write a story", "poem", "creative", "fiction", "narrative",
-                "blog post", "article", "essay", "draft", "copywriting",
-                "dialogue", "screenplay", "lyrics", "story",
+                "write a story",
+                "poem",
+                "creative",
+                "fiction",
+                "narrative",
+                "blog post",
+                "article",
+                "essay",
+                "draft",
+                "copywriting",
+                "dialogue",
+                "screenplay",
+                "lyrics",
+                "story",
             ],
         ),
         // Reasoning -- before coding because "why" and "explain" are very
@@ -637,10 +698,24 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Reasoning,
             vec![
-                "why is", "why does", "why do", "why are", "why would",
-                "explain why", "explain how", "analyze", "reason about",
-                "compare", "evaluate", "trade-off", "tradeoff",
-                "pros and cons", "argument", "logic", "deduce", "infer",
+                "why is",
+                "why does",
+                "why do",
+                "why are",
+                "why would",
+                "explain why",
+                "explain how",
+                "analyze",
+                "reason about",
+                "compare",
+                "evaluate",
+                "trade-off",
+                "tradeoff",
+                "pros and cons",
+                "argument",
+                "logic",
+                "deduce",
+                "infer",
                 "critical thinking",
             ],
         ),
@@ -650,22 +725,48 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::Coding,
             vec![
-                "write a function", "fix this code", "code review",
-                "fix the bug", "implement a", "implement the",
-                "code", "function", "compile", "syntax",
-                "algorithm", "debug", "refactor",
-                "class", "method", "variable", "endpoint", "library",
-                "framework", "component", "module", "crate", "package",
-                "implement", "bug",
+                "write a function",
+                "fix this code",
+                "code review",
+                "fix the bug",
+                "implement a",
+                "implement the",
+                "code",
+                "function",
+                "compile",
+                "syntax",
+                "algorithm",
+                "debug",
+                "refactor",
+                "class",
+                "method",
+                "variable",
+                "endpoint",
+                "library",
+                "framework",
+                "component",
+                "module",
+                "crate",
+                "package",
+                "implement",
+                "bug",
             ],
         ),
         // Data analysis
         (
             CapabilityTaskType::DataAnalysis,
             vec![
-                "dataset", "csv", "json data", "analyze the data",
-                "visualization", "plot", "graph", "metrics",
-                "dashboard", "insights", "trends",
+                "dataset",
+                "csv",
+                "json data",
+                "analyze the data",
+                "visualization",
+                "plot",
+                "graph",
+                "metrics",
+                "dashboard",
+                "insights",
+                "trends",
             ],
         ),
         // Instruction following (very generic; acts as catch-all before
@@ -673,8 +774,13 @@ static TASK_KEYWORDS: Lazy<Vec<(CapabilityTaskType, Vec<&'static str>)>> = Lazy:
         (
             CapabilityTaskType::InstructionFollowing,
             vec![
-                "follow these instructions", "do exactly", "step 1",
-                "format as", "output as", "strictly", "precisely",
+                "follow these instructions",
+                "do exactly",
+                "step 1",
+                "format as",
+                "output as",
+                "strictly",
+                "precisely",
                 "make sure to",
             ],
         ),
@@ -769,10 +875,10 @@ fn tier_weight(model_tier: ModelTier, preferred: Option<ModelTier>) -> f32 {
 
     let distance = (tier_ord(model_tier) - tier_ord(pref)).abs();
     match distance {
-        0 => 1.0,       // exact match
-        1 => 0.85,      // one tier away
-        2 => 0.65,      // two tiers away
-        _ => 0.50,      // three tiers away (e.g. Free vs Premium)
+        0 => 1.0,  // exact match
+        1 => 0.85, // one tier away
+        2 => 0.65, // two tiers away
+        _ => 0.50, // three tiers away (e.g. Free vs Premium)
     }
 }
 
@@ -906,9 +1012,9 @@ impl CapabilityRouter {
         let ranked = rank_models_for_task(&task, available_models, tier_preference);
 
         // The top entry is our recommendation.
-        let (model, score) = ranked
-            .first()
-            .expect("rank_models_for_task always returns at least one entry when input is non-empty");
+        let (model, score) = ranked.first().expect(
+            "rank_models_for_task always returns at least one entry when input is non-empty",
+        );
 
         let reasoning = self.build_reasoning(model, &task, *score);
 
@@ -970,42 +1076,24 @@ impl CapabilityRouter {
         };
 
         let extra = match task {
-            CapabilityTaskType::Coding => {
-                "code generation and has strong tool-use capabilities"
-            }
-            CapabilityTaskType::Reasoning => {
-                "deep analytical reasoning and multi-step logic"
-            }
+            CapabilityTaskType::Coding => "code generation and has strong tool-use capabilities",
+            CapabilityTaskType::Reasoning => "deep analytical reasoning and multi-step logic",
             CapabilityTaskType::CreativeWriting => {
                 "creative prose, storytelling, and stylistic flexibility"
             }
-            CapabilityTaskType::Math => {
-                "mathematical problem-solving and formal proofs"
-            }
+            CapabilityTaskType::Math => "mathematical problem-solving and formal proofs",
             CapabilityTaskType::InstructionFollowing => {
                 "precise instruction adherence and formatting"
             }
-            CapabilityTaskType::Translation => {
-                "multilingual translation and localization"
-            }
-            CapabilityTaskType::Summarization => {
-                "distilling long documents into concise summaries"
-            }
+            CapabilityTaskType::Translation => "multilingual translation and localization",
+            CapabilityTaskType::Summarization => "distilling long documents into concise summaries",
             CapabilityTaskType::DataAnalysis => {
                 "data interpretation, pattern recognition, and quantitative reasoning"
             }
-            CapabilityTaskType::ToolUse => {
-                "structured tool invocation and function calling"
-            }
-            CapabilityTaskType::Agentic => {
-                "multi-step autonomous tasks and cross-file changes"
-            }
-            CapabilityTaskType::Vision => {
-                "image understanding and visual reasoning"
-            }
-            CapabilityTaskType::GeneralChat => {
-                "conversational fluency and helpfulness"
-            }
+            CapabilityTaskType::ToolUse => "structured tool invocation and function calling",
+            CapabilityTaskType::Agentic => "multi-step autonomous tasks and cross-file changes",
+            CapabilityTaskType::Vision => "image understanding and visual reasoning",
+            CapabilityTaskType::GeneralChat => "conversational fluency and helpfulness",
         };
 
         format!("{} {} \u{2014} {}", quality, task, extra)
@@ -1045,8 +1133,7 @@ impl CapabilityRouter {
 mod tests {
     use super::*;
     use crate::types::{
-        MessageRole, ModelCapabilities, ModelInfo, ModelTier,
-        ProviderType as TypesProviderType,
+        MessageRole, ModelCapabilities, ModelInfo, ModelTier, ProviderType as TypesProviderType,
     };
     use chrono::Utc;
 
@@ -1113,16 +1200,8 @@ mod tests {
                 ModelTier::Mid,
                 TypesProviderType::Anthropic,
             ),
-            make_model(
-                "gpt-4o",
-                ModelTier::Premium,
-                TypesProviderType::OpenAI,
-            ),
-            make_model(
-                "gpt-4o-mini",
-                ModelTier::Mid,
-                TypesProviderType::OpenAI,
-            ),
+            make_model("gpt-4o", ModelTier::Premium, TypesProviderType::OpenAI),
+            make_model("gpt-4o-mini", ModelTier::Mid, TypesProviderType::OpenAI),
             make_model(
                 "deepseek/deepseek-chat",
                 ModelTier::Budget,
@@ -1133,11 +1212,7 @@ mod tests {
                 ModelTier::Premium,
                 TypesProviderType::Google,
             ),
-            make_model(
-                "o3",
-                ModelTier::Premium,
-                TypesProviderType::OpenAI,
-            ),
+            make_model("o3", ModelTier::Premium, TypesProviderType::OpenAI),
         ]
     }
 
@@ -1169,7 +1244,9 @@ mod tests {
 
     #[test]
     fn classify_translation_task() {
-        let msgs = vec![user_msg("Translate this sentence to French: Hello, how are you?")];
+        let msgs = vec![user_msg(
+            "Translate this sentence to French: Hello, how are you?",
+        )];
         assert_eq!(classify_task(&msgs), CapabilityTaskType::Translation);
     }
 
@@ -1272,11 +1349,8 @@ mod tests {
     #[test]
     fn rank_math_prefers_o3() {
         let models = sample_models();
-        let ranked = rank_models_for_task(
-            &CapabilityTaskType::Math,
-            &models,
-            Some(ModelTier::Premium),
-        );
+        let ranked =
+            rank_models_for_task(&CapabilityTaskType::Math, &models, Some(ModelTier::Premium));
         assert!(!ranked.is_empty());
         assert_eq!(
             ranked[0].0.id, "o3",
@@ -1332,11 +1406,7 @@ mod tests {
             ModelTier::Free,
             TypesProviderType::Ollama,
         )];
-        let ranked = rank_models_for_task(
-            &CapabilityTaskType::Coding,
-            &models,
-            None,
-        );
+        let ranked = rank_models_for_task(&CapabilityTaskType::Coding, &models, None);
         assert_eq!(ranked.len(), 1);
         // Unknown models get 0.5 base * 1.0 tier_weight = 0.5
         assert!((ranked[0].1 - 0.5).abs() < 0.01);
@@ -1372,15 +1442,26 @@ mod tests {
         let rec = router.recommend(&msgs, &models, Some(ModelTier::Premium));
         assert_eq!(rec.task_type, CapabilityTaskType::Math);
         // The reasoning should mention the model, the task, and a score.
-        assert!(rec.reasoning.contains("math"), "Reasoning: {}", rec.reasoning);
-        assert!(rec.reasoning.contains("score:"), "Reasoning: {}", rec.reasoning);
+        assert!(
+            rec.reasoning.contains("math"),
+            "Reasoning: {}",
+            rec.reasoning
+        );
+        assert!(
+            rec.reasoning.contains("score:"),
+            "Reasoning: {}",
+            rec.reasoning
+        );
     }
 
     // -- Tier weight tests --
 
     #[test]
     fn tier_weight_exact_match_is_one() {
-        assert_eq!(tier_weight(ModelTier::Premium, Some(ModelTier::Premium)), 1.0);
+        assert_eq!(
+            tier_weight(ModelTier::Premium, Some(ModelTier::Premium)),
+            1.0
+        );
         assert_eq!(tier_weight(ModelTier::Budget, Some(ModelTier::Budget)), 1.0);
     }
 

@@ -13,9 +13,9 @@ use tokio::sync::broadcast;
 use hive_ai::rag::RagService;
 use hive_ai::types::{ChatMessage, ChatRequest, MessageRole, ModelTier};
 
+use crate::activity::OperationType;
 use crate::activity::approval::{ApprovalDecision, ApprovalGate};
 use crate::activity::budget::{BudgetDecision, BudgetEnforcer};
-use crate::activity::OperationType;
 
 use crate::hivemind::{AiExecutor, default_model_for_tier};
 use crate::personas::{Persona, PersonaKind, PersonaRegistry, execute_with_persona_model};
@@ -66,10 +66,7 @@ pub enum TaskEvent {
         reason: Option<String>,
     },
     /// A task failed with an error.
-    TaskFailed {
-        task_id: String,
-        error: String,
-    },
+    TaskFailed { task_id: String, error: String },
     /// All tasks in the plan have finished.
     AllComplete {
         total_cost: f64,
@@ -214,7 +211,8 @@ impl TaskPlan {
             visited += 1;
             for task in &self.tasks {
                 if task.dependencies.iter().any(|d| d == current) {
-                    let deg = in_deg.get_mut(task.id.as_str())
+                    let deg = in_deg
+                        .get_mut(task.id.as_str())
                         .ok_or_else(|| format!("Task '{}' missing from in-degree map", task.id))?;
                     *deg -= 1;
                     if *deg == 0 {
@@ -368,7 +366,12 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
 
         // Build pipeline if configured.
         let pipeline = self.config.pipeline.as_ref().map(|cfg| {
-            TaskPipeline::new(cfg.clone(), self.executor.clone(), self.config.rag.clone(), None)
+            TaskPipeline::new(
+                cfg.clone(),
+                self.executor.clone(),
+                self.config.rag.clone(),
+                None,
+            )
         });
 
         // Emit PlanCreated with all task info.
@@ -829,9 +832,9 @@ mod tests {
                     prompt_tokens: 50,
                     completion_tokens: 100,
                     total_tokens: 150,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,
@@ -1240,14 +1243,25 @@ mod tests {
 
         // Expected sequence: PlanCreated, TaskStarted(t1), TaskCompleted(t1),
         //                    TaskStarted(t2), TaskCompleted(t2), AllComplete
-        assert!(events.len() >= 6, "Expected at least 6 events, got {}", events.len());
+        assert!(
+            events.len() >= 6,
+            "Expected at least 6 events, got {}",
+            events.len()
+        );
 
         assert!(matches!(&events[0], TaskEvent::PlanCreated { .. }));
         assert!(matches!(&events[1], TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
         assert!(matches!(&events[2], TaskEvent::TaskCompleted { task_id, .. } if task_id == "t1"));
         assert!(matches!(&events[3], TaskEvent::TaskStarted { task_id, .. } if task_id == "t2"));
         assert!(matches!(&events[4], TaskEvent::TaskCompleted { task_id, .. } if task_id == "t2"));
-        assert!(matches!(&events[5], TaskEvent::AllComplete { success_count: 2, failure_count: 0, .. }));
+        assert!(matches!(
+            &events[5],
+            TaskEvent::AllComplete {
+                success_count: 2,
+                failure_count: 0,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -1275,11 +1289,22 @@ mod tests {
         }
 
         // Expected: PlanCreated, TaskStarted, TaskFailed, AllComplete
-        assert!(events.len() >= 4, "Expected at least 4 events, got {}", events.len());
+        assert!(
+            events.len() >= 4,
+            "Expected at least 4 events, got {}",
+            events.len()
+        );
         assert!(matches!(&events[0], TaskEvent::PlanCreated { .. }));
         assert!(matches!(&events[1], TaskEvent::TaskStarted { task_id, .. } if task_id == "t1"));
         assert!(matches!(&events[2], TaskEvent::TaskFailed { task_id, .. } if task_id == "t1"));
-        assert!(matches!(&events[3], TaskEvent::AllComplete { success_count: 0, failure_count: 1, .. }));
+        assert!(matches!(
+            &events[3],
+            TaskEvent::AllComplete {
+                success_count: 0,
+                failure_count: 1,
+                ..
+            }
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -1376,11 +1401,13 @@ mod tests {
         // Task should have been denied, not executed.
         assert_eq!(result.results.len(), 1);
         assert!(!result.results[0].success);
-        assert!(result.results[0]
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Denied by user"));
+        assert!(
+            result.results[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Denied by user")
+        );
         // The executor should never have been called.
         assert_eq!(call_count.load(Ordering::SeqCst), 0);
 

@@ -249,10 +249,7 @@ pub struct BitbucketClient {
 impl BitbucketClient {
     /// Create a new client with the given username and app password,
     /// using the default `https://api.bitbucket.org/2.0` base URL.
-    pub fn new(
-        username: impl Into<String>,
-        app_password: impl Into<String>,
-    ) -> Result<Self> {
+    pub fn new(username: impl Into<String>, app_password: impl Into<String>) -> Result<Self> {
         Self::with_base_url(username, app_password, BASE_URL)
     }
 
@@ -297,10 +294,7 @@ impl BitbucketClient {
     // ── Repository operations ──────────────────────────────────────
 
     /// List repositories in a workspace.
-    pub async fn list_repositories(
-        &self,
-        workspace: &str,
-    ) -> Result<Vec<BitbucketRepo>> {
+    pub async fn list_repositories(&self, workspace: &str) -> Result<Vec<BitbucketRepo>> {
         let url = format!("{}/repositories/{workspace}", self.base_url);
         debug!(url = %url, workspace = %workspace, "listing Bitbucket repositories");
         let page: Paginated<BitbucketRepo> = self.get_json(&url).await?;
@@ -308,15 +302,8 @@ impl BitbucketClient {
     }
 
     /// Get a single repository by workspace and slug.
-    pub async fn get_repository(
-        &self,
-        workspace: &str,
-        repo_slug: &str,
-    ) -> Result<BitbucketRepo> {
-        let url = format!(
-            "{}/repositories/{workspace}/{repo_slug}",
-            self.base_url
-        );
+    pub async fn get_repository(&self, workspace: &str, repo_slug: &str) -> Result<BitbucketRepo> {
+        let url = format!("{}/repositories/{workspace}/{repo_slug}", self.base_url);
         debug!(url = %url, "getting Bitbucket repository");
         self.get_json(&url).await
     }
@@ -562,8 +549,7 @@ mod tests {
     #[test]
     fn test_custom_base_url_strips_trailing_slash() {
         let client =
-            BitbucketClient::with_base_url("u", "p", "https://bitbucket.example.com/2.0/")
-                .unwrap();
+            BitbucketClient::with_base_url("u", "p", "https://bitbucket.example.com/2.0/").unwrap();
         assert_eq!(client.base_url(), "https://bitbucket.example.com/2.0");
     }
 

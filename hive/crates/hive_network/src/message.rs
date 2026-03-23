@@ -89,7 +89,12 @@ pub struct Envelope {
 
 impl Envelope {
     /// Create a new envelope from this node to a specific peer.
-    pub fn new(from: PeerId, to: Option<PeerId>, kind: MessageKind, payload: serde_json::Value) -> Self {
+    pub fn new(
+        from: PeerId,
+        to: Option<PeerId>,
+        kind: MessageKind,
+        payload: serde_json::Value,
+    ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             from,

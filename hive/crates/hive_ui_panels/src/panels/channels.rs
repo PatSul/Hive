@@ -94,15 +94,20 @@ impl ChannelsView {
         });
 
         // Subscribe to input events (Enter key handling)
-        cx.subscribe_in(&message_input, window, |this, _entity, event: &InputEvent, window, cx| {
-            if let InputEvent::PressEnter { .. } = event {
-                let text = this.message_input.read(cx).value().to_string();
-                this.send_user_message(text, cx);
-                this.message_input.update(cx, |state, cx| {
-                    state.set_value("".to_string(), window, cx);
-                });
-            }
-        }).detach();
+        cx.subscribe_in(
+            &message_input,
+            window,
+            |this, _entity, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = event {
+                    let text = this.message_input.read(cx).value().to_string();
+                    this.send_user_message(text, cx);
+                    this.message_input.update(cx, |state, cx| {
+                        state.set_value("".to_string(), window, cx);
+                    });
+                }
+            },
+        )
+        .detach();
 
         let theme = if cx.has_global::<AppTheme>() {
             cx.global::<AppTheme>().0.clone()
@@ -139,23 +144,24 @@ impl ChannelsView {
     ) {
         self.channels = data
             .into_iter()
-            .map(|(id, name, icon, description, message_count, assigned_agents)| {
-                ChannelListItem {
+            .map(
+                |(id, name, icon, description, message_count, assigned_agents)| ChannelListItem {
                     id,
                     name,
                     icon,
                     description,
                     message_count,
                     assigned_agents,
-                }
-            })
+                },
+            )
             .collect();
 
         // Auto-select first channel if none selected
         if self.active_channel_id.is_none()
-            && let Some(first) = self.channels.first() {
-                self.active_channel_id = Some(first.id.clone());
-            }
+            && let Some(first) = self.channels.first()
+        {
+            self.active_channel_id = Some(first.id.clone());
+        }
         cx.notify();
     }
 
@@ -183,10 +189,11 @@ impl ChannelsView {
 
         // Auto-select first channel if none selected
         if self.active_channel_id.is_none()
-            && let Some(first) = self.channels.first() {
-                self.active_channel_id = Some(first.id.clone());
-                self.load_channel_messages(store);
-            }
+            && let Some(first) = self.channels.first()
+        {
+            self.active_channel_id = Some(first.id.clone());
+            self.load_channel_messages(store);
+        }
         cx.notify();
     }
 
@@ -194,17 +201,23 @@ impl ChannelsView {
     pub fn load_channel_messages(&mut self, store: &ChannelStore) {
         self.messages.clear();
         if let Some(ref id) = self.active_channel_id
-            && let Some(channel) = store.get_channel(id) {
-                self.messages = channel
-                    .messages
-                    .iter()
-                    .map(|m| self.message_to_display(m))
-                    .collect();
-            }
+            && let Some(channel) = store.get_channel(id)
+        {
+            self.messages = channel
+                .messages
+                .iter()
+                .map(|m| self.message_to_display(m))
+                .collect();
+        }
     }
 
     /// Switch to a different channel.
-    pub fn switch_channel(&mut self, channel_id: &str, store: &ChannelStore, cx: &mut Context<Self>) {
+    pub fn switch_channel(
+        &mut self,
+        channel_id: &str,
+        store: &ChannelStore,
+        cx: &mut Context<Self>,
+    ) {
         self.active_channel_id = Some(channel_id.to_string());
         self.load_channel_messages(store);
         cx.notify();
@@ -242,12 +255,7 @@ impl ChannelsView {
             ),
             MessageAuthor::Agent { persona } => {
                 let color = self.agent_color(persona);
-                (
-                    persona.clone(),
-                    self.agent_icon(persona),
-                    color,
-                    true,
-                )
+                (persona.clone(), self.agent_icon(persona), color, true)
             }
             MessageAuthor::System => (
                 "System".to_string(),
@@ -412,11 +420,7 @@ impl ChannelsView {
                             cx.notify();
                         }),
                     )
-                    .child(
-                        div()
-                            .text_size(px(18.0))
-                            .child(channel.icon.clone()),
-                    )
+                    .child(div().text_size(px(18.0)).child(channel.icon.clone()))
                     .child(
                         div()
                             .flex()
@@ -545,11 +549,7 @@ impl ChannelsView {
                 .py(theme.space_3)
                 .border_b_1()
                 .border_color(theme.border)
-                .child(
-                    div()
-                        .text_size(px(20.0))
-                        .child(channel.icon.clone()),
-                )
+                .child(div().text_size(px(20.0)).child(channel.icon.clone()))
                 .child(
                     div()
                         .flex()
@@ -596,49 +596,50 @@ impl ChannelsView {
 
         // Streaming indicator
         if self.is_streaming
-            && let Some(ref agent) = self.streaming_agent {
-                let color = self.agent_color(agent);
-                message_elements.push(
-                    div()
-                        .flex()
-                        .gap(theme.space_2)
-                        .px(theme.space_4)
-                        .py(theme.space_2)
-                        .child(
-                            div()
-                                .w(px(28.0))
-                                .h(px(28.0))
-                                .rounded(theme.radius_full)
-                                .bg(color)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(px(14.0))
-                                .child(self.agent_icon(agent)),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .child(
+            && let Some(ref agent) = self.streaming_agent
+        {
+            let color = self.agent_color(agent);
+            message_elements.push(
+                div()
+                    .flex()
+                    .gap(theme.space_2)
+                    .px(theme.space_4)
+                    .py(theme.space_2)
+                    .child(
+                        div()
+                            .w(px(28.0))
+                            .h(px(28.0))
+                            .rounded(theme.radius_full)
+                            .bg(color)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(14.0))
+                            .child(self.agent_icon(agent)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(color)
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(format!("{} is typing...", agent)),
+                            )
+                            .when(!self.streaming_content.is_empty(), |el| {
+                                el.child(
                                     div()
-                                        .text_size(theme.font_size_xs)
-                                        .text_color(color)
-                                        .font_weight(FontWeight::BOLD)
-                                        .child(format!("{} is typing...", agent)),
+                                        .text_size(theme.font_size_sm)
+                                        .text_color(theme.text_secondary)
+                                        .child(self.streaming_content.clone()),
                                 )
-                                .when(!self.streaming_content.is_empty(), |el| {
-                                    el.child(
-                                        div()
-                                            .text_size(theme.font_size_sm)
-                                            .text_color(theme.text_secondary)
-                                            .child(self.streaming_content.clone()),
-                                    )
-                                }),
-                        )
-                        .into_any_element(),
-                );
-            }
+                            }),
+                    )
+                    .into_any_element(),
+            );
+        }
 
         // Empty state
         if self.messages.is_empty() && !self.is_streaming {
@@ -650,11 +651,7 @@ impl ChannelsView {
                     .justify_center()
                     .flex_1()
                     .gap(theme.space_3)
-                    .child(
-                        div()
-                            .text_size(px(48.0))
-                            .child("\u{1F4AC}"),
-                    )
+                    .child(div().text_size(px(48.0)).child("\u{1F4AC}"))
                     .child(
                         div()
                             .text_size(theme.font_size_base)
@@ -684,14 +681,11 @@ impl ChannelsView {
             .border_t_1()
             .border_color(theme.border)
             .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .child(
-                        Input::new(&input_entity)
-                            .text_size(theme.font_size_sm)
-                            .cleanable(true),
-                    ),
+                div().flex_1().min_w(px(0.0)).child(
+                    Input::new(&input_entity)
+                        .text_size(theme.font_size_sm)
+                        .cleanable(true),
+                ),
             )
             .child(
                 div()

@@ -234,9 +234,9 @@ pub(crate) async fn drive_sse_stream(resp: reqwest::Response, tx: mpsc::Sender<S
                             prompt_tokens: p,
                             completion_tokens: c,
                             total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            });
+                            cache_creation_input_tokens: None,
+                            cache_read_input_tokens: None,
+                        });
                     }
 
                     // Only send chunks with actual content.

@@ -3,7 +3,13 @@ use crate::types::{ModelCapabilities, ModelCapability, ModelInfo, ModelTier, Pro
 pub(crate) fn builtin_models() -> Vec<ModelInfo> {
     let mut models = Vec::new();
 
-    let mut push_model = |id: &str, name: &str, tier: ModelTier, ctx: u32, in_price: f64, out_price: f64, caps: &[ModelCapability]| {
+    let mut push_model = |id: &str,
+                          name: &str,
+                          tier: ModelTier,
+                          ctx: u32,
+                          in_price: f64,
+                          out_price: f64,
+                          caps: &[ModelCapability]| {
         models.push(ModelInfo {
             id: id.to_string(),
             name: name.to_string(),
@@ -18,7 +24,7 @@ pub(crate) fn builtin_models() -> Vec<ModelInfo> {
         });
     };
 
-    // Note: Venice API is compatible with OpenAI but has different model names. 
+    // Note: Venice API is compatible with OpenAI but has different model names.
     // We'll populate some known ones here.
 
     push_model(
@@ -40,7 +46,7 @@ pub(crate) fn builtin_models() -> Vec<ModelInfo> {
         0.0,
         &[ModelCapability::ToolUse],
     );
-    
+
     push_model(
         "deepseek-r1-llama-70b",
         "DeepSeek R1 (Llama 70B)",

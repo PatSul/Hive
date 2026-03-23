@@ -482,7 +482,7 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 
 ## Remote Control
 
-Hive can be controlled from any device on your network — phone, tablet, or another computer — via a built-in web server with real-time streaming.
+Hive can be controlled from any device on your network — phone, tablet, or another computer — via a built-in web server with real-time streaming. The current web UI is a lightweight remote companion for chat, agents, terminal, files, and settings; it does not mirror the full desktop shell.
 
 | Feature | Details |
 |---|---|
@@ -685,9 +685,21 @@ hive_cli   (standalone binary) ── hive_core
 
 ---
 
-## UI — 27 Panels
+## UI — 27 Panels, 5 Shell Destinations
 
 All panels are wired to live backend data. No mock data in the production path. **8 built-in themes** (HiveCode Dark/Light, Nord, Dracula, Solarized Dark, Monokai, One Dark, GitHub Dark) with community voting and custom theme support via `~/.hive/themes/`.
+
+Desktop navigation is organized into 5 persistent destinations:
+
+| Destination | Primary Panels | Notes |
+|---|---|---|
+| Home | Home (`QuickStart`) | Command center for resume, blockers, launch paths, and workspace switching |
+| Build | Chat, History, Files, Code Map, Prompt Library, Specs, Agents, Kanban, Git Ops, Terminal | Main project execution flow |
+| Automate | Workflows, Channels, Network | Automation and orchestration surfaces |
+| Assist | Assistant | Personal assistant operations |
+| Observe | Monitor, Activity, Logs, Costs, Learning, Shield | Validation, approvals, runtime health, and spend |
+
+Utility panels stay reachable without becoming top-level destinations: Skills, Routing, Models, Token Launch, Settings, and Help.
 
 | Panel | Description | Data Source |
 |---|---|---|
@@ -715,7 +727,7 @@ All panels are wired to live backend data. No mock data in the production path. 
 | Settings | Application configuration with persist-on-save, cloud account fields | `HiveConfig` |
 | Terminal | Interactive shell with real PTY, command history, kill/restart | `InteractiveShell` via `hive_terminal` |
 | Network | P2P federation peer browser | `hive_network` |
-| Quick Start | Guided project onboarding with goal-driven AI | `AppConfig` + AI providers |
+| Home (`QuickStart`) | Command center for resume, blockers, launch templates, and workspace switching | `AppConfig` + AI providers |
 | Activity | Live agent event stream with approval cards, filters, and CSV export | `ActivityService` event bus |
 | Help | Documentation and guides | Static content |
 

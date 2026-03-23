@@ -8,9 +8,9 @@
 //! via [`wire_integration_handlers`] once the integration services are
 //! initialized as GPUI globals.
 
-use async_trait::async_trait;
 use crate::mcp_client::McpTool;
 use crate::mcp_server::ToolHandler;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -61,116 +61,356 @@ pub trait OutboundA2aService: Send + Sync {
 pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
     vec![
         // --- Messaging ---
-        (send_message_tool(), stub("Connect a messaging platform in Settings to send messages")),
+        (
+            send_message_tool(),
+            stub("Connect a messaging platform in Settings to send messages"),
+        ),
+        (
+            list_channels_tool(),
+            stub("Connect a messaging platform in Settings to list channels"),
+        ),
+        (
+            get_messages_tool(),
+            stub("Connect a messaging platform in Settings to get messages"),
+        ),
+        (
+            search_messages_tool(),
+            stub("Connect a messaging platform in Settings to search messages"),
+        ),
         // --- Project Management ---
-        (create_issue_tool(), stub("Connect your project management platform in Settings to create issues")),
-        (list_issues_tool(), stub("Connect your project management platform in Settings to list issues")),
+        (
+            create_issue_tool(),
+            stub("Connect your project management platform in Settings to create issues"),
+        ),
+        (
+            list_issues_tool(),
+            stub("Connect your project management platform in Settings to list issues"),
+        ),
         // --- Knowledge Base ---
-        (search_knowledge_tool(), stub("Connect a knowledge base in Settings to search content")),
+        (
+            search_knowledge_tool(),
+            stub("Connect a knowledge base in Settings to search content"),
+        ),
         // --- Database ---
-        (query_database_tool(), Box::new(|args| {
-            let query = args["query"].as_str().unwrap_or("");
-            if !query.trim_start().to_lowercase().starts_with("select") {
-                return Err("Only SELECT queries are allowed for safety".into());
-            }
-            if query.contains(';') {
-                return Err("Semicolons are not allowed in queries — multi-statement execution is blocked for safety".into());
-            }
-            Ok(json!({
-                "connection": args["connection"].as_str().unwrap_or("default"),
-                "query": query,
-                "rows": [],
-                "note": "Connect a database in Settings to run real queries"
-            }))
-        })),
-        (describe_schema_tool(), stub("Connect a database in Settings to see real schema")),
+        (
+            query_database_tool(),
+            Box::new(|args| {
+                let query = args["query"].as_str().unwrap_or("");
+                if !query.trim_start().to_lowercase().starts_with("select") {
+                    return Err("Only SELECT queries are allowed for safety".into());
+                }
+                if query.contains(';') {
+                    return Err("Semicolons are not allowed in queries — multi-statement execution is blocked for safety".into());
+                }
+                Ok(json!({
+                    "connection": args["connection"].as_str().unwrap_or("default"),
+                    "query": query,
+                    "rows": [],
+                    "note": "Connect a database in Settings to run real queries"
+                }))
+            }),
+        ),
+        (
+            describe_schema_tool(),
+            stub("Connect a database in Settings to see real schema"),
+        ),
         // --- Docker ---
-        (docker_list_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_logs_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (
+            docker_list_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_logs_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
         // --- Kubernetes ---
-        (k8s_pods_tool(), stub("Ensure kubeconfig is configured to see real pods")),
+        (
+            k8s_pods_tool(),
+            stub("Ensure kubeconfig is configured to see real pods"),
+        ),
         // --- Cloud ---
-        (cloud_resources_tool(), stub("Configure cloud credentials in Settings to see real resources")),
+        (
+            cloud_resources_tool(),
+            stub("Configure cloud credentials in Settings to see real resources"),
+        ),
         // --- A2A ---
-        (a2a_list_agents_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to list them here")),
-        (a2a_discover_agent_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to discover their skills")),
-        (a2a_run_task_tool(), stub("Configure remote A2A agents in ~/.hive/a2a.toml to run remote tasks")),
+        (
+            a2a_list_agents_tool(),
+            stub("Configure remote A2A agents in ~/.hive/a2a.toml to list them here"),
+        ),
+        (
+            a2a_discover_agent_tool(),
+            stub("Configure remote A2A agents in ~/.hive/a2a.toml to discover their skills"),
+        ),
+        (
+            a2a_run_task_tool(),
+            stub("Configure remote A2A agents in ~/.hive/a2a.toml to run remote tasks"),
+        ),
         // --- Browser ---
-        (browse_url_tool(), stub("Browser automation available — content extraction pending connection")),
-        (browser_navigate_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_screenshot_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_fill_form_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_click_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_evaluate_script_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_wait_for_selector_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_scrape_structured_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_pdf_export_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_run_test_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_crawl_site_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_monitor_changes_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_intercept_network_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_accessibility_audit_tool(), stub("Browser automation available — requires Playwright installation")),
-        (browser_performance_metrics_tool(), stub("Browser automation available — requires Playwright installation")),
+        (
+            browse_url_tool(),
+            stub("Browser automation available — content extraction pending connection"),
+        ),
+        (
+            browser_navigate_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_screenshot_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_fill_form_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_click_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_evaluate_script_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_wait_for_selector_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_scrape_structured_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_pdf_export_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_run_test_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_crawl_site_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_monitor_changes_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_intercept_network_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_accessibility_audit_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
+        (
+            browser_performance_metrics_tool(),
+            stub("Browser automation available — requires Playwright installation"),
+        ),
         // --- Local AI / Ollama ---
-        (ollama_list_models_tool(), stub("Point Settings > Local AI at a running Ollama instance to list models")),
-        (ollama_pull_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to pull models")),
-        (ollama_show_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to inspect models")),
-        (ollama_delete_model_tool(), stub("Point Settings > Local AI at a running Ollama instance to delete models")),
+        (
+            ollama_list_models_tool(),
+            stub("Point Settings > Local AI at a running Ollama instance to list models"),
+        ),
+        (
+            ollama_pull_model_tool(),
+            stub("Point Settings > Local AI at a running Ollama instance to pull models"),
+        ),
+        (
+            ollama_show_model_tool(),
+            stub("Point Settings > Local AI at a running Ollama instance to inspect models"),
+        ),
+        (
+            ollama_delete_model_tool(),
+            stub("Point Settings > Local AI at a running Ollama instance to delete models"),
+        ),
         // --- Smart Home / Hue ---
-        (hue_discover_bridges_tool(), stub("Hue bridge discovery is available when local networking is reachable")),
-        (hue_list_lights_tool(), stub("Configure a Hue bridge and API key in Settings to list lights")),
-        (hue_set_light_state_tool(), stub("Configure a Hue bridge and API key in Settings to control lights")),
-        (hue_list_scenes_tool(), stub("Configure a Hue bridge and API key in Settings to list scenes")),
-        (hue_activate_scene_tool(), stub("Configure a Hue bridge and API key in Settings to activate scenes")),
+        (
+            hue_discover_bridges_tool(),
+            stub("Hue bridge discovery is available when local networking is reachable"),
+        ),
+        (
+            hue_list_lights_tool(),
+            stub("Configure a Hue bridge and API key in Settings to list lights"),
+        ),
+        (
+            hue_set_light_state_tool(),
+            stub("Configure a Hue bridge and API key in Settings to control lights"),
+        ),
+        (
+            hue_list_scenes_tool(),
+            stub("Configure a Hue bridge and API key in Settings to list scenes"),
+        ),
+        (
+            hue_activate_scene_tool(),
+            stub("Configure a Hue bridge and API key in Settings to activate scenes"),
+        ),
         // --- Docker (extended) ---
-        (docker_start_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_stop_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_restart_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_run_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_images_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_build_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_networks_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_volumes_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_compose_up_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_compose_down_tool(), stub("Docker integration active — ensure Docker daemon is running")),
-        (docker_system_info_tool(), stub("Docker integration active — ensure Docker daemon is running")),
+        (
+            docker_start_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_stop_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_restart_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_run_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_images_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_build_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_networks_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_volumes_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_compose_up_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_compose_down_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
+        (
+            docker_system_info_tool(),
+            stub("Docker integration active — ensure Docker daemon is running"),
+        ),
         // --- Document Export ---
-        (export_pdf_tool(), Box::new(handle_export_pdf) as ToolHandler),
-        (export_docx_tool(), Box::new(handle_export_docx) as ToolHandler),
-        (export_xlsx_tool(), Box::new(handle_export_xlsx) as ToolHandler),
-        (export_pptx_tool(), Box::new(handle_export_pptx) as ToolHandler),
-        (export_csv_tool(), Box::new(handle_export_csv) as ToolHandler),
-        (export_html_tool(), Box::new(handle_export_html) as ToolHandler),
-        (export_markdown_tool(), Box::new(handle_export_markdown) as ToolHandler),
+        (
+            export_pdf_tool(),
+            Box::new(handle_export_pdf) as ToolHandler,
+        ),
+        (
+            export_docx_tool(),
+            Box::new(handle_export_docx) as ToolHandler,
+        ),
+        (
+            export_xlsx_tool(),
+            Box::new(handle_export_xlsx) as ToolHandler,
+        ),
+        (
+            export_pptx_tool(),
+            Box::new(handle_export_pptx) as ToolHandler,
+        ),
+        (
+            export_csv_tool(),
+            Box::new(handle_export_csv) as ToolHandler,
+        ),
+        (
+            export_html_tool(),
+            Box::new(handle_export_html) as ToolHandler,
+        ),
+        (
+            export_markdown_tool(),
+            Box::new(handle_export_markdown) as ToolHandler,
+        ),
         // --- Docs Search ---
-        (search_docs_tool(), stub("Run /index-docs to build the documentation index first")),
+        (
+            search_docs_tool(),
+            stub("Run /index-docs to build the documentation index first"),
+        ),
         // --- Deploy ---
-        (deploy_trigger_tool(), stub("Configure deployment workflows in Settings")),
+        (
+            deploy_trigger_tool(),
+            stub("Configure deployment workflows in Settings"),
+        ),
         // --- Google Suite ---
-        (google_drive_list_files_tool(), stub("Connect Google Drive in Settings to list files")),
-        (google_drive_search_tool(), stub("Connect Google Drive in Settings to search files")),
-        (google_sheets_read_tool(), stub("Connect Google Sheets in Settings to read spreadsheet data")),
-        (google_docs_get_tool(), stub("Connect Google Docs in Settings to get document content")),
-        (google_tasks_list_tool(), stub("Connect Google Tasks in Settings to list tasks")),
-        (google_contacts_search_tool(), stub("Connect Google Contacts in Settings to search contacts")),
+        (
+            google_drive_list_files_tool(),
+            stub("Connect Google Drive in Settings to list files"),
+        ),
+        (
+            google_drive_search_tool(),
+            stub("Connect Google Drive in Settings to search files"),
+        ),
+        (
+            google_sheets_read_tool(),
+            stub("Connect Google Sheets in Settings to read spreadsheet data"),
+        ),
+        (
+            google_docs_get_tool(),
+            stub("Connect Google Docs in Settings to get document content"),
+        ),
+        (
+            google_tasks_list_tool(),
+            stub("Connect Google Tasks in Settings to list tasks"),
+        ),
+        (
+            google_contacts_search_tool(),
+            stub("Connect Google Contacts in Settings to search contacts"),
+        ),
         // --- Bitbucket ---
-        (bitbucket_list_repos_tool(), stub("Connect Bitbucket in Settings to list repositories")),
-        (bitbucket_list_prs_tool(), stub("Connect Bitbucket in Settings to list pull requests")),
-        (bitbucket_create_pr_tool(), stub("Connect Bitbucket in Settings to create pull requests")),
+        (
+            bitbucket_list_repos_tool(),
+            stub("Connect Bitbucket in Settings to list repositories"),
+        ),
+        (
+            bitbucket_list_prs_tool(),
+            stub("Connect Bitbucket in Settings to list pull requests"),
+        ),
+        (
+            bitbucket_create_pr_tool(),
+            stub("Connect Bitbucket in Settings to create pull requests"),
+        ),
         // --- GitLab ---
-        (gitlab_list_projects_tool(), stub("Connect GitLab in Settings to list projects")),
-        (gitlab_list_mrs_tool(), stub("Connect GitLab in Settings to list merge requests")),
-        (gitlab_list_pipelines_tool(), stub("Connect GitLab in Settings to list pipelines")),
+        (
+            gitlab_list_projects_tool(),
+            stub("Connect GitLab in Settings to list projects"),
+        ),
+        (
+            gitlab_list_mrs_tool(),
+            stub("Connect GitLab in Settings to list merge requests"),
+        ),
+        (
+            gitlab_list_pipelines_tool(),
+            stub("Connect GitLab in Settings to list pipelines"),
+        ),
         // --- Blockchain (HIGH-RISK — requires user approval) ---
-        (token_estimate_cost_tool(), stub("Configure a wallet in Settings to estimate token deployment costs")),
-        (token_deploy_erc20_tool(), stub("Configure a wallet in Settings to deploy ERC-20 tokens")),
-        (token_deploy_spl_tool(), stub("Configure a wallet in Settings to deploy SPL tokens")),
+        (
+            token_estimate_cost_tool(),
+            stub("Configure a wallet in Settings to estimate token deployment costs"),
+        ),
+        (
+            token_deploy_erc20_tool(),
+            stub("Configure a wallet in Settings to deploy ERC-20 tokens"),
+        ),
+        (
+            token_deploy_spl_tool(),
+            stub("Configure a wallet in Settings to deploy SPL tokens"),
+        ),
         // --- Webhooks ---
-        (webhook_register_tool(), stub("Webhook registry available — register webhooks via this tool")),
-        (webhook_list_tool(), stub("Webhook registry available — list registered webhooks")),
-        (webhook_fire_tool(), stub("Webhook registry available — fire events to subscribed webhooks")),
+        (
+            webhook_register_tool(),
+            stub("Webhook registry available — register webhooks via this tool"),
+        ),
+        (
+            webhook_list_tool(),
+            stub("Webhook registry available — list registered webhooks"),
+        ),
+        (
+            webhook_fire_tool(),
+            stub("Webhook registry available — fire events to subscribed webhooks"),
+        ),
         // --- Local Search (SearXNG) ---
-        (local_search_tool(), Box::new(handle_local_search) as ToolHandler),
+        (
+            local_search_tool(),
+            Box::new(handle_local_search) as ToolHandler,
+        ),
     ]
 }
 
@@ -184,124 +424,270 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
     // --- Messaging ---
     {
         let svc = Arc::clone(&services.messaging);
-        tools.push((send_message_tool(), Box::new(move |args: serde_json::Value| {
-            let platform = args["platform"].as_str().unwrap_or("slack").to_string();
-            let channel = args["channel"].as_str().unwrap_or("").to_string();
-            let message = args["message"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let plat = parse_messaging_platform(&platform);
-                match svc.send_message(plat, &channel, &message).await {
-                    Ok(sent) => Ok(json!({
-                        "status": "sent",
-                        "platform": platform,
-                        "channel": channel,
-                        "timestamp": sent.timestamp
-                    })),
-                    Err(e) => Err(format!("Failed to send message: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            send_message_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let channel = args["channel"].as_str().unwrap_or("").to_string();
+                let message = args["message"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.send_message(plat, &channel, &message).await {
+                        Ok(sent) => Ok(json!({
+                            "status": "sent",
+                            "platform": platform,
+                            "channel": channel,
+                            "timestamp": sent.timestamp
+                        })),
+                        Err(e) => Err(format!("Failed to send message: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.messaging);
+        tools.push((
+            list_channels_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.list_channels(plat).await {
+                        Ok(channels) => {
+                            let items: Vec<serde_json::Value> = channels
+                                .iter()
+                                .map(|c| json!({
+                                    "id": c.id,
+                                    "name": c.name,
+                                    "platform": format!("{}", c.platform),
+                                }))
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "count": items.len(),
+                                "channels": items,
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to list channels: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.messaging);
+        tools.push((
+            get_messages_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let channel = args["channel"].as_str().unwrap_or("").to_string();
+                let limit = args["limit"].as_u64().unwrap_or(20) as u32;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.get_messages(plat, &channel, limit).await {
+                        Ok(messages) => {
+                            let items: Vec<serde_json::Value> = messages
+                                .iter()
+                                .map(|m| json!({
+                                    "id": m.id,
+                                    "channel_id": m.channel_id,
+                                    "author": m.author,
+                                    "content": m.content,
+                                    "timestamp": m.timestamp,
+                                    "attachments": m.attachments.iter().map(|a| json!({
+                                        "name": a.name,
+                                        "url": a.url,
+                                        "mime_type": a.mime_type,
+                                        "size": a.size,
+                                    })).collect::<Vec<_>>(),
+                                    "platform": format!("{}", m.platform),
+                                }))
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "channel": channel,
+                                "count": items.len(),
+                                "messages": items,
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to get messages: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.messaging);
+        tools.push((
+            search_messages_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("slack").to_string();
+                let query = args["query"].as_str().unwrap_or("").to_string();
+                let limit = args["limit"].as_u64().unwrap_or(10) as u32;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_messaging_platform(&platform);
+                    match svc.search_messages(plat, &query, limit).await {
+                        Ok(messages) => {
+                            let items: Vec<serde_json::Value> = messages
+                                .iter()
+                                .map(|m| json!({
+                                    "id": m.id,
+                                    "channel_id": m.channel_id,
+                                    "author": m.author,
+                                    "content": m.content,
+                                    "timestamp": m.timestamp,
+                                    "attachments": m.attachments.iter().map(|a| json!({
+                                        "name": a.name,
+                                        "url": a.url,
+                                        "mime_type": a.mime_type,
+                                        "size": a.size,
+                                    })).collect::<Vec<_>>(),
+                                    "platform": format!("{}", m.platform),
+                                }))
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "query": query,
+                                "count": items.len(),
+                                "messages": items,
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to search messages: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Project Management ---
     {
         let svc = Arc::clone(&services.project_management);
-        tools.push((create_issue_tool(), Box::new(move |args: serde_json::Value| {
-            let platform = args["platform"].as_str().unwrap_or("jira").to_string();
-            let project = args["project"].as_str().unwrap_or("").to_string();
-            let title = args["title"].as_str().unwrap_or("").to_string();
-            let description = args["description"].as_str().unwrap_or("").to_string();
-            let priority = args["priority"].as_str().unwrap_or("medium").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let plat = parse_pm_platform(&platform);
-                let request = hive_integrations::project_management::CreateIssueRequest {
-                    project_id: project,
-                    title,
-                    description: if description.is_empty() { None } else { Some(description) },
-                    priority: Some(parse_priority(&priority)),
-                    assignee: None,
-                    labels: vec![],
-                };
-                match svc.create_issue(plat, &request).await {
-                    Ok(issue) => Ok(json!({
-                        "status": "created",
-                        "platform": platform,
-                        "id": issue.id,
-                        "key": issue.key,
-                        "title": issue.title,
-                        "url": issue.url
-                    })),
-                    Err(e) => Err(format!("Failed to create issue: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            create_issue_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("jira").to_string();
+                let project = args["project"].as_str().unwrap_or("").to_string();
+                let title = args["title"].as_str().unwrap_or("").to_string();
+                let description = args["description"].as_str().unwrap_or("").to_string();
+                let priority = args["priority"].as_str().unwrap_or("medium").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_pm_platform(&platform);
+                    let request = hive_integrations::project_management::CreateIssueRequest {
+                        project_id: project,
+                        title,
+                        description: if description.is_empty() {
+                            None
+                        } else {
+                            Some(description)
+                        },
+                        priority: Some(parse_priority(&priority)),
+                        assignee: None,
+                        labels: vec![],
+                    };
+                    match svc.create_issue(plat, &request).await {
+                        Ok(issue) => Ok(json!({
+                            "status": "created",
+                            "platform": platform,
+                            "id": issue.id,
+                            "key": issue.key,
+                            "title": issue.title,
+                            "url": issue.url
+                        })),
+                        Err(e) => Err(format!("Failed to create issue: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.project_management);
-        tools.push((list_issues_tool(), Box::new(move |args: serde_json::Value| {
-            let platform = args["platform"].as_str().unwrap_or("jira").to_string();
-            let project = args["project"].as_str().unwrap_or("").to_string();
-            let status_filter = args["status"].as_str().unwrap_or("all").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let plat = parse_pm_platform(&platform);
-                let filters = hive_integrations::project_management::IssueFilters {
-                    status: parse_issue_status_filter(&status_filter),
-                    ..Default::default()
-                };
-                match svc.list_issues(plat, &project, &filters).await {
-                    Ok(issues) => {
-                        let items: Vec<serde_json::Value> = issues.iter().map(|i| json!({
-                            "id": i.id,
-                            "key": i.key,
-                            "title": i.title,
-                            "status": format!("{:?}", i.status),
-                            "priority": format!("{:?}", i.priority),
-                            "url": i.url
-                        })).collect();
-                        Ok(json!({
-                            "platform": platform,
-                            "project": project,
-                            "count": items.len(),
-                            "issues": items
-                        }))
+        tools.push((
+            list_issues_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let platform = args["platform"].as_str().unwrap_or("jira").to_string();
+                let project = args["project"].as_str().unwrap_or("").to_string();
+                let status_filter = args["status"].as_str().unwrap_or("all").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let plat = parse_pm_platform(&platform);
+                    let filters = hive_integrations::project_management::IssueFilters {
+                        status: parse_issue_status_filter(&status_filter),
+                        ..Default::default()
+                    };
+                    match svc.list_issues(plat, &project, &filters).await {
+                        Ok(issues) => {
+                            let items: Vec<serde_json::Value> = issues
+                                .iter()
+                                .map(|i| {
+                                    json!({
+                                        "id": i.id,
+                                        "key": i.key,
+                                        "title": i.title,
+                                        "status": format!("{:?}", i.status),
+                                        "priority": format!("{:?}", i.priority),
+                                        "url": i.url
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({
+                                "platform": platform,
+                                "project": project,
+                                "count": items.len(),
+                                "issues": items
+                            }))
+                        }
+                        Err(e) => Err(format!("Failed to list issues: {e}")),
                     }
-                    Err(e) => Err(format!("Failed to list issues: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Knowledge Base ---
     {
         let svc = Arc::clone(&services.knowledge);
-        tools.push((search_knowledge_tool(), Box::new(move |args: serde_json::Value| {
-            let query = args["query"].as_str().unwrap_or("").to_string();
-            let platform = args["platform"].as_str().unwrap_or("all").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let results = if platform == "all" {
-                    svc.search_all(&query, 20).await
-                } else {
-                    let plat = parse_kb_platform(&platform);
-                    svc.search(plat, &query, 20).await.unwrap_or_default()
-                };
-                let items: Vec<serde_json::Value> = results.iter().map(|r| json!({
-                    "title": r.title,
-                    "snippet": r.snippet,
-                    "url": r.url,
-                    "score": r.relevance_score
-                })).collect();
-                Ok(json!({
-                    "query": query,
-                    "count": items.len(),
-                    "results": items
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            search_knowledge_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let query = args["query"].as_str().unwrap_or("").to_string();
+                let platform = args["platform"].as_str().unwrap_or("all").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let results = if platform == "all" {
+                        svc.search_all(&query, 20).await
+                    } else {
+                        let plat = parse_kb_platform(&platform);
+                        svc.search(plat, &query, 20).await.unwrap_or_default()
+                    };
+                    let items: Vec<serde_json::Value> = results
+                        .iter()
+                        .map(|r| {
+                            json!({
+                                "title": r.title,
+                                "snippet": r.snippet,
+                                "url": r.url,
+                                "score": r.relevance_score
+                            })
+                        })
+                        .collect();
+                    Ok(json!({
+                        "query": query,
+                        "count": items.len(),
+                        "results": items
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Database ---
@@ -366,153 +752,220 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
     // --- Docker ---
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_list_tool(), Box::new(move |args: serde_json::Value| {
-            let all = args["all"].as_bool().unwrap_or(false);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.list_containers(all).await {
-                    Ok(containers) => {
-                        let items: Vec<serde_json::Value> = containers.iter().map(|c| json!({
-                            "id": c.id,
-                            "name": c.name,
-                            "image": c.image,
-                            "status": c.status,
-                            "state": c.state,
-                            "ports": c.ports
-                        })).collect();
-                        Ok(json!({
-                            "count": items.len(),
-                            "containers": items
-                        }))
+        tools.push((
+            docker_list_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let all = args["all"].as_bool().unwrap_or(false);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.list_containers(all).await {
+                        Ok(containers) => {
+                            let items: Vec<serde_json::Value> = containers
+                                .iter()
+                                .map(|c| {
+                                    json!({
+                                        "id": c.id,
+                                        "name": c.name,
+                                        "image": c.image,
+                                        "status": c.status,
+                                        "state": c.state,
+                                        "ports": c.ports
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({
+                                "count": items.len(),
+                                "containers": items
+                            }))
+                        }
+                        Err(e) => Err(format!("Docker list failed: {e}")),
                     }
-                    Err(e) => Err(format!("Docker list failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_logs_tool(), Box::new(move |args: serde_json::Value| {
-            let container = args["container"].as_str().unwrap_or("").to_string();
-            let tail = args["tail"].as_u64().map(|n| n as u32).unwrap_or(100);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.container_logs(&container, Some(tail)).await {
-                    Ok(logs) => Ok(json!({
-                        "container": container,
-                        "logs": logs
-                    })),
-                    Err(e) => Err(format!("Docker logs failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            docker_logs_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let container = args["container"].as_str().unwrap_or("").to_string();
+                let tail = args["tail"].as_u64().map(|n| n as u32).unwrap_or(100);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.container_logs(&container, Some(tail)).await {
+                        Ok(logs) => Ok(json!({
+                            "container": container,
+                            "logs": logs
+                        })),
+                        Err(e) => Err(format!("Docker logs failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Docker (extended) ---
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_start_tool(), Box::new(move |args: serde_json::Value| {
-            let id = args["container"].as_str().unwrap_or("").to_string();
-            validate_container_id(&id)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                svc.start_container(&id).await.map_err(|e| format!("Docker start failed: {e}"))?;
-                Ok(json!({ "status": "started", "container": id }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            docker_start_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let id = args["container"].as_str().unwrap_or("").to_string();
+                validate_container_id(&id)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    svc.start_container(&id)
+                        .await
+                        .map_err(|e| format!("Docker start failed: {e}"))?;
+                    Ok(json!({ "status": "started", "container": id }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_stop_tool(), Box::new(move |args: serde_json::Value| {
-            let id = args["container"].as_str().unwrap_or("").to_string();
-            validate_container_id(&id)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                svc.stop_container(&id).await.map_err(|e| format!("Docker stop failed: {e}"))?;
-                Ok(json!({ "status": "stopped", "container": id }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            docker_stop_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let id = args["container"].as_str().unwrap_or("").to_string();
+                validate_container_id(&id)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    svc.stop_container(&id)
+                        .await
+                        .map_err(|e| format!("Docker stop failed: {e}"))?;
+                    Ok(json!({ "status": "stopped", "container": id }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_restart_tool(), Box::new(move |args: serde_json::Value| {
-            let id = args["container"].as_str().unwrap_or("").to_string();
-            validate_container_id(&id)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                svc.restart_container(&id).await.map_err(|e| format!("Docker restart failed: {e}"))?;
-                Ok(json!({ "status": "restarted", "container": id }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            docker_restart_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let id = args["container"].as_str().unwrap_or("").to_string();
+                validate_container_id(&id)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    svc.restart_container(&id)
+                        .await
+                        .map_err(|e| format!("Docker restart failed: {e}"))?;
+                    Ok(json!({ "status": "restarted", "container": id }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_run_tool(), Box::new(move |args: serde_json::Value| {
-            let image = args["image"].as_str().unwrap_or("").to_string();
-            if image.is_empty() {
-                return Err("image is required".into());
-            }
-            let name = args["name"].as_str().map(String::from);
-            let ports: Vec<(u16, u16)> = args["ports"].as_array()
-                .map(|arr| arr.iter().filter_map(|p| {
-                    Some((p["host"].as_u64()? as u16, p["container"].as_u64()? as u16))
-                }).collect())
-                .unwrap_or_default();
-            let env_vars: Vec<(String, String)> = args["env_vars"].as_array()
-                .map(|arr| arr.iter().filter_map(|e| {
-                    Some((e["key"].as_str()?.to_string(), e["value"].as_str()?.to_string()))
-                }).collect())
-                .unwrap_or_default();
-            let volumes: Vec<(String, String)> = args["volumes"].as_array()
-                .map(|arr| arr.iter().filter_map(|v| {
-                    Some((v["host"].as_str()?.to_string(), v["container"].as_str()?.to_string()))
-                }).collect())
-                .unwrap_or_default();
-            let network = args["network"].as_str().map(String::from);
-            let command: Option<Vec<String>> = args["command"].as_array()
-                .map(|arr| arr.iter().filter_map(|c| c.as_str().map(String::from)).collect());
-            let request = hive_integrations::docker::RunContainerRequest {
-                image, name, ports, env_vars, volumes, network, command,
-            };
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.run_container(&request).await {
-                    Ok(container) => Ok(json!({
-                        "status": "running",
-                        "id": container.id,
-                        "name": container.name,
-                        "image": container.image,
-                        "state": container.state
-                    })),
-                    Err(e) => Err(format!("Docker run failed: {e}")),
+        tools.push((
+            docker_run_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let image = args["image"].as_str().unwrap_or("").to_string();
+                if image.is_empty() {
+                    return Err("image is required".into());
                 }
-            })
-        }) as ToolHandler));
-    }
-
-    {
-        let svc = Arc::clone(&services.docker);
-        tools.push((docker_images_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.list_images().await {
-                    Ok(images) => {
-                        let items: Vec<serde_json::Value> = images.iter().map(|i| json!({
-                            "id": i.id,
-                            "tags": i.tags,
-                            "size_bytes": i.size_bytes,
-                            "created_at": i.created_at
-                        })).collect();
-                        Ok(json!({ "count": items.len(), "images": items }))
+                let name = args["name"].as_str().map(String::from);
+                let ports: Vec<(u16, u16)> = args["ports"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|p| {
+                                Some((p["host"].as_u64()? as u16, p["container"].as_u64()? as u16))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let env_vars: Vec<(String, String)> = args["env_vars"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|e| {
+                                Some((
+                                    e["key"].as_str()?.to_string(),
+                                    e["value"].as_str()?.to_string(),
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let volumes: Vec<(String, String)> = args["volumes"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| {
+                                Some((
+                                    v["host"].as_str()?.to_string(),
+                                    v["container"].as_str()?.to_string(),
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let network = args["network"].as_str().map(String::from);
+                let command: Option<Vec<String>> = args["command"].as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| c.as_str().map(String::from))
+                        .collect()
+                });
+                let request = hive_integrations::docker::RunContainerRequest {
+                    image,
+                    name,
+                    ports,
+                    env_vars,
+                    volumes,
+                    network,
+                    command,
+                };
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.run_container(&request).await {
+                        Ok(container) => Ok(json!({
+                            "status": "running",
+                            "id": container.id,
+                            "name": container.name,
+                            "image": container.image,
+                            "state": container.state
+                        })),
+                        Err(e) => Err(format!("Docker run failed: {e}")),
                     }
-                    Err(e) => Err(format!("Docker images failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.docker);
+        tools.push((
+            docker_images_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.list_images().await {
+                        Ok(images) => {
+                            let items: Vec<serde_json::Value> = images
+                                .iter()
+                                .map(|i| {
+                                    json!({
+                                        "id": i.id,
+                                        "tags": i.tags,
+                                        "size_bytes": i.size_bytes,
+                                        "created_at": i.created_at
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({ "count": items.len(), "images": items }))
+                        }
+                        Err(e) => Err(format!("Docker images failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
@@ -543,43 +996,59 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_networks_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.list_networks().await {
-                    Ok(networks) => {
-                        let items: Vec<serde_json::Value> = networks.iter().map(|n| json!({
-                            "id": n.id,
-                            "name": n.name,
-                            "driver": n.driver,
-                            "scope": n.scope
-                        })).collect();
-                        Ok(json!({ "count": items.len(), "networks": items }))
+        tools.push((
+            docker_networks_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.list_networks().await {
+                        Ok(networks) => {
+                            let items: Vec<serde_json::Value> = networks
+                                .iter()
+                                .map(|n| {
+                                    json!({
+                                        "id": n.id,
+                                        "name": n.name,
+                                        "driver": n.driver,
+                                        "scope": n.scope
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({ "count": items.len(), "networks": items }))
+                        }
+                        Err(e) => Err(format!("Docker networks failed: {e}")),
                     }
-                    Err(e) => Err(format!("Docker networks failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_volumes_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.list_volumes().await {
-                    Ok(volumes) => {
-                        let items: Vec<serde_json::Value> = volumes.iter().map(|v| json!({
-                            "name": v.name,
-                            "driver": v.driver,
-                            "mountpoint": v.mountpoint
-                        })).collect();
-                        Ok(json!({ "count": items.len(), "volumes": items }))
+        tools.push((
+            docker_volumes_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.list_volumes().await {
+                        Ok(volumes) => {
+                            let items: Vec<serde_json::Value> = volumes
+                                .iter()
+                                .map(|v| {
+                                    json!({
+                                        "name": v.name,
+                                        "driver": v.driver,
+                                        "mountpoint": v.mountpoint
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({ "count": items.len(), "volumes": items }))
+                        }
+                        Err(e) => Err(format!("Docker volumes failed: {e}")),
                     }
-                    Err(e) => Err(format!("Docker volumes failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
@@ -620,58 +1089,90 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
 
     {
         let svc = Arc::clone(&services.docker);
-        tools.push((docker_system_info_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.get_system_info().await {
-                    Ok(info) => Ok(json!({
-                        "containers_running": info.containers_running,
-                        "containers_stopped": info.containers_stopped,
-                        "images_count": info.images_count,
-                        "server_version": info.server_version
-                    })),
-                    Err(e) => Err(format!("Docker system info failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            docker_system_info_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.get_system_info().await {
+                        Ok(info) => Ok(json!({
+                            "containers_running": info.containers_running,
+                            "containers_stopped": info.containers_stopped,
+                            "images_count": info.images_count,
+                            "server_version": info.server_version
+                        })),
+                        Err(e) => Err(format!("Docker system info failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Document Export (standalone, no service needed) ---
-    tools.push((export_pdf_tool(), Box::new(handle_export_pdf) as ToolHandler));
-    tools.push((export_docx_tool(), Box::new(handle_export_docx) as ToolHandler));
-    tools.push((export_xlsx_tool(), Box::new(handle_export_xlsx) as ToolHandler));
-    tools.push((export_pptx_tool(), Box::new(handle_export_pptx) as ToolHandler));
-    tools.push((export_csv_tool(), Box::new(handle_export_csv) as ToolHandler));
-    tools.push((export_html_tool(), Box::new(handle_export_html) as ToolHandler));
-    tools.push((export_markdown_tool(), Box::new(handle_export_markdown) as ToolHandler));
+    tools.push((
+        export_pdf_tool(),
+        Box::new(handle_export_pdf) as ToolHandler,
+    ));
+    tools.push((
+        export_docx_tool(),
+        Box::new(handle_export_docx) as ToolHandler,
+    ));
+    tools.push((
+        export_xlsx_tool(),
+        Box::new(handle_export_xlsx) as ToolHandler,
+    ));
+    tools.push((
+        export_pptx_tool(),
+        Box::new(handle_export_pptx) as ToolHandler,
+    ));
+    tools.push((
+        export_csv_tool(),
+        Box::new(handle_export_csv) as ToolHandler,
+    ));
+    tools.push((
+        export_html_tool(),
+        Box::new(handle_export_html) as ToolHandler,
+    ));
+    tools.push((
+        export_markdown_tool(),
+        Box::new(handle_export_markdown) as ToolHandler,
+    ));
 
     // --- Kubernetes ---
     {
         let svc = Arc::clone(&services.kubernetes);
-        tools.push((k8s_pods_tool(), Box::new(move |args: serde_json::Value| {
-            let namespace = args["namespace"].as_str().map(String::from);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.list_pods(namespace.as_deref()).await {
-                    Ok(pods) => {
-                        let items: Vec<serde_json::Value> = pods.iter().map(|p| json!({
-                            "name": p.name,
-                            "namespace": p.namespace,
-                            "status": p.status,
-                            "node": p.node,
-                            "restarts": p.restarts,
-                            "age": p.age
-                        })).collect();
-                        Ok(json!({
-                            "namespace": namespace.as_deref().unwrap_or("default"),
-                            "count": items.len(),
-                            "pods": items
-                        }))
+        tools.push((
+            k8s_pods_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let namespace = args["namespace"].as_str().map(String::from);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.list_pods(namespace.as_deref()).await {
+                        Ok(pods) => {
+                            let items: Vec<serde_json::Value> = pods
+                                .iter()
+                                .map(|p| {
+                                    json!({
+                                        "name": p.name,
+                                        "namespace": p.namespace,
+                                        "status": p.status,
+                                        "node": p.node,
+                                        "restarts": p.restarts,
+                                        "age": p.age
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({
+                                "namespace": namespace.as_deref().unwrap_or("default"),
+                                "count": items.len(),
+                                "pods": items
+                            }))
+                        }
+                        Err(e) => Err(format!("Kubernetes list pods failed: {e}")),
                     }
-                    Err(e) => Err(format!("Kubernetes list pods failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Cloud ---
@@ -679,651 +1180,770 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         let aws = Arc::clone(&services.aws);
         let azure = Arc::clone(&services.azure);
         let gcp = Arc::clone(&services.gcp);
-        tools.push((cloud_resources_tool(), Box::new(move |args: serde_json::Value| {
-            let provider = args["provider"].as_str().unwrap_or("aws").to_string();
-            let resource_type = args["resource_type"].as_str().unwrap_or("").to_string();
-            let aws = Arc::clone(&aws);
-            let azure = Arc::clone(&azure);
-            let gcp = Arc::clone(&gcp);
-            block_on_async(async move {
-                match provider.as_str() {
-                    "aws" => list_aws_resources(&aws, &resource_type).await,
-                    "azure" => list_azure_resources(&azure, &resource_type).await,
-                    "gcp" => list_gcp_resources(&gcp, &resource_type).await,
-                    _ => Err(format!("Unknown cloud provider: {provider}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            cloud_resources_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let provider = args["provider"].as_str().unwrap_or("aws").to_string();
+                let resource_type = args["resource_type"].as_str().unwrap_or("").to_string();
+                let aws = Arc::clone(&aws);
+                let azure = Arc::clone(&azure);
+                let gcp = Arc::clone(&gcp);
+                block_on_async(async move {
+                    match provider.as_str() {
+                        "aws" => list_aws_resources(&aws, &resource_type).await,
+                        "azure" => list_azure_resources(&azure, &resource_type).await,
+                        "gcp" => list_gcp_resources(&gcp, &resource_type).await,
+                        _ => Err(format!("Unknown cloud provider: {provider}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- A2A ---
     {
         let svc = Arc::clone(&services.a2a);
-        tools.push((a2a_list_agents_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let agents = svc.list_agents().await?;
-                Ok(json!({
-                    "count": agents.len(),
-                    "agents": agents,
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            a2a_list_agents_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let agents = svc.list_agents().await?;
+                    Ok(json!({
+                        "count": agents.len(),
+                        "agents": agents,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.a2a);
-        tools.push((a2a_discover_agent_tool(), Box::new(move |args: serde_json::Value| {
-            let identifier = args["agent"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let agent = svc.discover_agent(&identifier).await?;
-                Ok(json!(agent))
-            })
-        }) as ToolHandler));
+        tools.push((
+            a2a_discover_agent_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let identifier = args["agent"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let agent = svc.discover_agent(&identifier).await?;
+                    Ok(json!(agent))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.a2a);
-        tools.push((a2a_run_task_tool(), Box::new(move |args: serde_json::Value| {
-            let identifier = args["agent"].as_str().unwrap_or("").to_string();
-            let prompt = args["prompt"].as_str().unwrap_or("").to_string();
-            let skill_id = args["skill_id"].as_str().map(ToOwned::to_owned);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let result = svc.run_task(&identifier, &prompt, skill_id.as_deref()).await?;
-                Ok(json!(result))
-            })
-        }) as ToolHandler));
+        tools.push((
+            a2a_run_task_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let identifier = args["agent"].as_str().unwrap_or("").to_string();
+                let prompt = args["prompt"].as_str().unwrap_or("").to_string();
+                let skill_id = args["skill_id"].as_str().map(ToOwned::to_owned);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let result = svc
+                        .run_task(&identifier, &prompt, skill_id.as_deref())
+                        .await?;
+                    Ok(json!(result))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Browser ---
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browse_url_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.get_page_content(&url).await {
-                    Ok(content) => Ok(json!({
-                        "url": url,
-                        "title": content.title,
-                        "content": content.text_content,
-                        "links": content.links
-                    })),
-                    Err(e) => Err(format!("Browse failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browse_url_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.get_page_content(&url).await {
+                        Ok(content) => Ok(json!({
+                            "url": url,
+                            "title": content.title,
+                            "content": content.text_content,
+                            "links": content.links
+                        })),
+                        Err(e) => Err(format!("Browse failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_navigate
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_navigate_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.navigate(&url).await {
-                    Ok(info) => Ok(json!({
-                        "url": info.url,
-                        "title": info.title,
-                        "status_code": info.status_code
-                    })),
-                    Err(e) => Err(format!("Navigate failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browser_navigate_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.navigate(&url).await {
+                        Ok(info) => Ok(json!({
+                            "url": info.url,
+                            "title": info.title,
+                            "status_code": info.status_code
+                        })),
+                        Err(e) => Err(format!("Navigate failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_screenshot
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_screenshot_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let full_page = args["full_page"].as_bool().unwrap_or(false);
-            let width = args["width"].as_u64().unwrap_or(1280) as u32;
-            let height = args["height"].as_u64().unwrap_or(720) as u32;
-            let selector = args["selector"].as_str().map(String::from);
-            let format = args["format"].as_str().unwrap_or("png").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let options = hive_integrations::browser::ScreenshotOptions {
-                    full_page,
-                    width,
-                    height,
-                    selector,
-                    format: format.clone(),
-                };
-                match svc.screenshot(&url, options).await {
-                    Ok(bytes) => {
-                        let b64 = encode_base64(&bytes);
-                        Ok(json!({
-                            "url": url,
-                            "format": format,
-                            "size_bytes": bytes.len(),
-                            "data_base64": b64
-                        }))
+        tools.push((
+            browser_screenshot_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let full_page = args["full_page"].as_bool().unwrap_or(false);
+                let width = args["width"].as_u64().unwrap_or(1280) as u32;
+                let height = args["height"].as_u64().unwrap_or(720) as u32;
+                let selector = args["selector"].as_str().map(String::from);
+                let format = args["format"].as_str().unwrap_or("png").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let options = hive_integrations::browser::ScreenshotOptions {
+                        full_page,
+                        width,
+                        height,
+                        selector,
+                        format: format.clone(),
+                    };
+                    match svc.screenshot(&url, options).await {
+                        Ok(bytes) => {
+                            let b64 = encode_base64(&bytes);
+                            Ok(json!({
+                                "url": url,
+                                "format": format,
+                                "size_bytes": bytes.len(),
+                                "data_base64": b64
+                            }))
+                        }
+                        Err(e) => Err(format!("Screenshot failed: {e}")),
                     }
-                    Err(e) => Err(format!("Screenshot failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_fill_form
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_fill_form_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let fields_val = args["fields"].as_array().cloned().unwrap_or_default();
-            let fields: Vec<hive_integrations::browser::FormField> = fields_val
-                .iter()
-                .map(|f| hive_integrations::browser::FormField {
-                    selector: f["selector"].as_str().unwrap_or("").to_string(),
-                    value: f["value"].as_str().unwrap_or("").to_string(),
+        tools.push((
+            browser_fill_form_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let fields_val = args["fields"].as_array().cloned().unwrap_or_default();
+                let fields: Vec<hive_integrations::browser::FormField> = fields_val
+                    .iter()
+                    .map(|f| hive_integrations::browser::FormField {
+                        selector: f["selector"].as_str().unwrap_or("").to_string(),
+                        value: f["value"].as_str().unwrap_or("").to_string(),
+                    })
+                    .collect();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.fill_form(&url, fields).await {
+                        Ok(result) => Ok(json!({
+                            "success": result.success,
+                            "submitted_url": result.submitted_url,
+                            "response_status": result.response_status
+                        })),
+                        Err(e) => Err(format!("Fill form failed: {e}")),
+                    }
                 })
-                .collect();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.fill_form(&url, fields).await {
-                    Ok(result) => Ok(json!({
-                        "success": result.success,
-                        "submitted_url": result.submitted_url,
-                        "response_status": result.response_status
-                    })),
-                    Err(e) => Err(format!("Fill form failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+            }) as ToolHandler,
+        ));
     }
 
     // browser_click
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_click_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let selector = args["selector"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.click(&url, &selector).await {
-                    Ok(()) => Ok(json!({
-                        "url": url,
-                        "selector": selector,
-                        "status": "clicked"
-                    })),
-                    Err(e) => Err(format!("Click failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browser_click_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let selector = args["selector"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.click(&url, &selector).await {
+                        Ok(()) => Ok(json!({
+                            "url": url,
+                            "selector": selector,
+                            "status": "clicked"
+                        })),
+                        Err(e) => Err(format!("Click failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_evaluate_script
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_evaluate_script_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let js_code = args["js_code"].as_str().unwrap_or("").to_string();
-            validate_js_code(&js_code)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.evaluate_script(&url, &js_code).await {
-                    Ok(value) => Ok(json!({
-                        "url": url,
-                        "result": value
-                    })),
-                    Err(e) => Err(format!("Script evaluation failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browser_evaluate_script_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let js_code = args["js_code"].as_str().unwrap_or("").to_string();
+                validate_js_code(&js_code)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.evaluate_script(&url, &js_code).await {
+                        Ok(value) => Ok(json!({
+                            "url": url,
+                            "result": value
+                        })),
+                        Err(e) => Err(format!("Script evaluation failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_wait_for_selector
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_wait_for_selector_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let selector = args["selector"].as_str().unwrap_or("").to_string();
-            let timeout_ms = args["timeout_ms"].as_u64().unwrap_or(30_000);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.wait_for_selector(&url, &selector, timeout_ms).await {
-                    Ok(found) => Ok(json!({
-                        "url": url,
-                        "selector": selector,
-                        "found": found,
-                        "timeout_ms": timeout_ms
-                    })),
-                    Err(e) => Err(format!("Wait for selector failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browser_wait_for_selector_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let selector = args["selector"].as_str().unwrap_or("").to_string();
+                let timeout_ms = args["timeout_ms"].as_u64().unwrap_or(30_000);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.wait_for_selector(&url, &selector, timeout_ms).await {
+                        Ok(found) => Ok(json!({
+                            "url": url,
+                            "selector": selector,
+                            "found": found,
+                            "timeout_ms": timeout_ms
+                        })),
+                        Err(e) => Err(format!("Wait for selector failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_scrape_structured
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_scrape_structured_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let selectors_val = args["selectors"].as_array().cloned().unwrap_or_default();
-            let selectors: Vec<hive_integrations::browser::ScrapeSelector> = selectors_val
-                .iter()
-                .map(|s| hive_integrations::browser::ScrapeSelector {
-                    name: s["name"].as_str().unwrap_or("").to_string(),
-                    css_selector: s["css_selector"].as_str().unwrap_or("").to_string(),
-                    attribute: s["attribute"].as_str().map(String::from),
-                })
-                .collect();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.scrape_structured(&url, selectors).await {
-                    Ok(data) => {
-                        let result: serde_json::Value = serde_json::to_value(&data)
-                            .unwrap_or_else(|_| json!({}));
-                        Ok(json!({
-                            "url": url,
-                            "data": result
-                        }))
+        tools.push((
+            browser_scrape_structured_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let selectors_val = args["selectors"].as_array().cloned().unwrap_or_default();
+                let selectors: Vec<hive_integrations::browser::ScrapeSelector> = selectors_val
+                    .iter()
+                    .map(|s| hive_integrations::browser::ScrapeSelector {
+                        name: s["name"].as_str().unwrap_or("").to_string(),
+                        css_selector: s["css_selector"].as_str().unwrap_or("").to_string(),
+                        attribute: s["attribute"].as_str().map(String::from),
+                    })
+                    .collect();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.scrape_structured(&url, selectors).await {
+                        Ok(data) => {
+                            let result: serde_json::Value =
+                                serde_json::to_value(&data).unwrap_or_else(|_| json!({}));
+                            Ok(json!({
+                                "url": url,
+                                "data": result
+                            }))
+                        }
+                        Err(e) => Err(format!("Structured scrape failed: {e}")),
                     }
-                    Err(e) => Err(format!("Structured scrape failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_pdf_export
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_pdf_export_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.pdf_export(&url).await {
-                    Ok(bytes) => {
-                        let b64 = encode_base64(&bytes);
-                        Ok(json!({
-                            "url": url,
-                            "size_bytes": bytes.len(),
-                            "data_base64": b64
-                        }))
+        tools.push((
+            browser_pdf_export_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.pdf_export(&url).await {
+                        Ok(bytes) => {
+                            let b64 = encode_base64(&bytes);
+                            Ok(json!({
+                                "url": url,
+                                "size_bytes": bytes.len(),
+                                "data_base64": b64
+                            }))
+                        }
+                        Err(e) => Err(format!("PDF export failed: {e}")),
                     }
-                    Err(e) => Err(format!("PDF export failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_run_test
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_run_test_tool(), Box::new(move |args: serde_json::Value| {
-            let test_script = args["test_script"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.run_test(&test_script).await {
-                    Ok(result) => Ok(json!({
-                        "passed": result.passed,
-                        "failed": result.failed,
-                        "duration_ms": result.duration_ms,
-                        "output": result.output
-                    })),
-                    Err(e) => Err(format!("Test run failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browser_run_test_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let test_script = args["test_script"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.run_test(&test_script).await {
+                        Ok(result) => Ok(json!({
+                            "passed": result.passed,
+                            "failed": result.failed,
+                            "duration_ms": result.duration_ms,
+                            "output": result.output
+                        })),
+                        Err(e) => Err(format!("Test run failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_crawl_site
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_crawl_site_tool(), Box::new(move |args: serde_json::Value| {
-            let base_url = args["base_url"].as_str().unwrap_or("").to_string();
-            validate_url(&base_url)?;
-            let max_pages = args["max_pages"].as_u64().unwrap_or(10) as usize;
-            let extract_selector = args["extract_selector"].as_str().map(String::from);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.crawl_site(&base_url, max_pages, extract_selector.as_deref()).await {
-                    Ok(pages) => {
-                        let items: Vec<serde_json::Value> = pages.iter().map(|p| json!({
-                            "url": p.url,
-                            "title": p.title,
-                            "content": p.content,
-                            "links": p.links,
-                            "depth": p.depth
-                        })).collect();
-                        Ok(json!({
-                            "base_url": base_url,
-                            "pages_crawled": items.len(),
-                            "pages": items
-                        }))
+        tools.push((
+            browser_crawl_site_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let base_url = args["base_url"].as_str().unwrap_or("").to_string();
+                validate_url(&base_url)?;
+                let max_pages = args["max_pages"].as_u64().unwrap_or(10) as usize;
+                let extract_selector = args["extract_selector"].as_str().map(String::from);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc
+                        .crawl_site(&base_url, max_pages, extract_selector.as_deref())
+                        .await
+                    {
+                        Ok(pages) => {
+                            let items: Vec<serde_json::Value> = pages
+                                .iter()
+                                .map(|p| {
+                                    json!({
+                                        "url": p.url,
+                                        "title": p.title,
+                                        "content": p.content,
+                                        "links": p.links,
+                                        "depth": p.depth
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({
+                                "base_url": base_url,
+                                "pages_crawled": items.len(),
+                                "pages": items
+                            }))
+                        }
+                        Err(e) => Err(format!("Crawl failed: {e}")),
                     }
-                    Err(e) => Err(format!("Crawl failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_monitor_changes — collect up to 5 change events with a 30s total timeout
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_monitor_changes_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let selector = args["selector"].as_str().unwrap_or("").to_string();
-            let interval_secs = args["interval_secs"].as_u64().unwrap_or(5);
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let mut rx = svc.monitor_changes(&url, &selector, interval_secs).await
-                    .map_err(|e| format!("Monitor setup failed: {e}"))?;
-                let mut events: Vec<serde_json::Value> = Vec::new();
-                let deadline = tokio::time::Instant::now()
-                    + tokio::time::Duration::from_secs(30);
-                let max_events = 5usize;
-                while events.len() < max_events {
-                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                    if remaining.is_zero() {
-                        break;
-                    }
-                    match tokio::time::timeout(remaining, rx.recv()).await {
-                        Ok(Some(event)) => {
-                            events.push(json!({
-                                "timestamp": event.timestamp.to_rfc3339(),
-                                "old_content": event.old_content,
-                                "new_content": event.new_content,
-                                "selector": event.selector
-                            }));
+        tools.push((
+            browser_monitor_changes_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let selector = args["selector"].as_str().unwrap_or("").to_string();
+                let interval_secs = args["interval_secs"].as_u64().unwrap_or(5);
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let mut rx = svc
+                        .monitor_changes(&url, &selector, interval_secs)
+                        .await
+                        .map_err(|e| format!("Monitor setup failed: {e}"))?;
+                    let mut events: Vec<serde_json::Value> = Vec::new();
+                    let deadline =
+                        tokio::time::Instant::now() + tokio::time::Duration::from_secs(30);
+                    let max_events = 5usize;
+                    while events.len() < max_events {
+                        let remaining =
+                            deadline.saturating_duration_since(tokio::time::Instant::now());
+                        if remaining.is_zero() {
+                            break;
                         }
-                        Ok(None) => break, // channel closed
-                        Err(_) => break,   // timeout
+                        match tokio::time::timeout(remaining, rx.recv()).await {
+                            Ok(Some(event)) => {
+                                events.push(json!({
+                                    "timestamp": event.timestamp.to_rfc3339(),
+                                    "old_content": event.old_content,
+                                    "new_content": event.new_content,
+                                    "selector": event.selector
+                                }));
+                            }
+                            Ok(None) => break, // channel closed
+                            Err(_) => break,   // timeout
+                        }
                     }
-                }
-                Ok(json!({
-                    "url": url,
-                    "selector": selector,
-                    "changes_detected": events.len(),
-                    "events": events
-                }))
-            })
-        }) as ToolHandler));
+                    Ok(json!({
+                        "url": url,
+                        "selector": selector,
+                        "changes_detected": events.len(),
+                        "events": events
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_intercept_network
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_intercept_network_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let url_pattern = args["url_pattern"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.intercept_network(&url, &url_pattern).await {
-                    Ok(requests) => {
-                        let items: Vec<serde_json::Value> = requests.iter().map(|r| json!({
-                            "url": r.url,
-                            "method": r.method,
-                            "status": r.status,
-                            "content_type": r.content_type,
-                            "body_size": r.body_size
-                        })).collect();
-                        Ok(json!({
-                            "page_url": url,
-                            "pattern": url_pattern,
-                            "requests_captured": items.len(),
-                            "requests": items
-                        }))
+        tools.push((
+            browser_intercept_network_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let url_pattern = args["url_pattern"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.intercept_network(&url, &url_pattern).await {
+                        Ok(requests) => {
+                            let items: Vec<serde_json::Value> = requests
+                                .iter()
+                                .map(|r| {
+                                    json!({
+                                        "url": r.url,
+                                        "method": r.method,
+                                        "status": r.status,
+                                        "content_type": r.content_type,
+                                        "body_size": r.body_size
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({
+                                "page_url": url,
+                                "pattern": url_pattern,
+                                "requests_captured": items.len(),
+                                "requests": items
+                            }))
+                        }
+                        Err(e) => Err(format!("Network intercept failed: {e}")),
                     }
-                    Err(e) => Err(format!("Network intercept failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_accessibility_audit
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_accessibility_audit_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.accessibility_audit(&url).await {
-                    Ok(report) => {
-                        let violations: Vec<serde_json::Value> = report.violations.iter().map(|v| json!({
-                            "id": v.id,
-                            "description": v.description,
-                            "impact": v.impact,
-                            "nodes": v.nodes
-                        })).collect();
-                        Ok(json!({
-                            "url": url,
-                            "violations_count": violations.len(),
-                            "violations": violations,
-                            "passes": report.passes,
-                            "total": report.total
-                        }))
+        tools.push((
+            browser_accessibility_audit_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.accessibility_audit(&url).await {
+                        Ok(report) => {
+                            let violations: Vec<serde_json::Value> = report
+                                .violations
+                                .iter()
+                                .map(|v| {
+                                    json!({
+                                        "id": v.id,
+                                        "description": v.description,
+                                        "impact": v.impact,
+                                        "nodes": v.nodes
+                                    })
+                                })
+                                .collect();
+                            Ok(json!({
+                                "url": url,
+                                "violations_count": violations.len(),
+                                "violations": violations,
+                                "passes": report.passes,
+                                "total": report.total
+                            }))
+                        }
+                        Err(e) => Err(format!("Accessibility audit failed: {e}")),
                     }
-                    Err(e) => Err(format!("Accessibility audit failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // browser_performance_metrics
     {
         let svc = Arc::clone(&services.browser);
-        tools.push((browser_performance_metrics_tool(), Box::new(move |args: serde_json::Value| {
-            let url = args["url"].as_str().unwrap_or("").to_string();
-            validate_url(&url)?;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.performance_metrics(&url).await {
-                    Ok(metrics) => Ok(json!({
-                        "url": url,
-                        "first_contentful_paint_ms": metrics.first_contentful_paint_ms,
-                        "largest_contentful_paint_ms": metrics.largest_contentful_paint_ms,
-                        "time_to_interactive_ms": metrics.time_to_interactive_ms,
-                        "total_blocking_time_ms": metrics.total_blocking_time_ms,
-                        "cumulative_layout_shift": metrics.cumulative_layout_shift
-                    })),
-                    Err(e) => Err(format!("Performance metrics failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            browser_performance_metrics_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let url = args["url"].as_str().unwrap_or("").to_string();
+                validate_url(&url)?;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.performance_metrics(&url).await {
+                        Ok(metrics) => Ok(json!({
+                            "url": url,
+                            "first_contentful_paint_ms": metrics.first_contentful_paint_ms,
+                            "largest_contentful_paint_ms": metrics.largest_contentful_paint_ms,
+                            "time_to_interactive_ms": metrics.time_to_interactive_ms,
+                            "total_blocking_time_ms": metrics.total_blocking_time_ms,
+                            "cumulative_layout_shift": metrics.cumulative_layout_shift
+                        })),
+                        Err(e) => Err(format!("Performance metrics failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Local AI / Ollama ---
     {
         let svc = Arc::clone(&services.ollama);
-        tools.push((ollama_list_models_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let models = svc.list_models().await?;
-                Ok(json!({
-                    "count": models.len(),
-                    "models": models,
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            ollama_list_models_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let models = svc.list_models().await?;
+                    Ok(json!({
+                        "count": models.len(),
+                        "models": models,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = Arc::clone(&services.ollama);
-        tools.push((ollama_pull_model_tool(), Box::new(move |args: serde_json::Value| {
-            let model = args["model"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-                let model_name = model.clone();
-                let pull = tokio::spawn(async move { svc.pull_model(&model_name, tx).await });
-                let mut progress = Vec::new();
-                while let Some(update) = rx.recv().await {
-                    progress.push(json!(update));
-                }
-                match pull.await.map_err(|e| format!("Ollama pull task panicked: {e}"))? {
-                    Ok(()) => Ok(json!({
-                        "status": "pulled",
+        tools.push((
+            ollama_pull_model_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let model = args["model"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+                    let model_name = model.clone();
+                    let pull = tokio::spawn(async move { svc.pull_model(&model_name, tx).await });
+                    let mut progress = Vec::new();
+                    while let Some(update) = rx.recv().await {
+                        progress.push(json!(update));
+                    }
+                    match pull
+                        .await
+                        .map_err(|e| format!("Ollama pull task panicked: {e}"))?
+                    {
+                        Ok(()) => Ok(json!({
+                            "status": "pulled",
+                            "model": model,
+                            "progress": progress,
+                        })),
+                        Err(e) => Err(e),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.ollama);
+        tools.push((
+            ollama_show_model_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let model = args["model"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let info = svc.show_model(&model).await?;
+                    Ok(json!(info))
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = Arc::clone(&services.ollama);
+        tools.push((
+            ollama_delete_model_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let model = args["model"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    svc.delete_model(&model).await?;
+                    Ok(json!({
+                        "status": "deleted",
                         "model": model,
-                        "progress": progress,
-                    })),
-                    Err(e) => Err(e),
-                }
-            })
-        }) as ToolHandler));
-    }
-
-    {
-        let svc = Arc::clone(&services.ollama);
-        tools.push((ollama_show_model_tool(), Box::new(move |args: serde_json::Value| {
-            let model = args["model"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let info = svc.show_model(&model).await?;
-                Ok(json!(info))
-            })
-        }) as ToolHandler));
-    }
-
-    {
-        let svc = Arc::clone(&services.ollama);
-        tools.push((ollama_delete_model_tool(), Box::new(move |args: serde_json::Value| {
-            let model = args["model"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                svc.delete_model(&model).await?;
-                Ok(json!({
-                    "status": "deleted",
-                    "model": model,
-                }))
-            })
-        }) as ToolHandler));
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Smart Home / Hue ---
-    tools.push((hue_discover_bridges_tool(), Box::new(move |_args: serde_json::Value| {
-        block_on_async(async move {
-            let bridges = hive_integrations::smart_home::PhilipsHueClient::discover_bridges()
-                .await
-                .map_err(|e| format!("Hue discovery failed: {e}"))?;
-            Ok(json!({
-                "count": bridges.len(),
-                "bridges": bridges,
-            }))
-        })
-    }) as ToolHandler));
+    tools.push((
+        hue_discover_bridges_tool(),
+        Box::new(move |_args: serde_json::Value| {
+            block_on_async(async move {
+                let bridges = hive_integrations::smart_home::PhilipsHueClient::discover_bridges()
+                    .await
+                    .map_err(|e| format!("Hue discovery failed: {e}"))?;
+                Ok(json!({
+                    "count": bridges.len(),
+                    "bridges": bridges,
+                }))
+            })
+        }) as ToolHandler,
+    ));
 
     {
         let svc = services.hue.clone();
-        tools.push((hue_list_lights_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = svc.clone();
-            block_on_async(async move {
-                let client = svc
-                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
-                let lights = client
-                    .list_lights()
-                    .await
-                    .map_err(|e| format!("Hue lights request failed: {e}"))?;
-                Ok(json!({
-                    "count": lights.len(),
-                    "lights": lights,
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            hue_list_lights_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client =
+                        svc.ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                    let lights = client
+                        .list_lights()
+                        .await
+                        .map_err(|e| format!("Hue lights request failed: {e}"))?;
+                    Ok(json!({
+                        "count": lights.len(),
+                        "lights": lights,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = services.hue.clone();
-        tools.push((hue_set_light_state_tool(), Box::new(move |args: serde_json::Value| {
-            let light_id = args["light_id"].as_str().unwrap_or("").to_string();
-            let on = args["on"].as_bool().unwrap_or(false);
-            let brightness = args["brightness"].as_u64().map(|value| value as u8);
-            let svc = svc.clone();
-            block_on_async(async move {
-                let client = svc
-                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
-                client
-                    .set_light_state(&light_id, on, brightness)
-                    .await
-                    .map_err(|e| format!("Hue light state update failed: {e}"))?;
-                Ok(json!({
-                    "status": "updated",
-                    "light_id": light_id,
-                    "on": on,
-                    "brightness": brightness,
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            hue_set_light_state_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let light_id = args["light_id"].as_str().unwrap_or("").to_string();
+                let on = args["on"].as_bool().unwrap_or(false);
+                let brightness = args["brightness"].as_u64().map(|value| value as u8);
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client =
+                        svc.ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                    client
+                        .set_light_state(&light_id, on, brightness)
+                        .await
+                        .map_err(|e| format!("Hue light state update failed: {e}"))?;
+                    Ok(json!({
+                        "status": "updated",
+                        "light_id": light_id,
+                        "on": on,
+                        "brightness": brightness,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = services.hue.clone();
-        tools.push((hue_list_scenes_tool(), Box::new(move |_args: serde_json::Value| {
-            let svc = svc.clone();
-            block_on_async(async move {
-                let client = svc
-                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
-                let scenes = client
-                    .list_scenes()
-                    .await
-                    .map_err(|e| format!("Hue scenes request failed: {e}"))?;
-                Ok(json!({
-                    "count": scenes.len(),
-                    "scenes": scenes,
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            hue_list_scenes_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client =
+                        svc.ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                    let scenes = client
+                        .list_scenes()
+                        .await
+                        .map_err(|e| format!("Hue scenes request failed: {e}"))?;
+                    Ok(json!({
+                        "count": scenes.len(),
+                        "scenes": scenes,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     {
         let svc = services.hue.clone();
-        tools.push((hue_activate_scene_tool(), Box::new(move |args: serde_json::Value| {
-            let scene_id = args["scene_id"].as_str().unwrap_or("").to_string();
-            let svc = svc.clone();
-            block_on_async(async move {
-                let client = svc
-                    .ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
-                client
-                    .activate_scene(&scene_id)
-                    .await
-                    .map_err(|e| format!("Hue scene activation failed: {e}"))?;
-                Ok(json!({
-                    "status": "activated",
-                    "scene_id": scene_id,
-                }))
-            })
-        }) as ToolHandler));
+        tools.push((
+            hue_activate_scene_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let scene_id = args["scene_id"].as_str().unwrap_or("").to_string();
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client =
+                        svc.ok_or_else(|| "Hue bridge is not configured in Settings".to_string())?;
+                    client
+                        .activate_scene(&scene_id)
+                        .await
+                        .map_err(|e| format!("Hue scene activation failed: {e}"))?;
+                    Ok(json!({
+                        "status": "activated",
+                        "scene_id": scene_id,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
     }
 
     // --- Docs Search ---
     {
         let svc = Arc::clone(&services.docs_indexer);
-        tools.push((search_docs_tool(), Box::new(move |args: serde_json::Value| {
-            let query = args["query"].as_str().unwrap_or("").to_string();
-            let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
-            let svc = Arc::clone(&svc);
-            // search is sync
-            let results = svc.search("default", &query, max_results);
-            let items: Vec<serde_json::Value> = results.iter().map(|r| json!({
-                "title": r.title,
-                "url": r.page_url,
-                "snippet": r.snippet,
-                "score": r.relevance_score
-            })).collect();
-            Ok(json!({
-                "query": query,
-                "count": items.len(),
-                "results": items
-            }))
-        }) as ToolHandler));
+        tools.push((
+            search_docs_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let query = args["query"].as_str().unwrap_or("").to_string();
+                let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+                let svc = Arc::clone(&svc);
+                // search is sync
+                let results = svc.search("default", &query, max_results);
+                let items: Vec<serde_json::Value> = results
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "title": r.title,
+                            "url": r.page_url,
+                            "snippet": r.snippet,
+                            "score": r.relevance_score
+                        })
+                    })
+                    .collect();
+                Ok(json!({
+                    "query": query,
+                    "count": items.len(),
+                    "results": items
+                }))
+            }) as ToolHandler,
+        ));
     }
 
     // --- Deploy (dispatches via deploy scripts, Makefile, or GitHub Actions) ---
@@ -1428,61 +2048,70 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         }) as ToolHandler));
 
         let svc = Arc::clone(drive);
-        tools.push((google_drive_search_tool(), Box::new(move |args: serde_json::Value| {
-            let query = args["query"].as_str().unwrap_or("").to_string();
-            let page_size = args["page_size"].as_u64().unwrap_or(20) as u32;
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                let drive_query = format!("name contains '{}'", query.replace('\'', "\\'"));
-                match svc.list_files(Some(&drive_query), page_size).await {
-                    Ok(list) => {
-                        let items: Vec<serde_json::Value> = list.files.iter().map(|f| json!({
+        tools.push((
+            google_drive_search_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let query = args["query"].as_str().unwrap_or("").to_string();
+                let page_size = args["page_size"].as_u64().unwrap_or(20) as u32;
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    let drive_query = format!("name contains '{}'", query.replace('\'', "\\'"));
+                    match svc.list_files(Some(&drive_query), page_size).await {
+                        Ok(list) => {
+                            let items: Vec<serde_json::Value> = list.files.iter().map(|f| json!({
                             "id": f.id, "name": f.name, "mime_type": f.mime_type, "size": f.size
                         })).collect();
-                        Ok(json!({ "query": query, "count": items.len(), "files": items }))
+                            Ok(json!({ "query": query, "count": items.len(), "files": items }))
+                        }
+                        Err(e) => Err(format!("Google Drive search failed: {e}")),
                     }
-                    Err(e) => Err(format!("Google Drive search failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+                })
+            }) as ToolHandler,
+        ));
     }
 
     if let Some(ref sheets) = services.google_sheets {
         let svc = Arc::clone(sheets);
-        tools.push((google_sheets_read_tool(), Box::new(move |args: serde_json::Value| {
-            let spreadsheet_id = args["spreadsheet_id"].as_str().unwrap_or("").to_string();
-            let range = args["range"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.get_values(&spreadsheet_id, &range).await {
-                    Ok(values) => Ok(json!({
-                        "spreadsheet_id": spreadsheet_id,
-                        "range": values.range,
-                        "row_count": values.values.len(),
-                        "values": values.values
-                    })),
-                    Err(e) => Err(format!("Google Sheets read failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            google_sheets_read_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let spreadsheet_id = args["spreadsheet_id"].as_str().unwrap_or("").to_string();
+                let range = args["range"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.get_values(&spreadsheet_id, &range).await {
+                        Ok(values) => Ok(json!({
+                            "spreadsheet_id": spreadsheet_id,
+                            "range": values.range,
+                            "row_count": values.values.len(),
+                            "values": values.values
+                        })),
+                        Err(e) => Err(format!("Google Sheets read failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     if let Some(ref docs) = services.google_docs {
         let svc = Arc::clone(docs);
-        tools.push((google_docs_get_tool(), Box::new(move |args: serde_json::Value| {
-            let document_id = args["document_id"].as_str().unwrap_or("").to_string();
-            let svc = Arc::clone(&svc);
-            block_on_async(async move {
-                match svc.read_text(&document_id).await {
-                    Ok(text) => Ok(json!({
-                        "document_id": document_id,
-                        "text": text,
-                        "length": text.len()
-                    })),
-                    Err(e) => Err(format!("Google Docs get failed: {e}")),
-                }
-            })
-        }) as ToolHandler));
+        tools.push((
+            google_docs_get_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let document_id = args["document_id"].as_str().unwrap_or("").to_string();
+                let svc = Arc::clone(&svc);
+                block_on_async(async move {
+                    match svc.read_text(&document_id).await {
+                        Ok(text) => Ok(json!({
+                            "document_id": document_id,
+                            "text": text,
+                            "length": text.len()
+                        })),
+                        Err(e) => Err(format!("Google Docs get failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
     }
 
     if let Some(ref tasks) = services.google_tasks {
@@ -1688,43 +2317,58 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
     }
 
     // --- Blockchain (HIGH-RISK — requires user approval) ---
-    tools.push((token_estimate_cost_tool(), Box::new(|args: serde_json::Value| {
-        let chain_str = args["chain"].as_str().unwrap_or("ethereum").to_string();
-        block_on_async(async move {
-            match chain_str.as_str() {
-                "solana" => {
-                    match hive_blockchain::solana::estimate_deploy_cost().await {
+    tools.push((
+        token_estimate_cost_tool(),
+        Box::new(|args: serde_json::Value| {
+            let chain_str = args["chain"].as_str().unwrap_or("ethereum").to_string();
+            block_on_async(async move {
+                match chain_str.as_str() {
+                    "solana" => match hive_blockchain::solana::estimate_deploy_cost().await {
                         Ok(cost) => Ok(json!({ "chain": "solana", "estimated_cost_sol": cost })),
                         Err(e) => Err(format!("Solana cost estimate failed: {e}")),
+                    },
+                    _ => {
+                        let chain = match chain_str.as_str() {
+                            "base" => hive_blockchain::wallet_store::Chain::Base,
+                            _ => hive_blockchain::wallet_store::Chain::Ethereum,
+                        };
+                        match hive_blockchain::evm::estimate_deploy_cost(chain).await {
+                            Ok(cost) => {
+                                Ok(json!({ "chain": chain_str, "estimated_cost_eth": cost }))
+                            }
+                            Err(e) => Err(format!("EVM cost estimate failed: {e}")),
+                        }
                     }
                 }
-                _ => {
-                    let chain = match chain_str.as_str() {
-                        "base" => hive_blockchain::wallet_store::Chain::Base,
-                        _ => hive_blockchain::wallet_store::Chain::Ethereum,
-                    };
-                    match hive_blockchain::evm::estimate_deploy_cost(chain).await {
-                        Ok(cost) => Ok(json!({ "chain": chain_str, "estimated_cost_eth": cost })),
-                        Err(e) => Err(format!("EVM cost estimate failed: {e}")),
-                    }
-                }
-            }
-        })
-    }) as ToolHandler));
+            })
+        }) as ToolHandler,
+    ));
 
     // HIGH-RISK: token_deploy_erc20 — deploys a real ERC-20 token on-chain.
     // This handler returns an error directing the user to use the wallet UI instead,
     // because private key handling requires explicit user approval flow.
-    tools.push((token_deploy_erc20_tool(), Box::new(|_args: serde_json::Value| {
-        Err("ERC-20 deployment requires explicit user approval and wallet signing. \
-             Use the Blockchain panel in Settings to deploy tokens securely.".into())
-    }) as ToolHandler));
+    tools.push((
+        token_deploy_erc20_tool(),
+        Box::new(|_args: serde_json::Value| {
+            Err(
+                "ERC-20 deployment requires explicit user approval and wallet signing. \
+             Use the Blockchain panel in Settings to deploy tokens securely."
+                    .into(),
+            )
+        }) as ToolHandler,
+    ));
 
     // HIGH-RISK: token_deploy_spl — deploys a real SPL token on Solana.
-    tools.push((token_deploy_spl_tool(), Box::new(|_args: serde_json::Value| {
-        Err("SPL token deployment requires explicit user approval and wallet signing. \
-             Use the Blockchain panel in Settings to deploy tokens securely.".into())
-    }) as ToolHandler));
+    tools.push((
+        token_deploy_spl_tool(),
+        Box::new(|_args: serde_json::Value| {
+            Err(
+                "SPL token deployment requires explicit user approval and wallet signing. \
+             Use the Blockchain panel in Settings to deploy tokens securely."
+                    .into(),
+            )
+        }) as ToolHandler,
+    ));
 
     // --- Webhooks ---
     {
@@ -1747,31 +2391,37 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
 
     {
         let registry = Arc::clone(&services.webhooks);
-        tools.push((webhook_list_tool(), Box::new(move |_args: serde_json::Value| {
-            let guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-            let items: Vec<serde_json::Value> = guard.list().iter().map(|w| json!({
+        tools.push((
+            webhook_list_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                let items: Vec<serde_json::Value> = guard.list().iter().map(|w| json!({
                 "id": w.id, "name": w.name, "url": w.url, "events": w.events, "active": w.active
             })).collect();
-            Ok(json!({ "count": items.len(), "webhooks": items }))
-        }) as ToolHandler));
+                Ok(json!({ "count": items.len(), "webhooks": items }))
+            }) as ToolHandler,
+        ));
     }
 
     {
         let registry = Arc::clone(&services.webhooks);
-        tools.push((webhook_fire_tool(), Box::new(move |args: serde_json::Value| {
-            let event = args["event"].as_str().unwrap_or("").to_string();
-            let payload = args.get("payload").cloned().unwrap_or(json!({}));
-            let registry = Arc::clone(&registry);
-            {
-                let guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
-                let count = guard.subscriber_count_for(&event);
-                // NOTE: actual HTTP delivery requires async + the guard's client.
-                // The std::sync::MutexGuard is !Send so we cannot hold it across
-                // an await inside block_on_async.  For now we report the subscriber
-                // count synchronously; full delivery is handled by the event bus.
-                Ok(json!({ "event": event, "notified": count }))
-            }
-        }) as ToolHandler));
+        tools.push((
+            webhook_fire_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let event = args["event"].as_str().unwrap_or("").to_string();
+                let _payload = args.get("payload").cloned().unwrap_or(json!({}));
+                let registry = Arc::clone(&registry);
+                {
+                    let guard = registry.lock().map_err(|e| format!("Lock poisoned: {e}"))?;
+                    let count = guard.subscriber_count_for(&event);
+                    // NOTE: actual HTTP delivery requires async + the guard's client.
+                    // The std::sync::MutexGuard is !Send so we cannot hold it across
+                    // an await inside block_on_async.  For now we report the subscriber
+                    // count synchronously; full delivery is handled by the event bus.
+                    Ok(json!({ "event": event, "notified": count }))
+                }
+            }) as ToolHandler,
+        ));
     }
 
     tools
@@ -1819,6 +2469,52 @@ fn send_message_tool() -> McpTool {
                 "message": { "type": "string", "description": "Message content" }
             },
             "required": ["platform", "channel", "message"]
+        }),
+    }
+}
+
+fn list_channels_tool() -> McpTool {
+    McpTool {
+        name: "list_channels".into(),
+        description: "List available channels/conversations on a messaging platform".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] }
+            },
+            "required": ["platform"]
+        }),
+    }
+}
+
+fn get_messages_tool() -> McpTool {
+    McpTool {
+        name: "get_messages".into(),
+        description: "Get recent messages from a channel on a messaging platform".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] },
+                "channel": { "type": "string", "description": "Channel name or ID" },
+                "limit": { "type": "integer", "description": "Maximum number of messages to retrieve (default 20)", "default": 20 }
+            },
+            "required": ["platform", "channel"]
+        }),
+    }
+}
+
+fn search_messages_tool() -> McpTool {
+    McpTool {
+        name: "search_messages".into(),
+        description: "Search messages across a messaging platform".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "platform": { "type": "string", "enum": ["slack", "discord", "teams", "telegram", "matrix", "web_chat", "whatsapp", "signal", "google_chat", "imessage"] },
+                "query": { "type": "string", "description": "Search query" },
+                "limit": { "type": "integer", "description": "Maximum number of results to return (default 10)", "default": 10 }
+            },
+            "required": ["platform", "query"]
         }),
     }
 }
@@ -1971,7 +2667,8 @@ fn a2a_list_agents_tool() -> McpTool {
 fn a2a_discover_agent_tool() -> McpTool {
     McpTool {
         name: "a2a_discover_agent".into(),
-        description: "Discover a configured remote A2A agent and return its advertised skills".into(),
+        description: "Discover a configured remote A2A agent and return its advertised skills"
+            .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2049,7 +2746,9 @@ fn browser_screenshot_tool() -> McpTool {
 fn browser_fill_form_tool() -> McpTool {
     McpTool {
         name: "browser_fill_form".into(),
-        description: "Fill form fields on a page and submit. Each field needs a CSS selector and value.".into(),
+        description:
+            "Fill form fields on a page and submit. Each field needs a CSS selector and value."
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2162,7 +2861,9 @@ fn browser_pdf_export_tool() -> McpTool {
 fn browser_run_test_tool() -> McpTool {
     McpTool {
         name: "browser_run_test".into(),
-        description: "Run a Playwright test script and return results (passed, failed, duration, output)".into(),
+        description:
+            "Run a Playwright test script and return results (passed, failed, duration, output)"
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2208,7 +2909,8 @@ fn browser_monitor_changes_tool() -> McpTool {
 fn browser_intercept_network_tool() -> McpTool {
     McpTool {
         name: "browser_intercept_network".into(),
-        description: "Intercept and capture network requests matching a URL pattern during page load".into(),
+        description:
+            "Intercept and capture network requests matching a URL pattern during page load".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2223,7 +2925,9 @@ fn browser_intercept_network_tool() -> McpTool {
 fn browser_accessibility_audit_tool() -> McpTool {
     McpTool {
         name: "browser_accessibility_audit".into(),
-        description: "Run an accessibility audit on a page and return violations, passes, and total checks".into(),
+        description:
+            "Run an accessibility audit on a page and return violations, passes, and total checks"
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2237,7 +2941,9 @@ fn browser_accessibility_audit_tool() -> McpTool {
 fn browser_performance_metrics_tool() -> McpTool {
     McpTool {
         name: "browser_performance_metrics".into(),
-        description: "Collect Core Web Vitals and performance metrics for a page (FCP, LCP, TTI, TBT, CLS)".into(),
+        description:
+            "Collect Core Web Vitals and performance metrics for a page (FCP, LCP, TTI, TBT, CLS)"
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2707,17 +3413,13 @@ fn local_search_tool() -> McpTool {
 }
 
 fn handle_local_search(args: serde_json::Value) -> Result<serde_json::Value, String> {
-    let query = args["query"]
-        .as_str()
-        .ok_or("query is required")?;
+    let query = args["query"].as_str().ok_or("query is required")?;
 
     if query.trim().is_empty() {
         return Err("query must not be empty".into());
     }
 
-    let max_results = args["max_results"]
-        .as_u64()
-        .unwrap_or(10) as usize;
+    let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
 
     let config = hive_ai::LocalSearchConfig {
         max_results,
@@ -2726,12 +3428,10 @@ fn handle_local_search(args: serde_json::Value) -> Result<serde_json::Value, Str
     let svc = hive_ai::LocalSearchService::new(config);
 
     if !svc.is_available() {
-        return Err(
-            "SearXNG is not running. Start a SearXNG instance (e.g. \
+        return Err("SearXNG is not running. Start a SearXNG instance (e.g. \
              `docker run -d -p 8888:8080 searxng/searxng:latest`) \
              and try again."
-                .into(),
-        );
+            .into());
     }
 
     let results = svc.search(query, &[])?;
@@ -2935,7 +3635,8 @@ fn docker_compose_down_tool() -> McpTool {
 fn docker_system_info_tool() -> McpTool {
     McpTool {
         name: "docker_system_info".into(),
-        description: "Get Docker system information (running/stopped containers, images, version)".into(),
+        description: "Get Docker system information (running/stopped containers, images, version)"
+            .into(),
         input_schema: json!({
             "type": "object",
             "properties": {}
@@ -2950,7 +3651,8 @@ fn docker_system_info_tool() -> McpTool {
 fn export_pdf_tool() -> McpTool {
     McpTool {
         name: "export_pdf".into(),
-        description: "Generate a PDF document with a title and sections, then write it to a file".into(),
+        description: "Generate a PDF document with a title and sections, then write it to a file"
+            .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -2977,7 +3679,9 @@ fn export_pdf_tool() -> McpTool {
 fn export_docx_tool() -> McpTool {
     McpTool {
         name: "export_docx".into(),
-        description: "Generate a DOCX (Word) document with a title and sections, then write it to a file".into(),
+        description:
+            "Generate a DOCX (Word) document with a title and sections, then write it to a file"
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -3004,7 +3708,9 @@ fn export_docx_tool() -> McpTool {
 fn export_xlsx_tool() -> McpTool {
     McpTool {
         name: "export_xlsx".into(),
-        description: "Generate an XLSX (Excel) spreadsheet from headers and rows, then write it to a file".into(),
+        description:
+            "Generate an XLSX (Excel) spreadsheet from headers and rows, then write it to a file"
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -3032,7 +3738,8 @@ fn export_xlsx_tool() -> McpTool {
 fn export_pptx_tool() -> McpTool {
     McpTool {
         name: "export_pptx".into(),
-        description: "Generate a PPTX (PowerPoint) presentation from slides, then write it to a file".into(),
+        description:
+            "Generate a PPTX (PowerPoint) presentation from slides, then write it to a file".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -3087,7 +3794,9 @@ fn export_csv_tool() -> McpTool {
 fn export_html_tool() -> McpTool {
     McpTool {
         name: "export_html".into(),
-        description: "Generate an HTML document with a title and body content, then write it to a file".into(),
+        description:
+            "Generate an HTML document with a title and body content, then write it to a file"
+                .into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -3103,7 +3812,8 @@ fn export_html_tool() -> McpTool {
 fn export_markdown_tool() -> McpTool {
     McpTool {
         name: "export_markdown".into(),
-        description: "Generate a Markdown document with a title and sections, then write it to a file".into(),
+        description:
+            "Generate a Markdown document with a title and sections, then write it to a file".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -3376,7 +4086,9 @@ fn is_safe_docker_param(s: &str) -> bool {
 /// Allows alphanumeric characters, '.', '_', '-', and '/' (for branch names
 /// like `feature/foo`). Rejects empty strings and anything else.
 fn is_safe_deploy_param(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/'))
 }
 
 /// Format the output of a deploy command into a JSON result.
@@ -3414,9 +4126,7 @@ fn format_deploy_output(
 
 /// Create a stub handler that returns a note.
 fn stub(note: &'static str) -> ToolHandler {
-    Box::new(move |_args| {
-        Ok(json!({ "note": note }))
-    })
+    Box::new(move |_args| Ok(json!({ "note": note })))
 }
 
 /// Bridge sync handler to async by running on the tokio runtime.
@@ -3436,8 +4146,8 @@ where
         .join()
         .map_err(|_| "Async task panicked".to_string())?
     } else {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create runtime: {e}"))?;
+        let rt =
+            tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {e}"))?;
         rt.block_on(future)
     }
 }
@@ -3543,8 +4253,7 @@ fn validate_js_code(code: &str) -> Result<(), String> {
 
 /// Encode bytes as a standard base64 string (RFC 4648).
 fn encode_base64(input: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
     for chunk in input.chunks(3) {
@@ -3570,10 +4279,19 @@ fn encode_base64(input: &[u8]) -> String {
 }
 
 fn parse_messaging_platform(s: &str) -> hive_integrations::messaging::Platform {
+    use hive_integrations::messaging::Platform;
     match s {
-        "discord" => hive_integrations::messaging::Platform::Discord,
-        "teams" => hive_integrations::messaging::Platform::Teams,
-        _ => hive_integrations::messaging::Platform::Slack,
+        "slack" => Platform::Slack,
+        "discord" => Platform::Discord,
+        "teams" => Platform::Teams,
+        "telegram" => Platform::Telegram,
+        "whatsapp" => Platform::WhatsApp,
+        "signal" => Platform::Signal,
+        "matrix" => Platform::Matrix,
+        "google_chat" => Platform::GoogleChat,
+        "web_chat" | "webchat" => Platform::WebChat,
+        "imessage" | "i_message" => Platform::IMessage,
+        _ => Platform::Slack,
     }
 }
 
@@ -3594,7 +4312,9 @@ fn parse_priority(s: &str) -> hive_integrations::project_management::IssuePriori
     }
 }
 
-fn parse_issue_status_filter(s: &str) -> Option<hive_integrations::project_management::IssueStatus> {
+fn parse_issue_status_filter(
+    s: &str,
+) -> Option<hive_integrations::project_management::IssueStatus> {
     match s {
         "open" => Some(hive_integrations::project_management::IssueStatus::Todo),
         "in_progress" => Some(hive_integrations::project_management::IssueStatus::InProgress),
@@ -3616,26 +4336,51 @@ async fn list_aws_resources(
 ) -> Result<serde_json::Value, String> {
     match resource_type {
         "s3" | "storage" => {
-            let buckets = aws.list_s3_buckets().await.map_err(|e| format!("AWS error: {e}"))?;
-            let items: Vec<serde_json::Value> = buckets.iter().map(|b| json!({
-                "name": b.name, "region": b.region, "created": b.creation_date
-            })).collect();
-            Ok(json!({ "provider": "aws", "resource_type": "s3", "count": items.len(), "resources": items }))
+            let buckets = aws
+                .list_s3_buckets()
+                .await
+                .map_err(|e| format!("AWS error: {e}"))?;
+            let items: Vec<serde_json::Value> = buckets
+                .iter()
+                .map(|b| {
+                    json!({
+                        "name": b.name, "region": b.region, "created": b.creation_date
+                    })
+                })
+                .collect();
+            Ok(
+                json!({ "provider": "aws", "resource_type": "s3", "count": items.len(), "resources": items }),
+            )
         }
         "lambda" | "functions" => {
-            let fns = aws.list_lambda_functions().await.map_err(|e| format!("AWS error: {e}"))?;
-            let items: Vec<serde_json::Value> = fns.iter().map(|f| json!({
-                "name": f.name, "runtime": f.runtime, "memory_mb": f.memory_mb
-            })).collect();
-            Ok(json!({ "provider": "aws", "resource_type": "lambda", "count": items.len(), "resources": items }))
+            let fns = aws
+                .list_lambda_functions()
+                .await
+                .map_err(|e| format!("AWS error: {e}"))?;
+            let items: Vec<serde_json::Value> = fns
+                .iter()
+                .map(|f| {
+                    json!({
+                        "name": f.name, "runtime": f.runtime, "memory_mb": f.memory_mb
+                    })
+                })
+                .collect();
+            Ok(
+                json!({ "provider": "aws", "resource_type": "lambda", "count": items.len(), "resources": items }),
+            )
         }
         _ => {
             // Default: list EC2 instances
-            let instances = aws.list_ec2_instances().await.map_err(|e| format!("AWS error: {e}"))?;
+            let instances = aws
+                .list_ec2_instances()
+                .await
+                .map_err(|e| format!("AWS error: {e}"))?;
             let items: Vec<serde_json::Value> = instances.iter().map(|i| json!({
                 "id": i.id, "name": i.name, "state": i.state, "instance_type": i.instance_type
             })).collect();
-            Ok(json!({ "provider": "aws", "resource_type": "ec2", "count": items.len(), "resources": items }))
+            Ok(
+                json!({ "provider": "aws", "resource_type": "ec2", "count": items.len(), "resources": items }),
+            )
         }
     }
 }
@@ -3646,25 +4391,50 @@ async fn list_azure_resources(
 ) -> Result<serde_json::Value, String> {
     match resource_type {
         "storage" => {
-            let accounts = azure.list_storage_accounts().await.map_err(|e| format!("Azure error: {e}"))?;
-            let items: Vec<serde_json::Value> = accounts.iter().map(|a| json!({
-                "name": a.name, "kind": a.kind, "location": a.location
-            })).collect();
-            Ok(json!({ "provider": "azure", "resource_type": "storage", "count": items.len(), "resources": items }))
+            let accounts = azure
+                .list_storage_accounts()
+                .await
+                .map_err(|e| format!("Azure error: {e}"))?;
+            let items: Vec<serde_json::Value> = accounts
+                .iter()
+                .map(|a| {
+                    json!({
+                        "name": a.name, "kind": a.kind, "location": a.location
+                    })
+                })
+                .collect();
+            Ok(
+                json!({ "provider": "azure", "resource_type": "storage", "count": items.len(), "resources": items }),
+            )
         }
         "functions" => {
-            let fns = azure.list_functions().await.map_err(|e| format!("Azure error: {e}"))?;
-            let items: Vec<serde_json::Value> = fns.iter().map(|f| json!({
-                "name": f.name, "runtime": f.runtime, "state": f.state
-            })).collect();
-            Ok(json!({ "provider": "azure", "resource_type": "functions", "count": items.len(), "resources": items }))
+            let fns = azure
+                .list_functions()
+                .await
+                .map_err(|e| format!("Azure error: {e}"))?;
+            let items: Vec<serde_json::Value> = fns
+                .iter()
+                .map(|f| {
+                    json!({
+                        "name": f.name, "runtime": f.runtime, "state": f.state
+                    })
+                })
+                .collect();
+            Ok(
+                json!({ "provider": "azure", "resource_type": "functions", "count": items.len(), "resources": items }),
+            )
         }
         _ => {
-            let vms = azure.list_vms().await.map_err(|e| format!("Azure error: {e}"))?;
+            let vms = azure
+                .list_vms()
+                .await
+                .map_err(|e| format!("Azure error: {e}"))?;
             let items: Vec<serde_json::Value> = vms.iter().map(|v| json!({
                 "name": v.name, "size": v.vm_size, "status": v.status, "location": v.location
             })).collect();
-            Ok(json!({ "provider": "azure", "resource_type": "vms", "count": items.len(), "resources": items }))
+            Ok(
+                json!({ "provider": "azure", "resource_type": "vms", "count": items.len(), "resources": items }),
+            )
         }
     }
 }
@@ -3675,25 +4445,50 @@ async fn list_gcp_resources(
 ) -> Result<serde_json::Value, String> {
     match resource_type {
         "storage" => {
-            let buckets = gcp.list_gcs_buckets().await.map_err(|e| format!("GCP error: {e}"))?;
-            let items: Vec<serde_json::Value> = buckets.iter().map(|b| json!({
-                "name": b.name, "location": b.location, "storage_class": b.storage_class
-            })).collect();
-            Ok(json!({ "provider": "gcp", "resource_type": "storage", "count": items.len(), "resources": items }))
+            let buckets = gcp
+                .list_gcs_buckets()
+                .await
+                .map_err(|e| format!("GCP error: {e}"))?;
+            let items: Vec<serde_json::Value> = buckets
+                .iter()
+                .map(|b| {
+                    json!({
+                        "name": b.name, "location": b.location, "storage_class": b.storage_class
+                    })
+                })
+                .collect();
+            Ok(
+                json!({ "provider": "gcp", "resource_type": "storage", "count": items.len(), "resources": items }),
+            )
         }
         "functions" => {
-            let fns = gcp.list_cloud_functions().await.map_err(|e| format!("GCP error: {e}"))?;
-            let items: Vec<serde_json::Value> = fns.iter().map(|f| json!({
-                "name": f.name, "runtime": f.runtime, "status": f.status
-            })).collect();
-            Ok(json!({ "provider": "gcp", "resource_type": "functions", "count": items.len(), "resources": items }))
+            let fns = gcp
+                .list_cloud_functions()
+                .await
+                .map_err(|e| format!("GCP error: {e}"))?;
+            let items: Vec<serde_json::Value> = fns
+                .iter()
+                .map(|f| {
+                    json!({
+                        "name": f.name, "runtime": f.runtime, "status": f.status
+                    })
+                })
+                .collect();
+            Ok(
+                json!({ "provider": "gcp", "resource_type": "functions", "count": items.len(), "resources": items }),
+            )
         }
         _ => {
-            let instances = gcp.list_compute_instances().await.map_err(|e| format!("GCP error: {e}"))?;
+            let instances = gcp
+                .list_compute_instances()
+                .await
+                .map_err(|e| format!("GCP error: {e}"))?;
             let items: Vec<serde_json::Value> = instances.iter().map(|i| json!({
                 "name": i.name, "machine_type": i.machine_type, "status": i.status, "zone": i.zone
             })).collect();
-            Ok(json!({ "provider": "gcp", "resource_type": "compute", "count": items.len(), "resources": items }))
+            Ok(
+                json!({ "provider": "gcp", "resource_type": "compute", "count": items.len(), "resources": items }),
+            )
         }
     }
 }
@@ -3912,7 +4707,12 @@ mod tests {
         assert_eq!(listed["count"], 1);
         assert_eq!(listed["agents"][0]["name"], "remote-builder");
 
-        let discovered = call_tool(&tools, "a2a_discover_agent", json!({"agent": "remote-builder"})).unwrap();
+        let discovered = call_tool(
+            &tools,
+            "a2a_discover_agent",
+            json!({"agent": "remote-builder"}),
+        )
+        .unwrap();
         assert_eq!(discovered["skills"][0], "build");
 
         let ran = call_tool(
@@ -3929,36 +4729,49 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ollama_tools_use_configured_endpoint() {
         let ollama_url = start_ollama_server().await;
-        let services = test_services(
-            Arc::new(MockA2aService::default()),
-            Some(ollama_url),
-            None,
-        );
+        let services = test_services(Arc::new(MockA2aService::default()), Some(ollama_url), None);
         let tools = wire_integration_handlers(services);
 
         let listed = call_tool(&tools, "ollama_list_models", json!({})).unwrap();
         assert_eq!(listed["count"], 1);
         assert_eq!(listed["models"][0]["name"], "llama3.2:latest");
 
-        let shown = call_tool(&tools, "ollama_show_model", json!({"model": "llama3.2:latest"})).unwrap();
+        let shown = call_tool(
+            &tools,
+            "ollama_show_model",
+            json!({"model": "llama3.2:latest"}),
+        )
+        .unwrap();
         assert_eq!(shown["name"], "llama3.2:latest");
 
-        let pulled = call_tool(&tools, "ollama_pull_model", json!({"model": "llama3.2:latest"})).unwrap();
+        let pulled = call_tool(
+            &tools,
+            "ollama_pull_model",
+            json!({"model": "llama3.2:latest"}),
+        )
+        .unwrap();
         assert_eq!(pulled["status"], "pulled");
         assert!(pulled["progress"].as_array().unwrap().len() >= 2);
 
-        let deleted = call_tool(&tools, "ollama_delete_model", json!({"model": "llama3.2:latest"})).unwrap();
+        let deleted = call_tool(
+            &tools,
+            "ollama_delete_model",
+            json!({"model": "llama3.2:latest"}),
+        )
+        .unwrap();
         assert_eq!(deleted["status"], "deleted");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn hue_tools_use_configured_client_and_fail_without_one() {
         let hue_url = start_hue_server().await;
-        let hue_client = Arc::new(hive_integrations::smart_home::PhilipsHueClient::with_base_url(
-            "127.0.0.1",
-            "key",
-            &hue_url,
-        ));
+        let hue_client = Arc::new(
+            hive_integrations::smart_home::PhilipsHueClient::with_base_url(
+                "127.0.0.1",
+                "key",
+                &hue_url,
+            ),
+        );
         let tools = wire_integration_handlers(test_services(
             Arc::new(MockA2aService::default()),
             None,
@@ -3981,7 +4794,8 @@ mod tests {
         .unwrap();
         assert_eq!(updated["status"], "updated");
 
-        let activated = call_tool(&tools, "hue_activate_scene", json!({"scene_id": "scene-1"})).unwrap();
+        let activated =
+            call_tool(&tools, "hue_activate_scene", json!({"scene_id": "scene-1"})).unwrap();
         assert_eq!(activated["status"], "activated");
 
         let missing = wire_integration_handlers(test_services(

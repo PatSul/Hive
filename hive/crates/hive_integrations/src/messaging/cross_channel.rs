@@ -136,7 +136,11 @@ impl CrossChannelService {
 
     /// List all channel links.
     pub fn list_channel_links(&self) -> Vec<ChannelLink> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).channel_links.clone()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .channel_links
+            .clone()
     }
 
     /// Find channels linked to the given platform+channel.
@@ -209,7 +213,11 @@ impl CrossChannelService {
 
     /// List all thread links.
     pub fn list_thread_links(&self) -> Vec<ThreadLink> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).thread_links.clone()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .thread_links
+            .clone()
     }
 
     // ── Conversation tracking ────────────────────────────────────
@@ -232,7 +240,11 @@ impl CrossChannelService {
             "tracking cross-channel message"
         );
 
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).conversations.push(entry);
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .conversations
+            .push(entry);
     }
 
     /// Track multiple messages at once.
@@ -244,7 +256,11 @@ impl CrossChannelService {
 
     /// Return the total number of tracked conversation entries.
     pub fn conversation_count(&self) -> usize {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).conversations.len()
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .conversations
+            .len()
     }
 
     /// Get recent conversation entries, newest first.
@@ -360,7 +376,10 @@ impl CrossChannelService {
 
     /// Persist the cross-channel service state to a JSON file.
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
-        let state = self.state.lock().map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
+        let state = self
+            .state
+            .lock()
+            .map_err(|e| anyhow::anyhow!("lock poisoned: {e}"))?;
         let json = serde_json::to_string_pretty(&*state)?;
         std::fs::write(path, json)?;
         Ok(())

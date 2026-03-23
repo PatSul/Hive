@@ -313,9 +313,9 @@ impl AiProvider for OllamaProvider {
                                     prompt_tokens: p,
                                     completion_tokens: c,
                                     total_tokens: p + c,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            })
+                                    cache_creation_input_tokens: None,
+                                    cache_read_input_tokens: None,
+                                })
                             } else {
                                 None
                             };

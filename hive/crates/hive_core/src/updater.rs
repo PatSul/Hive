@@ -7,7 +7,10 @@
 //! - **Windows**: Downloads the zip, extracts, and replaces the exe
 
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use anyhow::{Context, Result, bail};
 use parking_lot::RwLock;
@@ -88,11 +91,17 @@ impl UpdateService {
 
         match &result {
             Ok(Some(info)) => {
-                info!("Update available: {} -> {}", self.inner.current_version, info.version);
+                info!(
+                    "Update available: {} -> {}",
+                    self.inner.current_version, info.version
+                );
                 *self.inner.update_info.write() = Some(info.clone());
             }
             Ok(None) => {
-                info!("No update available (current: {})", self.inner.current_version);
+                info!(
+                    "No update available (current: {})",
+                    self.inner.current_version
+                );
                 *self.inner.update_info.write() = None;
             }
             Err(e) => {
@@ -104,9 +113,7 @@ impl UpdateService {
     }
 
     fn do_check(&self) -> Result<Option<UpdateInfo>> {
-        let url = format!(
-            "https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        );
+        let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
 
         // Use a blocking reqwest client (we're on a background thread).
         let client = reqwest::blocking::Client::builder()
@@ -144,15 +151,9 @@ impl UpdateService {
             .map(String::from)
             .context(format!("Asset {asset_name} not found in release"))?;
 
-        let release_url = body["html_url"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let release_url = body["html_url"].as_str().unwrap_or("").to_string();
 
-        let release_notes = body["body"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let release_notes = body["body"].as_str().unwrap_or("").to_string();
 
         Ok(Some(UpdateInfo {
             version: remote_version.to_string(),
@@ -165,7 +166,8 @@ impl UpdateService {
     /// Download and install the update. Blocking — call from a background thread.
     /// Returns the path to the new binary (caller may need to restart).
     pub fn install_update(&self) -> Result<PathBuf> {
-        let info = self.available_update()
+        let info = self
+            .available_update()
             .context("No update available to install")?;
 
         if self.inner.updating.swap(true, Ordering::SeqCst) {
@@ -188,7 +190,8 @@ impl UpdateService {
             .build()
             .context("Failed to build HTTP client")?;
 
-        let resp = client.get(&info.asset_url)
+        let resp = client
+            .get(&info.asset_url)
             .send()
             .context("Failed to download update")?;
 
@@ -198,11 +201,10 @@ impl UpdateService {
 
         let bytes = resp.bytes().context("Failed to read response body")?;
 
-        let current_exe = std::env::current_exe()
-            .context("Cannot determine current executable path")?;
+        let current_exe =
+            std::env::current_exe().context("Cannot determine current executable path")?;
 
-        let tmp_dir = tempfile::tempdir()
-            .context("Failed to create temp directory")?;
+        let tmp_dir = tempfile::tempdir().context("Failed to create temp directory")?;
 
         // Platform-specific extraction and installation.
         #[cfg(target_os = "macos")]
@@ -225,7 +227,12 @@ impl UpdateService {
     }
 
     #[cfg(target_os = "macos")]
-    fn install_macos(&self, data: &[u8], current_exe: &std::path::Path, tmp: &std::path::Path) -> Result<()> {
+    fn install_macos(
+        &self,
+        data: &[u8],
+        current_exe: &std::path::Path,
+        tmp: &std::path::Path,
+    ) -> Result<()> {
         // First try Homebrew upgrade if available.
         if let Ok(output) = std::process::Command::new("brew")
             .args(["upgrade", "PatSul/tap/hive"])
@@ -259,8 +266,7 @@ impl UpdateService {
 
         // Swap the binary: rename old, copy new, delete old.
         let backup = current_exe.with_extension("old");
-        std::fs::rename(current_exe, &backup)
-            .context("Failed to back up current binary")?;
+        std::fs::rename(current_exe, &backup).context("Failed to back up current binary")?;
 
         if let Err(e) = std::fs::copy(&new_binary, current_exe) {
             // Restore backup on failure.
@@ -270,7 +276,11 @@ impl UpdateService {
 
         // Remove quarantine attribute.
         let _ = std::process::Command::new("xattr")
-            .args(["-dr", "com.apple.quarantine", &current_exe.to_string_lossy()])
+            .args([
+                "-dr",
+                "com.apple.quarantine",
+                &current_exe.to_string_lossy(),
+            ])
             .output();
 
         let _ = std::fs::remove_file(&backup);
@@ -278,7 +288,12 @@ impl UpdateService {
     }
 
     #[cfg(target_os = "linux")]
-    fn install_linux(&self, data: &[u8], current_exe: &std::path::Path, tmp: &std::path::Path) -> Result<()> {
+    fn install_linux(
+        &self,
+        data: &[u8],
+        current_exe: &std::path::Path,
+        tmp: &std::path::Path,
+    ) -> Result<()> {
         let archive_path = tmp.join("update.tar.gz");
         std::fs::write(&archive_path, data).context("Failed to write archive")?;
 
@@ -298,8 +313,7 @@ impl UpdateService {
         }
 
         let backup = current_exe.with_extension("old");
-        std::fs::rename(current_exe, &backup)
-            .context("Failed to back up current binary")?;
+        std::fs::rename(current_exe, &backup).context("Failed to back up current binary")?;
 
         if let Err(e) = std::fs::copy(&new_binary, current_exe) {
             let _ = std::fs::rename(&backup, current_exe);
@@ -317,7 +331,12 @@ impl UpdateService {
     }
 
     #[cfg(target_os = "windows")]
-    fn install_windows(&self, data: &[u8], current_exe: &std::path::Path, tmp: &std::path::Path) -> Result<()> {
+    fn install_windows(
+        &self,
+        data: &[u8],
+        current_exe: &std::path::Path,
+        tmp: &std::path::Path,
+    ) -> Result<()> {
         let archive_path = tmp.join("update.zip");
         std::fs::write(&archive_path, data).context("Failed to write archive")?;
 
@@ -347,8 +366,7 @@ impl UpdateService {
         // On Windows, we can't replace a running exe directly.
         // Rename current to .old, copy new, schedule .old for deletion on reboot.
         let backup = current_exe.with_extension("exe.old");
-        std::fs::rename(current_exe, &backup)
-            .context("Failed to back up current binary")?;
+        std::fs::rename(current_exe, &backup).context("Failed to back up current binary")?;
 
         if let Err(e) = std::fs::copy(&new_binary, current_exe) {
             let _ = std::fs::rename(&backup, current_exe);
@@ -380,20 +398,28 @@ fn is_newer(remote: &str, local: &str) -> bool {
 /// The expected asset filename for the current platform.
 fn platform_asset_name() -> &'static str {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    { "hive-macos-arm64.tar.gz" }
+    {
+        "hive-macos-arm64.tar.gz"
+    }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    { "hive-linux-x64.tar.gz" }
+    {
+        "hive-linux-x64.tar.gz"
+    }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    { "hive-windows-x64.zip" }
+    {
+        "hive-windows-x64.zip"
+    }
 
     #[cfg(not(any(
         all(target_os = "macos", target_arch = "aarch64"),
         all(target_os = "linux", target_arch = "x86_64"),
         all(target_os = "windows", target_arch = "x86_64"),
     )))]
-    { "hive-unknown-platform" }
+    {
+        "hive-unknown-platform"
+    }
 }
 
 #[cfg(test)]

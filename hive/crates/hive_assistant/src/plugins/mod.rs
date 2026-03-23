@@ -158,7 +158,10 @@ mod tests {
         let mut registry = PluginRegistry::with_defaults();
         let results = registry.initialize_all().await;
         for (name, result) in &results {
-            assert!(result.is_ok(), "Plugin {name} failed to initialize: {result:?}");
+            assert!(
+                result.is_ok(),
+                "Plugin {name} failed to initialize: {result:?}"
+            );
         }
     }
 
@@ -168,7 +171,10 @@ mod tests {
         registry.initialize_all().await;
         let results = registry.shutdown_all().await;
         for (name, result) in &results {
-            assert!(result.is_ok(), "Plugin {name} failed to shut down: {result:?}");
+            assert!(
+                result.is_ok(),
+                "Plugin {name} failed to shut down: {result:?}"
+            );
         }
     }
 }

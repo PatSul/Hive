@@ -38,7 +38,9 @@ pub async fn call(workspace: Option<PathBuf>, name: &str, args_json: &str) -> Re
     let server = build_server(workspace_root).await?;
     let args: Value = serde_json::from_str(args_json)
         .with_context(|| format!("Failed to parse --args JSON: {args_json}"))?;
-    let result = server.call_tool_value(name, args).map_err(anyhow::Error::msg)?;
+    let result = server
+        .call_tool_value(name, args)
+        .map_err(anyhow::Error::msg)?;
 
     match result {
         Value::String(text) => println!("{text}"),

@@ -48,7 +48,8 @@ impl ApprovalRule {
             }
             RuleTrigger::FilesExceed { count } => {
                 if let OperationType::FileModify { scope, .. } = op {
-                    scope.split_whitespace()
+                    scope
+                        .split_whitespace()
                         .next()
                         .and_then(|n| n.parse::<usize>().ok())
                         .map(|n| n > *count)
@@ -85,7 +86,9 @@ impl ApprovalRule {
             ApprovalRule {
                 name: "git-push".into(),
                 enabled: true,
-                trigger: RuleTrigger::CommandMatches { pattern: "git push*".into() },
+                trigger: RuleTrigger::CommandMatches {
+                    pattern: "git push*".into(),
+                },
                 priority: 80,
             },
             ApprovalRule {

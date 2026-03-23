@@ -122,19 +122,15 @@ fn filtered_matches_preview() {
 
 #[test]
 fn filtered_case_insensitive() {
-    let data = HistoryData::from_summaries(vec![
-        make_summary("1", "AUTH Flow", "gpt", ""),
-    ])
-    .with_search("auth");
+    let data = HistoryData::from_summaries(vec![make_summary("1", "AUTH Flow", "gpt", "")])
+        .with_search("auth");
     assert_eq!(data.filtered().len(), 1);
 }
 
 #[test]
 fn filtered_no_match_returns_empty() {
-    let data = HistoryData::from_summaries(vec![
-        make_summary("1", "Hello", "gpt", "world"),
-    ])
-    .with_search("zzzzz");
+    let data = HistoryData::from_summaries(vec![make_summary("1", "Hello", "gpt", "world")])
+        .with_search("zzzzz");
     assert!(data.filtered().is_empty());
 }
 

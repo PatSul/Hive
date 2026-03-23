@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use tracing::debug;
 
 use super::{
-    cell_to_json_value, parse_separated_output, run_cli_command, ColumnInfo, DatabaseProvider,
-    DatabaseType, ForeignKey, IndexInfo, QueryResult, SchemaInfo, TableDescription, TableInfo,
+    ColumnInfo, DatabaseProvider, DatabaseType, ForeignKey, IndexInfo, QueryResult, SchemaInfo,
+    TableDescription, TableInfo, cell_to_json_value, parse_separated_output, run_cli_command,
 };
 
 /// SQLite provider backed by the `sqlite3` command-line tool.
@@ -74,7 +74,8 @@ impl DatabaseProvider for SQLiteProvider {
         debug!("listing SQLite schemas");
 
         // SQLite has a single implicit schema called "main".
-        let sql = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'";
+        let sql =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'";
         let output = self.sqlite_query(sql).await?;
         let count: usize = output.trim().parse().unwrap_or(0);
 
@@ -89,8 +90,7 @@ impl DatabaseProvider for SQLiteProvider {
 
         // List all user tables with estimated row counts.
         // SQLite does not expose row counts in metadata, so we query each table.
-        let tables_sql =
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+        let tables_sql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
         let output = self.sqlite_query(tables_sql).await?;
         let table_names: Vec<String> = output
             .lines()
@@ -192,7 +192,13 @@ impl DatabaseProvider for SQLiteProvider {
                 // PRAGMA index_info returns: seqno|cid|name
                 let idx_columns: Vec<String> = info_rows
                     .into_iter()
-                    .filter_map(|c| if c.len() >= 3 { Some(c[2].clone()) } else { None })
+                    .filter_map(|c| {
+                        if c.len() >= 3 {
+                            Some(c[2].clone())
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
 
                 indexes.push(IndexInfo {
@@ -229,10 +235,7 @@ impl DatabaseProvider for SQLiteProvider {
             return Ok(Vec::new());
         }
 
-        let headers: Vec<String> = lines[0]
-            .split('|')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let headers: Vec<String> = lines[0].split('|').map(|s| s.trim().to_string()).collect();
 
         let mut results = Vec::new();
         for line in &lines[1..] {
@@ -269,10 +272,7 @@ impl DatabaseProvider for SQLiteProvider {
             });
         }
 
-        let columns: Vec<String> = lines[0]
-            .split('|')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let columns: Vec<String> = lines[0].split('|').map(|s| s.trim().to_string()).collect();
 
         let mut rows = Vec::new();
         for line in &lines[1..] {
@@ -300,8 +300,7 @@ impl DatabaseProvider for SQLiteProvider {
         debug!("building SQLite context summary");
 
         // Get all user tables.
-        let tables_sql =
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+        let tables_sql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name";
         let output = self.sqlite_query(tables_sql).await?;
         let table_names: Vec<String> = output
             .lines()

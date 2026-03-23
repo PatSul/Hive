@@ -164,9 +164,7 @@ impl GcpClient {
         debug!("listing GCS buckets");
         // gsutil ls -p <project> --json is not directly available; use the
         // gcloud storage buckets list command instead.
-        let output = self
-            .run_gcloud(&["storage", "buckets", "list"])
-            .await?;
+        let output = self.run_gcloud(&["storage", "buckets", "list"]).await?;
 
         let raw: Vec<serde_json::Value> =
             serde_json::from_str(&output).context("failed to parse GCS buckets JSON")?;
@@ -198,9 +196,7 @@ impl GcpClient {
     /// List Cloud Functions (2nd gen / v2).
     pub async fn list_cloud_functions(&self) -> Result<Vec<CloudFunction>> {
         debug!("listing Cloud Functions");
-        let output = self
-            .run_gcloud(&["functions", "list"])
-            .await?;
+        let output = self.run_gcloud(&["functions", "list"]).await?;
 
         let raw: Vec<serde_json::Value> =
             serde_json::from_str(&output).context("failed to parse Cloud Functions JSON")?;
@@ -215,11 +211,7 @@ impl GcpClient {
                     .unwrap_or(&name_full)
                     .to_string();
 
-                let region = name_full
-                    .split('/')
-                    .nth(3)
-                    .unwrap_or("")
-                    .to_string();
+                let region = name_full.split('/').nth(3).unwrap_or("").to_string();
 
                 CloudFunction {
                     name,
@@ -239,9 +231,7 @@ impl GcpClient {
     /// List Cloud Run services across all regions.
     pub async fn list_cloud_run_services(&self) -> Result<Vec<CloudRunService>> {
         debug!("listing Cloud Run services");
-        let output = self
-            .run_gcloud(&["run", "services", "list"])
-            .await?;
+        let output = self.run_gcloud(&["run", "services", "list"]).await?;
 
         let raw: Vec<serde_json::Value> =
             serde_json::from_str(&output).context("failed to parse Cloud Run services JSON")?;
@@ -307,9 +297,7 @@ impl GcpClient {
     /// List GKE clusters.
     pub async fn list_gke_clusters(&self) -> Result<Vec<GkeCluster>> {
         debug!("listing GKE clusters");
-        let output = self
-            .run_gcloud(&["container", "clusters", "list"])
-            .await?;
+        let output = self.run_gcloud(&["container", "clusters", "list"]).await?;
 
         let raw: Vec<serde_json::Value> =
             serde_json::from_str(&output).context("failed to parse GKE clusters JSON")?;
@@ -380,9 +368,7 @@ impl GcpClient {
             .as_deref()
             .context("no project configured — set GcpClient.project or use gcloud config")?;
 
-        let output = self
-            .run_gcloud(&["projects", "describe", project])
-            .await?;
+        let output = self.run_gcloud(&["projects", "describe", project]).await?;
 
         let parsed: serde_json::Value =
             serde_json::from_str(&output).context("failed to parse GCP project info JSON")?;
@@ -411,8 +397,8 @@ impl GcpClient {
             return Ok(Vec::new());
         }
 
-        let raw: Vec<serde_json::Value> = serde_json::from_str(&output)
-            .context("failed to parse Firestore collections JSON")?;
+        let raw: Vec<serde_json::Value> =
+            serde_json::from_str(&output).context("failed to parse Firestore collections JSON")?;
 
         let mut collections: Vec<String> = raw
             .iter()

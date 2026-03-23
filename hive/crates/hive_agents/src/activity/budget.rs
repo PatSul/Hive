@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use chrono::{Utc, Duration};
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use super::log::ActivityLog;
 
@@ -80,7 +80,9 @@ impl BudgetEnforcer {
                         usage_pct,
                         message: format!(
                             "Daily budget at {:.0}% (${:.2} / ${:.2})",
-                            usage_pct * 100.0, summary.total_usd, daily_limit
+                            usage_pct * 100.0,
+                            summary.total_usd,
+                            daily_limit
                         ),
                     };
                 }

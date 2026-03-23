@@ -13,9 +13,9 @@ use async_trait::async_trait;
 use tracing::debug;
 
 use super::{
-    cell_to_json_value, parse_separated_output, run_cli_command, ColumnInfo, DatabaseConfig,
-    DatabaseProvider, DatabaseType, ForeignKey, IndexInfo, QueryResult, SchemaInfo,
-    TableDescription, TableInfo,
+    ColumnInfo, DatabaseConfig, DatabaseProvider, DatabaseType, ForeignKey, IndexInfo, QueryResult,
+    SchemaInfo, TableDescription, TableInfo, cell_to_json_value, parse_separated_output,
+    run_cli_command,
 };
 
 /// PostgreSQL provider backed by the `psql` command-line client.
@@ -66,35 +66,19 @@ impl PostgresProvider {
     async fn psql_query(&self, sql: &str) -> Result<String> {
         let uri = self.connection_uri();
         let env_owned = self.env_vars();
-        let env_refs: Vec<(&str, &str)> = env_owned
-            .iter()
-            .map(|(k, v)| (*k, v.as_str()))
-            .collect();
+        let env_refs: Vec<(&str, &str)> = env_owned.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
-        run_cli_command(
-            "psql",
-            &[&uri, "-t", "-A", "-F", "|", "-c", sql],
-            &env_refs,
-        )
-        .await
+        run_cli_command("psql", &[&uri, "-t", "-A", "-F", "|", "-c", sql], &env_refs).await
     }
 
     /// Execute a SQL query via `psql` *with* column headers included.
     async fn psql_query_with_headers(&self, sql: &str) -> Result<String> {
         let uri = self.connection_uri();
         let env_owned = self.env_vars();
-        let env_refs: Vec<(&str, &str)> = env_owned
-            .iter()
-            .map(|(k, v)| (*k, v.as_str()))
-            .collect();
+        let env_refs: Vec<(&str, &str)> = env_owned.iter().map(|(k, v)| (*k, v.as_str())).collect();
 
         // `-A` unaligned, `-F '|'` pipe separator, no `-t` so headers are included.
-        run_cli_command(
-            "psql",
-            &[&uri, "-A", "-F", "|", "-c", sql],
-            &env_refs,
-        )
-        .await
+        run_cli_command("psql", &[&uri, "-A", "-F", "|", "-c", sql], &env_refs).await
     }
 }
 
@@ -320,9 +304,7 @@ impl DatabaseProvider for PostgresProvider {
     ) -> Result<Vec<HashMap<String, serde_json::Value>>> {
         debug!(schema = %schema, table = %table, limit = limit, "sampling PostgreSQL rows");
 
-        let sql = format!(
-            "SELECT * FROM \"{schema}\".\"{table}\" LIMIT {limit}"
-        );
+        let sql = format!("SELECT * FROM \"{schema}\".\"{table}\" LIMIT {limit}");
 
         let output = self.psql_query_with_headers(&sql).await?;
         let lines: Vec<&str> = output.lines().collect();
@@ -332,10 +314,7 @@ impl DatabaseProvider for PostgresProvider {
             return Ok(Vec::new());
         }
 
-        let headers: Vec<String> = lines[0]
-            .split('|')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let headers: Vec<String> = lines[0].split('|').map(|s| s.trim().to_string()).collect();
 
         let mut results = Vec::new();
         // Skip the header line and the trailing row-count line (e.g. "(5 rows)").
@@ -377,10 +356,7 @@ impl DatabaseProvider for PostgresProvider {
         }
 
         // Parse header row
-        let columns: Vec<String> = lines[0]
-            .split('|')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let columns: Vec<String> = lines[0].split('|').map(|s| s.trim().to_string()).collect();
 
         let mut rows = Vec::new();
         let mut rows_affected: Option<u64> = None;
@@ -487,7 +463,11 @@ mod tests {
 
     fn make_provider() -> PostgresProvider {
         PostgresProvider::new(DatabaseConfig::postgres(
-            "localhost", 5432, "testdb", "user", "pass",
+            "localhost",
+            5432,
+            "testdb",
+            "user",
+            "pass",
         ))
     }
 
@@ -527,7 +507,10 @@ mod tests {
             password: None,
             connection_string: None,
         });
-        assert_eq!(p.connection_uri(), "postgresql://postgres@localhost:5432/postgres");
+        assert_eq!(
+            p.connection_uri(),
+            "postgresql://postgres@localhost:5432/postgres"
+        );
     }
 
     #[test]

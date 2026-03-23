@@ -55,4 +55,8 @@ AGENT_BOARD.md.lock
 hive/target_nolock/
 hive/target_check/
 hive/target-check/
+hive/target-*/
 .worktrees/
+
+# Third-party agent tooling
+.agent/

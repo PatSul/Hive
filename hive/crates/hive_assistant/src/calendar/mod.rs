@@ -134,11 +134,7 @@ impl CalendarService {
                             end: end_str,
                             location: evt.location,
                             provider: CalendarProvider::Google,
-                            attendees: evt
-                                .attendees
-                                .iter()
-                                .map(|a| a.email.clone())
-                                .collect(),
+                            attendees: evt.attendees.iter().map(|a| a.email.clone()).collect(),
                             description: evt.description,
                         }
                     })
@@ -395,8 +391,7 @@ mod tests {
 
     #[test]
     fn test_with_tokens_constructor() {
-        let service =
-            CalendarService::with_tokens(Some("g_tok".into()), Some("o_tok".into()));
+        let service = CalendarService::with_tokens(Some("g_tok".into()), Some("o_tok".into()));
         // Tokens set but no runtime — today_events degrades gracefully
         let result = service.today_events();
         assert!(result.is_err() || result.unwrap().is_empty());

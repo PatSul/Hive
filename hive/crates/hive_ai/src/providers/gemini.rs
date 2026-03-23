@@ -127,7 +127,10 @@ impl GeminiProvider {
         }
 
         // Auto-inject Gemini Agentic tools (Google Search Grounding & Code Execution) for advanced models
-        if request.model.contains("gemini-2.") || request.model.contains("gemini-3") || request.model.contains("gemini-4") {
+        if request.model.contains("gemini-2.")
+            || request.model.contains("gemini-3")
+            || request.model.contains("gemini-4")
+        {
             tools.push(serde_json::json!({ "type": "google_search" }));
             // Code execution might be via "code_execution" or "code_interpreter" depending on adapter matching
             tools.push(serde_json::json!({ "type": "code_execution" }));
@@ -142,7 +145,9 @@ impl GeminiProvider {
             max_tokens: Some(request.max_tokens),
             temperature: request.temperature,
             stream_options: if stream {
-                Some(StreamOptions { include_usage: true })
+                Some(StreamOptions {
+                    include_usage: true,
+                })
             } else {
                 None
             },
@@ -212,10 +217,11 @@ impl AiProvider for GeminiProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::Google)
-            .into_iter()
-            .cloned()
-            .collect();
+        let mut static_models: Vec<ModelInfo> =
+            crate::model_registry::models_for_provider(ProviderType::Google)
+                .into_iter()
+                .cloned()
+                .collect();
 
         let key = match self.require_key() {
             Ok(k) => k,
@@ -240,7 +246,11 @@ impl AiProvider for GeminiProvider {
                     let static_ids: std::collections::HashSet<_> =
                         static_models.iter().map(|m| m.id.clone()).collect();
                     for m in models {
-                        let id = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+                        let id = m
+                            .name
+                            .strip_prefix("models/")
+                            .unwrap_or(&m.name)
+                            .to_string();
                         // Only add Gemini models (ignore older text-bison etc unless explicitly static)
                         if !static_ids.contains(&id) && id.starts_with("gemini") {
                             static_models.push(ModelInfo {
@@ -299,9 +309,9 @@ impl AiProvider for GeminiProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }
             })
             .unwrap_or_default();
 

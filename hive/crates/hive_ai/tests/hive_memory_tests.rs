@@ -12,10 +12,7 @@ async fn test_hive_memory_index_and_query_file() {
         .unwrap();
 
     memory
-        .index_file(
-            "src/lib.rs",
-            "pub fn add(a: i32, b: i32) -> i32 { a + b }",
-        )
+        .index_file("src/lib.rs", "pub fn add(a: i32, b: i32) -> i32 { a + b }")
         .await
         .unwrap();
 

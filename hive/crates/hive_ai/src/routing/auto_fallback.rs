@@ -65,8 +65,7 @@ impl std::fmt::Display for ProviderType {
 // ---------------------------------------------------------------------------
 
 /// Health status of a single provider.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ProviderStatus {
     pub available: bool,
     pub rate_limited_until: Option<Instant>,
@@ -76,7 +75,6 @@ pub struct ProviderStatus {
     pub last_error: Option<String>,
     pub budget_exhausted: bool,
 }
-
 
 /// Why a fallback was triggered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -330,10 +328,7 @@ impl AutoFallbackManager {
 
     /// Replace the fallback chain with a new one (e.g. built from project models).
     pub fn set_fallback_chain(&mut self, chain: Vec<FallbackChainEntry>) {
-        info!(
-            entries = chain.len(),
-            "Fallback chain updated"
-        );
+        info!(entries = chain.len(), "Fallback chain updated");
         self.fallback_chain = chain;
     }
 
@@ -417,9 +412,10 @@ impl AutoFallbackManager {
 
         // Check rate-limit cooldown
         if let Some(until) = status.rate_limited_until
-            && Instant::now() < until {
-                return false;
-            }
+            && Instant::now() < until
+        {
+            return false;
+        }
 
         // Check budget exhaustion
         if self.config.budget_fallback_enabled && status.budget_exhausted {

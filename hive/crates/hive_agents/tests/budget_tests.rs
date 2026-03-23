@@ -1,6 +1,6 @@
+use hive_agents::activity::ActivityEvent;
 use hive_agents::activity::budget::{BudgetConfig, BudgetDecision, BudgetEnforcer, ExhaustAction};
 use hive_agents::activity::log::ActivityLog;
-use hive_agents::activity::ActivityEvent;
 use std::sync::Arc;
 
 fn test_enforcer(daily_limit: f64) -> (Arc<ActivityLog>, BudgetEnforcer) {
@@ -34,7 +34,8 @@ fn budget_warning_at_threshold() {
             input_tokens: 100,
             output_tokens: 50,
             cost_usd: 0.1,
-        }).unwrap();
+        })
+        .unwrap();
     }
     let decision = enforcer.check("agent-1", 0.5);
     assert!(matches!(decision, BudgetDecision::Warning { .. }));
@@ -50,7 +51,8 @@ fn budget_blocked_at_limit() {
             input_tokens: 100,
             output_tokens: 50,
             cost_usd: 0.1,
-        }).unwrap();
+        })
+        .unwrap();
     }
     let decision = enforcer.check("agent-1", 0.5);
     assert!(matches!(decision, BudgetDecision::Blocked { .. }));

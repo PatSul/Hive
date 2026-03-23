@@ -75,10 +75,10 @@ pub fn select_draft_model(primary_model: &str, config: &SpeculativeConfig) -> Op
     // The draft just needs to give a rough preview; the primary verifies quality.
     let tier = infer_tier_from_model(primary_model);
     let draft = match tier {
-        ModelTier::Premium => "gpt-4o-mini",     // Tiny + fast cloud model
-        ModelTier::Mid => "gpt-4o-mini",         // Same — smallest cloud option
-        ModelTier::Budget => "llama3.2",         // Budget → local (free + instant)
-        ModelTier::Free => return None,          // Already cheapest — no speculation
+        ModelTier::Premium => "gpt-4o-mini", // Tiny + fast cloud model
+        ModelTier::Mid => "gpt-4o-mini",     // Same — smallest cloud option
+        ModelTier::Budget => "llama3.2",     // Budget → local (free + instant)
+        ModelTier::Free => return None,      // Already cheapest — no speculation
     };
 
     Some(draft.to_string())
@@ -354,10 +354,7 @@ mod tests {
             ModelTier::Mid
         );
         assert_eq!(infer_tier_from_model("gpt-4o-mini"), ModelTier::Mid);
-        assert_eq!(
-            infer_tier_from_model("gemini-1.5-flash"),
-            ModelTier::Mid
-        );
+        assert_eq!(infer_tier_from_model("gemini-1.5-flash"), ModelTier::Mid);
     }
 
     #[test]

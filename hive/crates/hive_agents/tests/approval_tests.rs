@@ -1,12 +1,14 @@
-use hive_agents::activity::rules::{ApprovalRule, RuleTrigger};
 use hive_agents::activity::OperationType;
+use hive_agents::activity::rules::{ApprovalRule, RuleTrigger};
 
 #[test]
 fn rule_matches_shell_command_pattern() {
     let rule = ApprovalRule {
         name: "git-push".into(),
         enabled: true,
-        trigger: RuleTrigger::CommandMatches { pattern: "git push*".into() },
+        trigger: RuleTrigger::CommandMatches {
+            pattern: "git push*".into(),
+        },
         priority: 80,
     };
     let op = OperationType::ShellCommand("git push origin main".into());
@@ -18,7 +20,9 @@ fn rule_does_not_match_different_command() {
     let rule = ApprovalRule {
         name: "git-push".into(),
         enabled: true,
-        trigger: RuleTrigger::CommandMatches { pattern: "git push*".into() },
+        trigger: RuleTrigger::CommandMatches {
+            pattern: "git push*".into(),
+        },
         priority: 80,
     };
     let op = OperationType::ShellCommand("git status".into());
@@ -33,7 +37,10 @@ fn rule_matches_cost_threshold() {
         trigger: RuleTrigger::CostExceeds { usd: 5.0 },
         priority: 90,
     };
-    let op = OperationType::AiCall { model: "claude-opus-4-6".into(), estimated_cost: 7.50 };
+    let op = OperationType::AiCall {
+        model: "claude-opus-4-6".into(),
+        estimated_cost: 7.50,
+    };
     assert!(rule.matches(&op));
 }
 
@@ -45,7 +52,10 @@ fn rule_cost_under_threshold_no_match() {
         trigger: RuleTrigger::CostExceeds { usd: 5.0 },
         priority: 90,
     };
-    let op = OperationType::AiCall { model: "claude-haiku".into(), estimated_cost: 0.50 };
+    let op = OperationType::AiCall {
+        model: "claude-haiku".into(),
+        estimated_cost: 0.50,
+    };
     assert!(!rule.matches(&op));
 }
 
@@ -54,7 +64,9 @@ fn rule_matches_path_glob() {
     let rule = ApprovalRule {
         name: "protect-core".into(),
         enabled: true,
-        trigger: RuleTrigger::PathMatches { glob: "src/core/**".into() },
+        trigger: RuleTrigger::PathMatches {
+            glob: "src/core/**".into(),
+        },
         priority: 75,
     };
     let op = OperationType::FileModify {
@@ -79,9 +91,24 @@ fn disabled_rule_never_matches() {
 #[test]
 fn rules_sorted_by_priority_descending() {
     let mut rules = vec![
-        ApprovalRule { name: "low".into(), enabled: true, trigger: RuleTrigger::Always, priority: 10 },
-        ApprovalRule { name: "high".into(), enabled: true, trigger: RuleTrigger::Always, priority: 100 },
-        ApprovalRule { name: "mid".into(), enabled: true, trigger: RuleTrigger::Always, priority: 50 },
+        ApprovalRule {
+            name: "low".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 10,
+        },
+        ApprovalRule {
+            name: "high".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 100,
+        },
+        ApprovalRule {
+            name: "mid".into(),
+            enabled: true,
+            trigger: RuleTrigger::Always,
+            priority: 50,
+        },
     ];
     rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     assert_eq!(rules[0].name, "high");
@@ -89,7 +116,7 @@ fn rules_sorted_by_priority_descending() {
     assert_eq!(rules[2].name, "low");
 }
 
-use hive_agents::activity::approval::{ApprovalGate, ApprovalDecision};
+use hive_agents::activity::approval::{ApprovalDecision, ApprovalGate};
 
 #[tokio::test]
 async fn approval_gate_no_rules_match_proceeds() {
@@ -100,14 +127,12 @@ async fn approval_gate_no_rules_match_proceeds() {
 
 #[tokio::test]
 async fn approval_gate_rule_match_creates_request() {
-    let rules = vec![
-        ApprovalRule {
-            name: "always".into(),
-            enabled: true,
-            trigger: RuleTrigger::Always,
-            priority: 100,
-        },
-    ];
+    let rules = vec![ApprovalRule {
+        name: "always".into(),
+        enabled: true,
+        trigger: RuleTrigger::Always,
+        priority: 100,
+    }];
     let gate = ApprovalGate::new(rules);
 
     let pending = gate.check_sync("agent-1", &OperationType::ShellCommand("test".into()));
@@ -121,24 +146,27 @@ async fn approval_gate_rule_match_creates_request() {
 
 #[tokio::test]
 async fn approval_gate_respond_deny() {
-    let rules = vec![
-        ApprovalRule {
-            name: "always".into(),
-            enabled: true,
-            trigger: RuleTrigger::Always,
-            priority: 100,
-        },
-    ];
+    let rules = vec![ApprovalRule {
+        name: "always".into(),
+        enabled: true,
+        trigger: RuleTrigger::Always,
+        priority: 100,
+    }];
     let gate = ApprovalGate::new(rules);
 
     let pending = gate.check_sync("agent-1", &OperationType::ShellCommand("test".into()));
     assert!(pending.is_some());
 
-    gate.respond(&pending.unwrap().id, ApprovalDecision::Denied { reason: Some("nope".into()) });
+    gate.respond(
+        &pending.unwrap().id,
+        ApprovalDecision::Denied {
+            reason: Some("nope".into()),
+        },
+    );
     assert_eq!(gate.pending_count(), 0);
 }
 
-use hive_agents::activity::notification::{NotificationService, NotificationKind};
+use hive_agents::activity::notification::{NotificationKind, NotificationService};
 
 #[test]
 fn notification_service_push_and_read() {

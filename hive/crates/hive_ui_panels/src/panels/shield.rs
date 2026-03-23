@@ -20,7 +20,6 @@ actions!(
     ]
 );
 
-
 // ---------------------------------------------------------------------------
 // Event
 // ---------------------------------------------------------------------------
@@ -261,21 +260,27 @@ impl Render for ShieldView {
             .p(theme.space_4)
             .gap(theme.space_4)
             // Actions
-            .on_action(cx.listener(|this: &mut Self, _: &ShieldToggleEnabled, _, cx| {
-                this.shield_enabled = !this.shield_enabled;
-                cx.emit(ShieldConfigChanged);
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this: &mut Self, _: &ShieldToggleSecretScan, _, cx| {
-                this.secret_scan_enabled = !this.secret_scan_enabled;
-                cx.emit(ShieldConfigChanged);
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this: &mut Self, _: &ShieldToggleVulnCheck, _, cx| {
-                this.vulnerability_check_enabled = !this.vulnerability_check_enabled;
-                cx.emit(ShieldConfigChanged);
-                cx.notify();
-            }))
+            .on_action(
+                cx.listener(|this: &mut Self, _: &ShieldToggleEnabled, _, cx| {
+                    this.shield_enabled = !this.shield_enabled;
+                    cx.emit(ShieldConfigChanged);
+                    cx.notify();
+                }),
+            )
+            .on_action(
+                cx.listener(|this: &mut Self, _: &ShieldToggleSecretScan, _, cx| {
+                    this.secret_scan_enabled = !this.secret_scan_enabled;
+                    cx.emit(ShieldConfigChanged);
+                    cx.notify();
+                }),
+            )
+            .on_action(
+                cx.listener(|this: &mut Self, _: &ShieldToggleVulnCheck, _, cx| {
+                    this.vulnerability_check_enabled = !this.vulnerability_check_enabled;
+                    cx.emit(ShieldConfigChanged);
+                    cx.notify();
+                }),
+            )
             .on_action(cx.listener(|this: &mut Self, _: &ShieldTogglePii, _, cx| {
                 this.pii_detection_enabled = !this.pii_detection_enabled;
                 cx.emit(ShieldConfigChanged);
@@ -470,11 +475,7 @@ impl ShieldView {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(section_title("Custom Rules", theme)),
-                    )
+                    .child(div().flex_1().child(section_title("Custom Rules", theme)))
                     .child(
                         div()
                             .px(theme.space_3)
@@ -522,7 +523,12 @@ impl ShieldView {
         section.into_any_element()
     }
 
-    fn render_rule_row(&self, rule: &UserRule, theme: &HiveTheme, cx: &mut Context<Self>) -> AnyElement {
+    fn render_rule_row(
+        &self,
+        rule: &UserRule,
+        theme: &HiveTheme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let rule_id_toggle = rule.id.clone();
         let rule_id_delete = rule.id.clone();
         let rule_id_delete2 = rule.id.clone();
@@ -547,7 +553,9 @@ impl ShieldView {
                     .checked(active)
                     .on_click(move |_checked, _window, cx| {
                         entity.update(cx, |this, cx| {
-                            if let Some(r) = this.user_rules.iter_mut().find(|r| r.id == rule_id_toggle) {
+                            if let Some(r) =
+                                this.user_rules.iter_mut().find(|r| r.id == rule_id_toggle)
+                            {
                                 r.active = !r.active;
                             }
                             cx.emit(ShieldConfigChanged);
@@ -573,14 +581,17 @@ impl ShieldView {
                         div()
                             .text_size(theme.font_size_xs)
                             .text_color(theme.text_muted)
-                            .font_family("monospace")
+                            .font_family(theme.font_mono.clone())
                             .child(rule.pattern.clone()),
                     ),
             )
             .child(
                 // Delete button
                 div()
-                    .id(SharedString::from(format!("rule-delete-{}", &rule_id_delete2)))
+                    .id(SharedString::from(format!(
+                        "rule-delete-{}",
+                        &rule_id_delete2
+                    )))
                     .px(theme.space_2)
                     .py(theme.space_1)
                     .rounded(theme.radius_sm)

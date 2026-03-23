@@ -15,12 +15,12 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::config::NetworkConfig;
-use crate::discovery::{Announcement, DiscoveryConfig, DiscoveryService, DiscoveredPeer};
+use crate::discovery::{Announcement, DiscoveredPeer, DiscoveryConfig, DiscoveryService};
 use crate::error::NetworkError;
 use crate::identity::{NodeIdentity, PeerId};
 use crate::message::{Envelope, MessageKind};
 use crate::peer::{PeerInfo, PeerRegistry, PeerState};
-use crate::router::{MessageRouter, hello_handler, heartbeat_handler, goodbye_handler};
+use crate::router::{MessageRouter, goodbye_handler, heartbeat_handler, hello_handler};
 use crate::transport::{self, PeerConnection, TransportEvent};
 
 /// Read-only handle for querying live network state from outside the runtime
@@ -94,10 +94,7 @@ impl HiveNode {
         let mut router = MessageRouter::new();
 
         // Register built-in protocol handlers.
-        router.register(
-            MessageKind::Hello,
-            hello_handler(identity.peer_id.clone()),
-        );
+        router.register(MessageKind::Hello, hello_handler(identity.peer_id.clone()));
         router.register(
             MessageKind::Heartbeat,
             heartbeat_handler(identity.peer_id.clone()),
@@ -162,11 +159,7 @@ impl HiveNode {
     }
 
     /// Register a custom message handler for a specific message kind.
-    pub async fn on_message(
-        &self,
-        kind: MessageKind,
-        handler: crate::router::MessageHandler,
-    ) {
+    pub async fn on_message(&self, kind: MessageKind, handler: crate::router::MessageHandler) {
         let mut router = self.router.write().await;
         router.register(kind, handler);
     }
@@ -512,10 +505,7 @@ impl HiveNode {
             let addr_str = ann.listen_addr.clone();
             match transport::connect_to_peer(&addr_str, event_tx.clone()).await {
                 Ok(conn) => {
-                    connections
-                        .write()
-                        .await
-                        .insert(addr_str.clone(), conn);
+                    connections.write().await.insert(addr_str.clone(), conn);
                     let mut registry = peers.write().await;
                     registry.update_state(&ann.peer_id, PeerState::Connected);
                     info!("Connected to discovered peer '{}' at {addr_str}", ann.name);
@@ -700,10 +690,10 @@ mod tests {
         let node = HiveNode::new(identity, config);
 
         // Register a custom handler.
-        let custom_handler: crate::router::MessageHandler = Arc::new(|_env| {
-            Box::pin(async { None })
-        });
-        node.on_message(MessageKind::TaskRequest, custom_handler).await;
+        let custom_handler: crate::router::MessageHandler =
+            Arc::new(|_env| Box::pin(async { None }));
+        node.on_message(MessageKind::TaskRequest, custom_handler)
+            .await;
 
         // Verify it's registered.
         let router = node.router.read().await;

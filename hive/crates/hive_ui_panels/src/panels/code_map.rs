@@ -165,11 +165,7 @@ fn render_empty_state(theme: &HiveTheme) -> impl IntoElement {
 }
 
 /// Render a collapsible file group with its symbols.
-fn render_file_group(
-    file: &str,
-    symbols: &[CodeMapSymbol],
-    theme: &HiveTheme,
-) -> impl IntoElement {
+fn render_file_group(file: &str, symbols: &[CodeMapSymbol], theme: &HiveTheme) -> impl IntoElement {
     div()
         .flex()
         .flex_col()

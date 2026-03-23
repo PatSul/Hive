@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use qrcode::QrCode;
 use qrcode::render::svg;
 use serde::{Deserialize, Serialize};
@@ -75,12 +75,8 @@ impl PairingQrPayload {
 /// Returns the SVG markup as a `String`.
 pub fn generate_pairing_qr(payload: &PairingQrPayload) -> Result<String> {
     let url = payload.to_url();
-    let code =
-        QrCode::new(url.as_bytes()).map_err(|e| anyhow!("QR generation failed: {}", e))?;
-    let svg_string = code
-        .render::<svg::Color>()
-        .min_dimensions(200, 200)
-        .build();
+    let code = QrCode::new(url.as_bytes()).map_err(|e| anyhow!("QR generation failed: {}", e))?;
+    let svg_string = code.render::<svg::Color>().min_dimensions(200, 200).build();
     Ok(svg_string)
 }
 

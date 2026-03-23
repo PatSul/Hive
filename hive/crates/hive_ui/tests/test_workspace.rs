@@ -24,20 +24,21 @@ fn test_set_active_panel_all_panels() {
     }
 }
 
-/// Verify ctrl-1..ctrl-9,ctrl-0 keyboard mapping matches expected panels.
+/// Verify ctrl-1..ctrl-9,ctrl-0 keyboard mapping matches the current panel
+/// order used by `Panel::from_index`.
 #[test]
 fn test_keyboard_panel_mapping() {
     let expected: [(usize, Panel); 10] = [
         (1, Panel::Chat),
         (2, Panel::History),
         (3, Panel::Files),
-        (4, Panel::Specs),
-        (5, Panel::Agents),
-        (6, Panel::Workflows),
-        (7, Panel::Channels),
-        (8, Panel::Kanban),
-        (9, Panel::Monitor),
-        (0, Panel::Logs),
+        (4, Panel::CodeMap),
+        (5, Panel::PromptLibrary),
+        (6, Panel::Specs),
+        (7, Panel::Agents),
+        (8, Panel::Workflows),
+        (9, Panel::Channels),
+        (0, Panel::Kanban),
     ];
     for (key, expected_panel) in expected {
         let idx = if key == 0 { 9 } else { key - 1 };
@@ -66,4 +67,6 @@ fn test_action_types_implement_action_trait() {
     assert_action::<SwitchToSkills>();
     assert_action::<SwitchToRouting>();
     assert_action::<SwitchToLearning>();
+    assert_action::<ToggleCommandPalette>();
+    assert_action::<ActivitySetView>();
 }

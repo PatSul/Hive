@@ -8,14 +8,18 @@ use std::sync::{Arc, Mutex};
 
 use gpui::Global;
 
+use crate::theme::HiveTheme;
+use hive_a2a::A2aClientService;
 use hive_agents::automation::AutomationService;
+use hive_agents::collective_memory::CollectiveMemory;
+use hive_agents::competence_detection::CompetenceDetector;
 use hive_agents::mcp_server::McpServer;
 use hive_agents::personas::PersonaRegistry;
 use hive_agents::plugin_manager::PluginManager;
 use hive_agents::skill_marketplace::SkillMarketplace;
 use hive_agents::skills::{SkillManager, SkillsRegistry};
 use hive_agents::specs::SpecManager;
-use crate::theme::HiveTheme;
+use hive_agents::standup::StandupService;
 use hive_ai::context_engine::ContextEngine;
 use hive_ai::memory::HiveMemory;
 use hive_ai::quick_index::QuickIndex;
@@ -23,19 +27,14 @@ use hive_ai::rag::RagService;
 use hive_ai::semantic_search::SemanticSearchService;
 use hive_ai::service::AiService;
 use hive_ai::tts::service::TtsService;
-use hive_agents::collective_memory::CollectiveMemory;
-use hive_agents::standup::StandupService;
-use hive_agents::competence_detection::CompetenceDetector;
-use hive_a2a::A2aClientService;
 use hive_assistant::AssistantService;
 use hive_blockchain::rpc_config::RpcConfigStore;
 use hive_blockchain::wallet_store::WalletStore;
 use hive_core::channels::ChannelStore;
-use hive_core::scheduler::Scheduler;
-use hive_network::HiveNodeHandle;
 use hive_core::config::ConfigManager;
 use hive_core::notifications::NotificationStore;
 use hive_core::persistence::Database;
+use hive_core::scheduler::Scheduler;
 use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_integrations::bitbucket::BitbucketClient;
@@ -48,10 +47,12 @@ use hive_integrations::gitlab::GitLabClient;
 use hive_integrations::ide::IdeIntegrationService;
 use hive_integrations::knowledge::KnowledgeHub;
 use hive_integrations::kubernetes::KubernetesClient;
+use hive_integrations::messaging::CrossChannelService;
 use hive_integrations::messaging::MessagingHub;
 use hive_integrations::project_management::ProjectManagementHub;
 use hive_integrations::smart_home::PhilipsHueClient;
 use hive_learn::LearningService;
+use hive_network::HiveNodeHandle;
 use hive_shield::HiveShield;
 use hive_terminal::CliService;
 use hive_terminal::local_ai::OllamaManager;
@@ -166,6 +167,11 @@ impl Global for AppNetwork {}
 /// Global wrapper for the messaging hub (Slack, Discord, Teams, etc.).
 pub struct AppMessaging(pub Arc<MessagingHub>);
 impl Global for AppMessaging {}
+
+/// Global wrapper for the cross-channel memory service (channel/thread linking,
+/// conversation tracking, unified search across messaging platforms).
+pub struct AppCrossChannel(pub Arc<Mutex<CrossChannelService>>);
+impl Global for AppCrossChannel {}
 
 /// Global wrapper for project management (Jira, Linear, Asana).
 pub struct AppProjectManagement(pub Arc<ProjectManagementHub>);

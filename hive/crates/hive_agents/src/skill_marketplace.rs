@@ -165,8 +165,9 @@ static COMPILED_API_KEY_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLoc
 });
 
 /// Zero-width character pattern — Medium severity.
-static COMPILED_ZWC_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[\u{200B}\u{200C}\u{200D}\u{FEFF}\u{00AD}]").expect("valid regex"));
+static COMPILED_ZWC_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[\u{200B}\u{200C}\u{200D}\u{FEFF}\u{00AD}]").expect("valid regex")
+});
 
 /// Base64 payload pattern — Medium severity.
 static COMPILED_B64_PATTERN: LazyLock<Regex> =
@@ -493,7 +494,11 @@ impl SkillMarketplace {
                 .collect(),
         };
 
-        debug!(name = plugin.name, skills = plugin.skills.len(), "Installed plugin");
+        debug!(
+            name = plugin.name,
+            skills = plugin.skills.len(),
+            "Installed plugin"
+        );
         self.installed_plugins.push(plugin.clone());
         plugin
     }
@@ -511,18 +516,25 @@ impl SkillMarketplace {
 
     /// Toggle a skill within an installed plugin. Returns the new state.
     pub fn toggle_plugin_skill(&mut self, plugin_id: &str, skill_name: &str) -> Result<bool> {
-        let plugin = self.installed_plugins
+        let plugin = self
+            .installed_plugins
             .iter_mut()
             .find(|p| p.id == plugin_id)
             .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", plugin_id))?;
 
-        let skill = plugin.skills
+        let skill = plugin
+            .skills
             .iter_mut()
             .find(|s| s.name == skill_name)
             .ok_or_else(|| anyhow::anyhow!("Skill '{}' not found in plugin", skill_name))?;
 
         skill.enabled = !skill.enabled;
-        debug!(plugin_id, skill_name, enabled = skill.enabled, "Toggled plugin skill");
+        debug!(
+            plugin_id,
+            skill_name,
+            enabled = skill.enabled,
+            "Toggled plugin skill"
+        );
         Ok(skill.enabled)
     }
 
@@ -531,12 +543,14 @@ impl SkillMarketplace {
         if !path.exists() {
             return Ok(());
         }
-        let content = std::fs::read_to_string(path)
-            .context("Failed to read plugins.json")?;
-        let store: crate::plugin_types::PluginStore = serde_json::from_str(&content)
-            .context("Failed to parse plugins.json")?;
+        let content = std::fs::read_to_string(path).context("Failed to read plugins.json")?;
+        let store: crate::plugin_types::PluginStore =
+            serde_json::from_str(&content).context("Failed to parse plugins.json")?;
         self.installed_plugins = store.plugins;
-        debug!(count = self.installed_plugins.len(), "Loaded plugins from file");
+        debug!(
+            count = self.installed_plugins.len(),
+            "Loaded plugins from file"
+        );
         Ok(())
     }
 
@@ -545,11 +559,12 @@ impl SkillMarketplace {
         let store = crate::plugin_types::PluginStore {
             plugins: self.installed_plugins.clone(),
         };
-        let json = serde_json::to_string_pretty(&store)
-            .context("Failed to serialize plugins")?;
-        std::fs::write(path, json)
-            .context("Failed to write plugins.json")?;
-        debug!(count = self.installed_plugins.len(), "Saved plugins to file");
+        let json = serde_json::to_string_pretty(&store).context("Failed to serialize plugins")?;
+        std::fs::write(path, json).context("Failed to write plugins.json")?;
+        debug!(
+            count = self.installed_plugins.len(),
+            "Saved plugins to file"
+        );
         Ok(())
     }
 
@@ -1130,9 +1145,17 @@ mod tests {
                 name: "test-plugin".into(),
                 description: "A test plugin".into(),
                 version: "1.0.0".into(),
-                author: PluginAuthor { name: "Tester".into(), email: None },
-                homepage: None, repository: None, license: None,
-                keywords: vec![], skills_path: None, commands_path: None, agents_path: None,
+                author: PluginAuthor {
+                    name: "Tester".into(),
+                    email: None,
+                },
+                homepage: None,
+                repository: None,
+                license: None,
+                keywords: vec![],
+                skills_path: None,
+                commands_path: None,
+                agents_path: None,
             },
             skills: vec![
                 ParsedSkill {
@@ -1173,14 +1196,25 @@ mod tests {
         let mut mp = SkillMarketplace::new();
         let preview = PluginPreview {
             manifest: PluginManifest {
-                name: "to-remove".into(), description: "".into(), version: "1.0.0".into(),
+                name: "to-remove".into(),
+                description: "".into(),
+                version: "1.0.0".into(),
                 author: PluginAuthor::default(),
-                homepage: None, repository: None, license: None,
-                keywords: vec![], skills_path: None, commands_path: None, agents_path: None,
+                homepage: None,
+                repository: None,
+                license: None,
+                keywords: vec![],
+                skills_path: None,
+                commands_path: None,
+                agents_path: None,
             },
-            skills: vec![], commands: vec![], security_warnings: vec![],
+            skills: vec![],
+            commands: vec![],
+            security_warnings: vec![],
         };
-        let source = PluginSource::Local { path: "/tmp".into() };
+        let source = PluginSource::Local {
+            path: "/tmp".into(),
+        };
         let plugin = mp.install_plugin(&preview, source, &[], &[]);
         assert!(mp.remove_plugin(&plugin.id).is_ok());
         assert!(mp.installed_plugins().is_empty());
@@ -1199,18 +1233,30 @@ mod tests {
         let mut mp = SkillMarketplace::new();
         let preview = PluginPreview {
             manifest: PluginManifest {
-                name: "toggler".into(), description: "".into(), version: "1.0.0".into(),
+                name: "toggler".into(),
+                description: "".into(),
+                version: "1.0.0".into(),
                 author: PluginAuthor::default(),
-                homepage: None, repository: None, license: None,
-                keywords: vec![], skills_path: None, commands_path: None, agents_path: None,
+                homepage: None,
+                repository: None,
+                license: None,
+                keywords: vec![],
+                skills_path: None,
+                commands_path: None,
+                agents_path: None,
             },
             skills: vec![ParsedSkill {
-                name: "my-skill".into(), description: "".into(),
-                instructions: "Do stuff.".into(), source_file: "s.md".into(),
+                name: "my-skill".into(),
+                description: "".into(),
+                instructions: "Do stuff.".into(),
+                source_file: "s.md".into(),
             }],
-            commands: vec![], security_warnings: vec![],
+            commands: vec![],
+            security_warnings: vec![],
         };
-        let source = PluginSource::Local { path: "/tmp".into() };
+        let source = PluginSource::Local {
+            path: "/tmp".into(),
+        };
         let plugin = mp.install_plugin(&preview, source, &[0], &[]);
 
         // Toggle off

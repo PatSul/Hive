@@ -1,9 +1,11 @@
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::{
     HiveTheme, QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate,
+    SwitchToWorkspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +42,34 @@ pub struct QuickStartNextStepDisplay {
 }
 
 #[derive(Debug, Clone)]
+pub struct QuickStartStatusDisplay {
+    pub title: String,
+    pub value: String,
+    pub detail: String,
+    pub tone: QuickStartTone,
+    pub action_label: Option<String>,
+    pub action_panel: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuickStartWorkspaceDisplay {
+    pub name: String,
+    pub path: String,
+    pub is_current: bool,
+    pub is_pinned: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct QuickStartPriorityDisplay {
+    pub eyebrow: String,
+    pub title: String,
+    pub detail: String,
+    pub action_label: String,
+    pub action_panel: String,
+    pub tone: QuickStartTone,
+}
+
+#[derive(Debug, Clone)]
 pub struct QuickStartPanelData {
     pub project_name: String,
     pub project_root: String,
@@ -49,8 +79,13 @@ pub struct QuickStartPanelData {
     pub dependencies: usize,
     pub selected_template: String,
     pub templates: Vec<QuickStartTemplateDisplay>,
+    pub status_cards: Vec<QuickStartStatusDisplay>,
     pub setup: Vec<QuickStartSetupDisplay>,
     pub next_steps: Vec<QuickStartNextStepDisplay>,
+    pub priorities: Vec<QuickStartPriorityDisplay>,
+    pub saved_workspaces: Vec<QuickStartWorkspaceDisplay>,
+    pub current_model: String,
+    pub pending_approvals: usize,
     pub launch_ready: bool,
     pub launch_hint: String,
     pub last_launch_status: Option<String>,
@@ -67,11 +102,15 @@ impl QuickStartPanelData {
             dependencies: 0,
             selected_template: "dogfood".into(),
             templates: Vec::new(),
+            status_cards: Vec::new(),
             setup: Vec::new(),
             next_steps: Vec::new(),
+            priorities: Vec::new(),
+            saved_workspaces: Vec::new(),
+            current_model: String::new(),
+            pending_approvals: 0,
             launch_ready: false,
-            launch_hint: "Connect a model and choose a project mission to launch Quick Start."
-                .into(),
+            launch_hint: "Connect a model and choose a project mission to launch Home.".into(),
             last_launch_status: None,
         }
     }
@@ -95,17 +134,21 @@ impl QuickStartPanel {
             .pb(px(48.0))
             .gap(theme.space_4)
             .child(render_hero(data, theme))
-            .child(render_setup_section(data, theme))
+            .child(render_priority_section(data, theme))
             .child(render_templates_section(data, theme))
             .child(render_launch_section(data, detail_input, theme))
+            .when(!data.saved_workspaces.is_empty(), |el| {
+                el.child(render_workspace_section(data, theme))
+            })
             .child(render_next_steps_section(data, theme))
+            .child(render_status_section(data, theme))
+            .child(render_setup_section(data, theme))
     }
 }
 
 fn render_hero(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
     let summary = if data.project_summary.trim().is_empty() {
-        "Hive will use the current workspace as the project context for a guided run."
-            .to_string()
+        "Hive will use the current workspace as the project context for a guided run.".to_string()
     } else {
         data.project_summary.clone()
     };
@@ -145,15 +188,13 @@ fn render_hero(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
                                 .text_size(theme.font_size_xl)
                                 .text_color(theme.text_primary)
                                 .font_weight(FontWeight::BOLD)
-                                .child(format!("Quick Start {}", data.project_name)),
+                                .child(format!("Home / {}", data.project_name)),
                         )
                         .child(
                             div()
                                 .text_size(theme.font_size_sm)
                                 .text_color(theme.text_secondary)
-                                .child(
-                                    "Choose the job to start, let Hive validate the setup, and kick off work in the current project."
-                                ),
+                                .child("Use Home as the command center for the next move: resume work, clear blockers, and launch the next project run."),
                         )
                         .child(
                             div()
@@ -191,6 +232,121 @@ fn render_hero(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
                     theme,
                 )),
         )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(theme.space_2)
+                .child(stat_chip(
+                    if data.current_model.trim().is_empty() {
+                        "Model pending".into()
+                    } else {
+                        format!("Model: {}", data.current_model)
+                    },
+                    if data.current_model.trim().is_empty() {
+                        theme.accent_yellow
+                    } else {
+                        theme.accent_green
+                    },
+                    theme,
+                ))
+                .child(stat_chip(
+                    format!("{} approvals", data.pending_approvals),
+                    if data.pending_approvals > 0 {
+                        theme.accent_yellow
+                    } else {
+                        theme.accent_aqua
+                    },
+                    theme,
+                ))
+        )
+        .into_any_element()
+}
+
+fn render_priority_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
+    let mut grid = div().flex().flex_row().flex_wrap().gap(theme.space_3);
+    for item in &data.priorities {
+        grid = grid.child(render_priority_card(item, theme));
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .child(section_header(
+            "What Needs Attention",
+            "Home should answer what to resume, what is blocked, and what Hive should do next before you scan the rest of the app.",
+            theme,
+        ))
+        .child(grid)
+        .into_any_element()
+}
+
+fn render_status_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
+    let mut grid = div().flex().flex_row().flex_wrap().gap(theme.space_3);
+    for card in &data.status_cards {
+        grid = grid.child(render_status_card(card, theme));
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .child(section_header(
+            "At A Glance",
+            "Use Home to clear blockers, jump to the right surface, and resume work without browsing the whole app.",
+            theme,
+        ))
+        .child(grid)
+        .into_any_element()
+}
+
+fn render_priority_card(item: &QuickStartPriorityDisplay, theme: &HiveTheme) -> AnyElement {
+    let accent = match item.tone {
+        QuickStartTone::Ready => theme.accent_green,
+        QuickStartTone::Action => theme.accent_yellow,
+        QuickStartTone::Optional => theme.accent_aqua,
+    };
+    let panel = item.action_panel.clone();
+
+    card(theme)
+        .min_w(px(220.0))
+        .max_w(px(340.0))
+        .flex_grow()
+        .border_color(accent)
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(accent)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(item.eyebrow.clone()),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_primary)
+                .font_weight(FontWeight::BOLD)
+                .child(item.title.clone()),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_sm)
+                .text_color(theme.text_secondary)
+                .child(item.detail.clone()),
+        )
+        .child(secondary_button(
+            &item.action_label,
+            move |_event, window, cx| {
+                window.dispatch_action(
+                    Box::new(QuickStartOpenPanel {
+                        panel: panel.clone(),
+                    }),
+                    cx,
+                );
+            },
+            theme,
+        ))
         .into_any_element()
 }
 
@@ -201,7 +357,7 @@ fn render_setup_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyEle
         .gap(theme.space_3)
         .child(section_header(
             "Recommended Setup",
-            "Quick Start checks the current project and points you at the next required panel when something is missing.",
+            "Home checks the current project and points you at the next required panel when something is missing.",
             theme,
         ));
 
@@ -250,7 +406,7 @@ fn render_launch_section(
     let mut section = card(theme)
         .child(section_header(
             "Launch",
-            "Describe the outcome you want. Quick Start will open Chat, seed the project brief, and start the run.",
+            "Describe the outcome you want. Home will open Chat, seed the project brief, and start the run.",
             theme,
         ))
         .child(
@@ -286,9 +442,7 @@ fn render_launch_section(
                     div()
                         .text_size(theme.font_size_xs)
                         .text_color(theme.text_muted)
-                        .child(
-                            "Quick Start launches a fresh chat run so the kickoff stays clean and project-scoped.",
-                        ),
+                        .child("Home launches a fresh chat run so the kickoff stays clean and project-scoped."),
                 )
                 .child(primary_button(
                     button_label,
@@ -328,12 +482,30 @@ fn render_next_steps_section(data: &QuickStartPanelData, theme: &HiveTheme) -> A
         .flex_col()
         .gap(theme.space_3)
         .child(section_header(
-            "Follow With The Other Tabs",
-            "Quick Start gets the project moving. These tabs are the fastest handoff points after the kickoff run starts.",
+            "Continue In The Workspace",
+            "Home gets the project moving. These tabs are the fastest handoff points after the kickoff run starts.",
             theme,
         ))
         .child(grid)
         .into_any_element()
+}
+
+fn render_workspace_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
+    let mut content = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .child(section_header(
+            "Resume A Workspace",
+            "Pinned and recent projects stay visible here so Home can double as a fast project switcher.",
+            theme,
+        ));
+
+    for workspace in &data.saved_workspaces {
+        content = content.child(render_workspace_card(workspace, theme));
+    }
+
+    content.into_any_element()
 }
 
 fn render_setup_card(item: &QuickStartSetupDisplay, theme: &HiveTheme) -> AnyElement {
@@ -343,44 +515,103 @@ fn render_setup_card(item: &QuickStartSetupDisplay, theme: &HiveTheme) -> AnyEle
         QuickStartTone::Optional => (theme.bg_primary, theme.text_muted),
     };
 
+    let mut card = card(theme).child(
+        div()
+            .flex()
+            .flex_row()
+            .items_start()
+            .justify_between()
+            .gap(theme.space_3)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(theme.space_1)
+                    .flex_1()
+                    .child(
+                        div()
+                            .text_size(theme.font_size_base)
+                            .text_color(theme.text_primary)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(item.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_size(theme.font_size_sm)
+                            .text_color(theme.text_secondary)
+                            .child(item.detail.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .px(theme.space_2)
+                    .py(px(3.0))
+                    .rounded(theme.radius_full)
+                    .bg(tone_bg)
+                    .text_size(theme.font_size_xs)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(tone_fg)
+                    .child(item.status_label.clone()),
+            ),
+    );
+
+    if let (Some(action_label), Some(action_panel)) =
+        (item.action_label.as_ref(), item.action_panel.as_ref())
+    {
+        let panel = action_panel.clone();
+        card = card.child(secondary_button(
+            action_label,
+            move |_event, window, cx| {
+                window.dispatch_action(
+                    Box::new(QuickStartOpenPanel {
+                        panel: panel.clone(),
+                    }),
+                    cx,
+                );
+            },
+            theme,
+        ));
+    }
+
+    card.into_any_element()
+}
+
+fn render_status_card(item: &QuickStartStatusDisplay, theme: &HiveTheme) -> AnyElement {
+    let accent = match item.tone {
+        QuickStartTone::Ready => theme.accent_green,
+        QuickStartTone::Action => theme.accent_yellow,
+        QuickStartTone::Optional => theme.accent_aqua,
+    };
+
     let mut card = card(theme)
+        .min_w(px(220.0))
+        .max_w(px(320.0))
+        .flex_grow()
+        .border_color(accent)
         .child(
             div()
                 .flex()
-                .flex_row()
-                .items_start()
-                .justify_between()
-                .gap(theme.space_3)
+                .flex_col()
+                .gap(theme.space_1)
                 .child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap(theme.space_1)
-                        .flex_1()
-                        .child(
-                            div()
-                                .text_size(theme.font_size_base)
-                                .text_color(theme.text_primary)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(item.title.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(theme.font_size_sm)
-                                .text_color(theme.text_secondary)
-                                .child(item.detail.clone()),
-                        ),
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(item.title.clone()),
                 )
                 .child(
                     div()
-                        .px(theme.space_2)
-                        .py(px(3.0))
-                        .rounded(theme.radius_full)
-                        .bg(tone_bg)
-                        .text_size(theme.font_size_xs)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(tone_fg)
-                        .child(item.status_label.clone()),
+                        .text_size(theme.font_size_lg)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::BOLD)
+                        .child(item.value.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_secondary)
+                        .child(item.detail.clone()),
                 ),
         );
 
@@ -388,20 +619,18 @@ fn render_setup_card(item: &QuickStartSetupDisplay, theme: &HiveTheme) -> AnyEle
         (item.action_label.as_ref(), item.action_panel.as_ref())
     {
         let panel = action_panel.clone();
-        card = card.child(
-            secondary_button(
-                action_label,
-                move |_event, window, cx| {
-                    window.dispatch_action(
-                        Box::new(QuickStartOpenPanel {
-                            panel: panel.clone(),
-                        }),
-                        cx,
-                    );
-                },
-                theme,
-            ),
-        );
+        card = card.child(secondary_button(
+            action_label,
+            move |_event, window, cx| {
+                window.dispatch_action(
+                    Box::new(QuickStartOpenPanel {
+                        panel: panel.clone(),
+                    }),
+                    cx,
+                );
+            },
+            theme,
+        ));
     }
 
     card.into_any_element()
@@ -509,19 +738,82 @@ fn render_next_step_card(step: &QuickStartNextStepDisplay, theme: &HiveTheme) ->
                 .text_color(theme.text_secondary)
                 .child(step.detail.clone()),
         )
+        .child(secondary_button(
+            &step.action_label,
+            move |_event, window, cx| {
+                window.dispatch_action(
+                    Box::new(QuickStartOpenPanel {
+                        panel: panel.clone(),
+                    }),
+                    cx,
+                );
+            },
+            theme,
+        ))
+        .into_any_element()
+}
+
+fn render_workspace_card(workspace: &QuickStartWorkspaceDisplay, theme: &HiveTheme) -> AnyElement {
+    let path = workspace.path.clone();
+    let open_label = if workspace.is_current {
+        "Current workspace"
+    } else {
+        "Open workspace"
+    };
+
+    card(theme)
         .child(
-            secondary_button(
-                &step.action_label,
-                move |_event, window, cx| {
-                    window.dispatch_action(
-                        Box::new(QuickStartOpenPanel {
-                            panel: panel.clone(),
-                        }),
-                        cx,
-                    );
-                },
-                theme,
-            ),
+            div()
+                .flex()
+                .flex_row()
+                .items_start()
+                .justify_between()
+                .gap(theme.space_3)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(theme.space_1)
+                        .flex_1()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(theme.space_2)
+                                .child(
+                                    div()
+                                        .text_size(theme.font_size_base)
+                                        .text_color(theme.text_primary)
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(workspace.name.clone()),
+                                )
+                                .when(workspace.is_pinned, |el| {
+                                    el.child(stat_chip("Pinned".into(), theme.accent_aqua, theme))
+                                })
+                                .when(workspace.is_current, |el| {
+                                    el.child(stat_chip("Current".into(), theme.accent_green, theme))
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(theme.font_size_sm)
+                                .text_color(theme.text_secondary)
+                                .child(workspace.path.clone()),
+                        ),
+                )
+                .child(secondary_button(
+                    open_label,
+                    move |_event, window, cx| {
+                        if open_label != "Current workspace" {
+                            window.dispatch_action(
+                                Box::new(SwitchToWorkspace { path: path.clone() }),
+                                cx,
+                            );
+                        }
+                    },
+                    theme,
+                )),
         )
         .into_any_element()
 }

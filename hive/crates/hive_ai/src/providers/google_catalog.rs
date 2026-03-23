@@ -51,9 +51,11 @@ pub async fn fetch_google_models(api_key: &str) -> Result<Vec<ModelInfo>, String
     {
         let cache = CACHE.lock();
         if let Some(fetched_at) = cache.fetched_at
-            && fetched_at.elapsed() < CACHE_TTL && !cache.models.is_empty() {
-                return Ok(cache.models.clone());
-            }
+            && fetched_at.elapsed() < CACHE_TTL
+            && !cache.models.is_empty()
+        {
+            return Ok(cache.models.clone());
+        }
     }
 
     let client = reqwest::Client::new();

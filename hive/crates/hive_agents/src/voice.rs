@@ -200,8 +200,7 @@ impl VoiceAssistant {
     /// (case-insensitive).
     pub fn is_wake_word(&self, text: &str) -> bool {
         let text_lower = text.to_lowercase().trim().to_string();
-        self.wake_word_config
-            .wake_words.contains(&text_lower)
+        self.wake_word_config.wake_words.contains(&text_lower)
     }
 
     /// Return the full command history.

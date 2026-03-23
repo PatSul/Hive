@@ -125,7 +125,9 @@ mod tests {
 
     impl MockExecutor {
         fn new(responses: Vec<String>) -> Self {
-            Self { responses: Mutex::new(responses) }
+            Self {
+                responses: Mutex::new(responses),
+            }
         }
     }
 
@@ -158,8 +160,16 @@ mod tests {
         EvalRunResult {
             pass_rate: 0.5,
             results: vec![
-                EvalResult { question_id: "q1".into(), passed: true, reasoning: "ok".into() },
-                EvalResult { question_id: "q2".into(), passed: false, reasoning: "Not safe enough".into() },
+                EvalResult {
+                    question_id: "q1".into(),
+                    passed: true,
+                    reasoning: "ok".into(),
+                },
+                EvalResult {
+                    question_id: "q2".into(),
+                    passed: false,
+                    reasoning: "Not safe enough".into(),
+                },
             ],
             sample_outputs: vec!["bad output here".into()],
         }
@@ -173,11 +183,9 @@ mod tests {
         let config = AutoResearchConfig::default();
         let mutator = PromptMutator::new(&config);
 
-        let result = mutator.mutate(
-            &executor,
-            "You are a coder.",
-            &make_eval_result(),
-        ).await;
+        let result = mutator
+            .mutate(&executor, "You are a coder.", &make_eval_result())
+            .await;
         assert!(result.is_ok());
         let new_prompt = result.unwrap();
         assert!(!new_prompt.is_empty());
@@ -194,28 +202,23 @@ mod tests {
         };
         let mutator = PromptMutator::new(&config);
 
-        let result = mutator.mutate(
-            &executor,
-            "short prompt",
-            &make_eval_result(),
-        ).await;
+        let result = mutator
+            .mutate(&executor, "short prompt", &make_eval_result())
+            .await;
         assert!(result.is_ok());
         assert!(result.unwrap().len() <= 100);
     }
 
     #[tokio::test]
     async fn test_mutate_trims_whitespace() {
-        let executor = MockExecutor::new(vec![
-            "  Improved prompt with spaces  \n\n".into(),
-        ]);
+        let executor = MockExecutor::new(vec!["  Improved prompt with spaces  \n\n".into()]);
         let config = AutoResearchConfig::default();
         let mutator = PromptMutator::new(&config);
 
-        let result = mutator.mutate(
-            &executor,
-            "Old prompt",
-            &make_eval_result(),
-        ).await.unwrap();
+        let result = mutator
+            .mutate(&executor, "Old prompt", &make_eval_result())
+            .await
+            .unwrap();
         assert!(!result.starts_with(' '));
         assert!(!result.ends_with('\n'));
     }
@@ -226,11 +229,9 @@ mod tests {
         let config = AutoResearchConfig::default();
         let mutator = PromptMutator::new(&config);
 
-        let result = mutator.mutate(
-            &executor,
-            "Old prompt",
-            &make_eval_result(),
-        ).await;
+        let result = mutator
+            .mutate(&executor, "Old prompt", &make_eval_result())
+            .await;
         assert!(result.is_err());
     }
 
@@ -241,11 +242,9 @@ mod tests {
         let config = AutoResearchConfig::default();
         let mutator = PromptMutator::new(&config);
 
-        let result = mutator.mutate(
-            &executor,
-            "You are a coder.",
-            &make_eval_result(),
-        ).await;
+        let result = mutator
+            .mutate(&executor, "You are a coder.", &make_eval_result())
+            .await;
         assert!(result.is_ok());
         // The mock doesn't validate request content, but this confirms the
         // function runs without error with failing criteria present
@@ -257,7 +256,10 @@ mod tests {
         let config = AutoResearchConfig::default();
         let mutator = PromptMutator::new(&config);
 
-        mutator.mutate(&executor, "prompt", &make_eval_result()).await.unwrap();
+        mutator
+            .mutate(&executor, "prompt", &make_eval_result())
+            .await
+            .unwrap();
         assert!(mutator.accumulated_cost() > 0.0);
     }
 }

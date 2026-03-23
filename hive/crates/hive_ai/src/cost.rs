@@ -104,13 +104,11 @@ pub struct CostRecord {
 }
 
 /// Budget limits for cost control.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BudgetLimits {
     pub daily_limit: Option<f64>,
     pub monthly_limit: Option<f64>,
 }
-
 
 // ---------------------------------------------------------------------------
 // CostTracker
@@ -264,7 +262,13 @@ impl CostTracker {
 
     /// Export records as CSV string.
     pub fn export_csv(&self) -> String {
-        let headers = ["timestamp", "model_id", "input_tokens", "output_tokens", "cost"];
+        let headers = [
+            "timestamp",
+            "model_id",
+            "input_tokens",
+            "output_tokens",
+            "cost",
+        ];
         let rows: Vec<Vec<String>> = self
             .records
             .iter()

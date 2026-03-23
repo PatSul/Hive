@@ -211,10 +211,11 @@ impl AiProvider for OpenRouterProvider {
     }
 
     async fn get_models(&self) -> Vec<ModelInfo> {
-        let mut static_models: Vec<ModelInfo> = crate::model_registry::models_for_provider(ProviderType::OpenRouter)
-            .into_iter()
-            .cloned()
-            .collect();
+        let mut static_models: Vec<ModelInfo> =
+            crate::model_registry::models_for_provider(ProviderType::OpenRouter)
+                .into_iter()
+                .cloned()
+                .collect();
 
         let key = match self.require_key() {
             Ok(k) => k,
@@ -324,9 +325,9 @@ impl AiProvider for OpenRouterProvider {
                     prompt_tokens: p,
                     completion_tokens: c,
                     total_tokens: u.total_tokens.unwrap_or(p + c),
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            }
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }
             })
             .unwrap_or_default();
 

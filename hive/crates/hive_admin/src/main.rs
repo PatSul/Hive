@@ -23,7 +23,12 @@ struct Cli {
     server_url: String,
 
     /// Admin JWT token for authentication
-    #[arg(long, env = "HIVE_ADMIN_TOKEN", hide_env_values = true, default_value = "")]
+    #[arg(
+        long,
+        env = "HIVE_ADMIN_TOKEN",
+        hide_env_values = true,
+        default_value = ""
+    )]
     token: String,
 }
 

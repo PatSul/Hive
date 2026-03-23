@@ -1,6 +1,7 @@
 use gpui::*;
 use hive_ai::ModelTier;
 use hive_ai::routing::{AutoFallbackManager, ModelRouter, ProviderType};
+use serde::{Deserialize, Serialize};
 
 use hive_ui_core::HiveTheme;
 use hive_ui_core::RoutingAddRule;
@@ -37,7 +38,7 @@ pub struct TaskMapping {
 }
 
 /// A custom routing rule override.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingRule {
     pub name: String,
     pub condition: String,

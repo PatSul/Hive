@@ -97,11 +97,7 @@ pub struct ModelsBrowserView {
 impl EventEmitter<ProjectModelsChanged> for ModelsBrowserView {}
 
 impl ModelsBrowserView {
-    pub fn new(
-        project_models: Vec<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(project_models: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_placeholder("Search models\u{2026}", window, cx);
@@ -393,8 +389,7 @@ impl ModelsBrowserView {
     // -- Catalog fetchers (same tokio bridge pattern) --
 
     fn maybe_fetch_openrouter(&mut self, cx: &mut Context<Self>) {
-        if self.or_fetch_status == FetchStatus::Loading
-            || self.or_fetch_status == FetchStatus::Done
+        if self.or_fetch_status == FetchStatus::Loading || self.or_fetch_status == FetchStatus::Done
         {
             return;
         }
@@ -453,9 +448,9 @@ impl ModelsBrowserView {
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => {
-                    rt.block_on(hive_ai::providers::openai_catalog::fetch_openai_models(&api_key))
-                }
+                Ok(rt) => rt.block_on(hive_ai::providers::openai_catalog::fetch_openai_models(
+                    &api_key,
+                )),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -539,9 +534,9 @@ impl ModelsBrowserView {
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt.block_on(
-                    hive_ai::providers::google_catalog::fetch_google_models(&api_key),
-                ),
+                Ok(rt) => rt.block_on(hive_ai::providers::google_catalog::fetch_google_models(
+                    &api_key,
+                )),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -582,9 +577,9 @@ impl ModelsBrowserView {
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => {
-                    rt.block_on(hive_ai::providers::groq_catalog::fetch_groq_models(&api_key))
-                }
+                Ok(rt) => rt.block_on(hive_ai::providers::groq_catalog::fetch_groq_models(
+                    &api_key,
+                )),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -608,8 +603,7 @@ impl ModelsBrowserView {
     }
 
     fn maybe_fetch_huggingface(&mut self, cx: &mut Context<Self>) {
-        if self.hf_fetch_status == FetchStatus::Loading
-            || self.hf_fetch_status == FetchStatus::Done
+        if self.hf_fetch_status == FetchStatus::Loading || self.hf_fetch_status == FetchStatus::Done
         {
             return;
         }
@@ -829,9 +823,7 @@ impl Render for ModelsBrowserView {
 
         // Search bar + catalog status line
         let catalog_status_text = if is_loading {
-            format!(
-                "Refreshing catalogs\u{2026} ({done}/{total} providers loaded)",
-            )
+            format!("Refreshing catalogs\u{2026} ({done}/{total} providers loaded)",)
         } else if total > 0 && done == total {
             "Live catalogs loaded \u{2014} showing latest available models".to_string()
         } else if total > 0 {
@@ -977,9 +969,7 @@ impl ModelsBrowserView {
         // Also include local models (always part of project implicitly)
         let mut locals: Vec<&ModelInfo> = all_models
             .iter()
-            .filter(|m| {
-                Self::is_local_provider(m.provider_type) && !self.is_in_project(&m.id)
-            })
+            .filter(|m| Self::is_local_provider(m.provider_type) && !self.is_in_project(&m.id))
             .collect();
         locals.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -1089,13 +1079,7 @@ impl ModelsBrowserView {
                         selected.len() + locals.len()
                     )),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(6.0))
-                    .children(chips),
-            )
+            .child(div().flex().flex_wrap().gap(px(6.0)).children(chips))
     }
 
     // -- Tier coverage guide --------------------------------------------------
@@ -1245,10 +1229,7 @@ impl ModelsBrowserView {
             if budget == 0 {
                 missing.push("Budget");
             }
-            format!(
-                "Add at least 1 model to: {}",
-                missing.join(", ")
-            )
+            format!("Add at least 1 model to: {}", missing.join(", "))
         };
         let summary_color = if all_covered {
             theme.accent_green
@@ -1364,9 +1345,10 @@ impl ModelsBrowserView {
         for (ptype, label) in &provider_order {
             // Provider chip filter
             if let Some(filter) = self.active_provider_filter
-                && filter != *ptype {
-                    continue;
-                }
+                && filter != *ptype
+            {
+                continue;
+            }
 
             let models: Vec<&ModelInfo> = all_models
                 .iter()
@@ -1466,7 +1448,8 @@ impl ModelsBrowserView {
                 self.google_fetch_status,
                 self.groq_fetch_status,
                 self.hf_fetch_status,
-            ].contains(&FetchStatus::Loading);
+            ]
+            .contains(&FetchStatus::Loading);
 
             let message = if self.view_mode == ViewMode::Project {
                 "No project models yet. Switch to All Models to add models.".to_string()
@@ -1495,17 +1478,20 @@ impl ModelsBrowserView {
                             .text_color(theme.text_muted)
                             .child(message),
                     )
-                    .when(!has_any_provider && self.view_mode == ViewMode::Browse, |el| {
-                        el.child(
-                            div()
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.text_muted)
-                                .child(
-                                    "Supported providers: Anthropic, OpenAI, Google, \
+                    .when(
+                        !has_any_provider && self.view_mode == ViewMode::Browse,
+                        |el| {
+                            el.child(
+                                div()
+                                    .text_size(theme.font_size_xs)
+                                    .text_color(theme.text_muted)
+                                    .child(
+                                        "Supported providers: Anthropic, OpenAI, Google, \
                                      OpenRouter, Groq, Hugging Face, Ollama, LM Studio",
-                                ),
-                        )
-                    })
+                                    ),
+                            )
+                        },
+                    )
                     .into_any_element(),
             );
         }

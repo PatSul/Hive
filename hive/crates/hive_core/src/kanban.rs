@@ -432,7 +432,8 @@ impl KanbanBoard {
             }
 
             if let Some(due) = task.due_date
-                && due < now && task.column != KanbanColumn::Done
+                && due < now
+                && task.column != KanbanColumn::Done
             {
                 overdue_count += 1;
             }

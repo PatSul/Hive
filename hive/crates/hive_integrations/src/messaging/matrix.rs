@@ -408,9 +408,10 @@ impl MessagingProvider for MatrixProvider {
         {
             for result in room_events.iter().take(limit as usize) {
                 if let Some(event_val) = result.get("result")
-                    && let Ok(event) = serde_json::from_value::<MatrixEvent>(event_val.clone()) {
-                        results.push(self.convert_event(&event, ""));
-                    }
+                    && let Ok(event) = serde_json::from_value::<MatrixEvent>(event_val.clone())
+                {
+                    results.push(self.convert_event(&event, ""));
+                }
             }
         }
 

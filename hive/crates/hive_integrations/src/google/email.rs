@@ -470,16 +470,18 @@ fn extract_body(payload: &RawPayload) -> String {
     for part in &payload.parts {
         if part.mime_type == "text/plain"
             && let Some(ref body) = part.body
-                && let Some(ref data) = body.data {
-                    return base64url_decode(data);
-                }
+            && let Some(ref data) = body.data
+        {
+            return base64url_decode(data);
+        }
     }
 
     // Fall back to top-level body
     if let Some(ref body) = payload.body
-        && let Some(ref data) = body.data {
-            return base64url_decode(data);
-        }
+        && let Some(ref data) = body.data
+    {
+        return base64url_decode(data);
+    }
 
     String::new()
 }

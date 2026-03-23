@@ -78,9 +78,7 @@ impl SkillExecutor {
                 .preferred
                 .contains(&ModelCapability::ExtendedThinking)
         {
-            parts.push(
-                "Think step by step before answering. Show your reasoning.".into(),
-            );
+            parts.push("Think step by step before answering. Show your reasoning.".into());
         }
 
         // Main template
@@ -127,8 +125,7 @@ impl SkillExecutor {
         let skill_tools: Vec<ToolDefinition> = available_tools
             .iter()
             .filter(|t| {
-                skill.tools.required.contains(&t.name)
-                    || skill.tools.optional.contains(&t.name)
+                skill.tools.required.contains(&t.name) || skill.tools.optional.contains(&t.name)
             })
             .cloned()
             .collect();

@@ -295,11 +295,7 @@ impl GitLabClient {
     }
 
     /// Get a single merge request by its project-scoped IID.
-    pub async fn get_merge_request(
-        &self,
-        project_id: &str,
-        mr_iid: u64,
-    ) -> Result<MergeRequest> {
+    pub async fn get_merge_request(&self, project_id: &str, mr_iid: u64) -> Result<MergeRequest> {
         let encoded = urlencoded(project_id);
         let url = format!(
             "{}/projects/{encoded}/merge_requests/{mr_iid}",
@@ -328,12 +324,7 @@ impl GitLabClient {
     }
 
     /// Add a comment (note) to a merge request.
-    pub async fn add_mr_comment(
-        &self,
-        project_id: &str,
-        mr_iid: u64,
-        body: &str,
-    ) -> Result<Note> {
+    pub async fn add_mr_comment(&self, project_id: &str, mr_iid: u64, body: &str) -> Result<Note> {
         let encoded = urlencoded(project_id);
         let url = format!(
             "{}/projects/{encoded}/merge_requests/{mr_iid}/notes",
@@ -400,10 +391,7 @@ impl GitLabClient {
     /// List branches for a project.
     pub async fn list_branches(&self, project_id: &str) -> Result<Vec<Branch>> {
         let encoded = urlencoded(project_id);
-        let url = format!(
-            "{}/projects/{encoded}/repository/branches",
-            self.base_url
-        );
+        let url = format!("{}/projects/{encoded}/repository/branches", self.base_url);
         debug!(url = %url, "listing branches");
         self.get_json(&url).await
     }
@@ -431,11 +419,7 @@ impl GitLabClient {
     }
 
     /// Search code within a project.
-    pub async fn search_code(
-        &self,
-        project_id: &str,
-        query: &str,
-    ) -> Result<Vec<SearchResult>> {
+    pub async fn search_code(&self, project_id: &str, query: &str) -> Result<Vec<SearchResult>> {
         let encoded = urlencoded(project_id);
         let encoded_query = urlencoded(query);
         let url = format!(

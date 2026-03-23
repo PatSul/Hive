@@ -193,15 +193,13 @@ impl SkillFile {
 
     /// Parse a `.toml` string into a `SkillFile`.
     pub fn from_toml(content: &str) -> Result<Self> {
-        let skill: Self = toml::from_str(content)
-            .context("Failed to parse skill TOML")?;
+        let skill: Self = toml::from_str(content).context("Failed to parse skill TOML")?;
         Ok(skill)
     }
 
     /// Serialize to a TOML string.
     pub fn to_toml(&self) -> Result<String> {
-        toml::to_string_pretty(self)
-            .context("Failed to serialize skill to TOML")
+        toml::to_string_pretty(self).context("Failed to serialize skill to TOML")
     }
 
     /// Create a `SkillFile` with integrity hash auto-computed.
@@ -379,7 +377,10 @@ mod tests {
         let toml_str = skill.to_toml().unwrap();
         let parsed = SkillFile::from_toml(&toml_str).unwrap();
         assert_eq!(parsed.skill.name, "test-skill");
-        assert_eq!(parsed.requirements.capabilities, vec![ModelCapability::ToolUse]);
+        assert_eq!(
+            parsed.requirements.capabilities,
+            vec![ModelCapability::ToolUse]
+        );
         assert!(parsed.verify_integrity());
     }
 

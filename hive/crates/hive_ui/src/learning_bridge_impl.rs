@@ -59,12 +59,9 @@ impl LearningBridge for HiveLearningBridge {
 
     fn sync_memory_to_learning(&self) -> Result<usize, String> {
         // Pull user-preference memories and feed them as observations.
-        let memories = self.memory.recall(
-            "",
-            Some(MemoryCategory::UserPreference),
-            None,
-            20,
-        )?;
+        let memories = self
+            .memory
+            .recall("", Some(MemoryCategory::UserPreference), None, 20)?;
         let mut count = 0;
 
         for mem in &memories {
@@ -89,7 +86,8 @@ impl LearningBridge for HiveLearningBridge {
         let mut count = 0;
 
         for (key, value, confidence) in &prefs {
-            let content = format!("Learned preference: {key}={value} (confidence: {confidence:.2})");
+            let content =
+                format!("Learned preference: {key}={value} (confidence: {confidence:.2})");
             let mut entry = MemoryEntry::new(MemoryCategory::ModelInsight, content);
             entry.tags = vec!["learned_preference".into(), key.clone()];
             entry.relevance_score = *confidence;

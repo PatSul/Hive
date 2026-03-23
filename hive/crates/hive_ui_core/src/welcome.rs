@@ -47,7 +47,7 @@ impl WelcomeScreen {
                         div()
                             .text_size(theme.font_size_base)
                             .text_color(theme.text_muted)
-                            .child("Start by typing a message below, or:"),
+                            .child("Start by typing a message below, or open Home:"),
                     )
                     .child(quick_start_button(theme))
                     .child(hint_row(
@@ -86,8 +86,12 @@ fn quick_start_button(theme: &HiveTheme) -> impl IntoElement {
         .on_mouse_down(MouseButton::Left, |_event, window, cx| {
             window.dispatch_action(Box::new(SwitchToQuickStart), cx);
         })
-        .child(Icon::new(IconName::Star).size_4().text_color(theme.text_on_accent))
-        .child("Run Quick Start for this project")
+        .child(
+            Icon::new(IconName::Star)
+                .size_4()
+                .text_color(theme.text_on_accent),
+        )
+        .child("Open Home for this project")
 }
 
 fn hint_row(theme: &HiveTheme, icon: IconName, text: &str) -> impl IntoElement {

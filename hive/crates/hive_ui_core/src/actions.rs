@@ -40,6 +40,7 @@ actions!(
         ActivityExportCsv,
         OpenWorkspaceDirectory,
         ToggleProjectDropdown,
+        ToggleCommandPalette,
         // Files panel
         FilesNavigateBack,
         FilesRefresh,
@@ -133,6 +134,10 @@ actions!(
         // Clipboard/export
         ExportPrompt,
         CopyFullPrompt,
+        // Assistant actions
+        DailyBriefing,
+        CheckEmail,
+        CheckCalendar,
     ]
 );
 
@@ -433,6 +438,13 @@ pub struct ReviewLfsSetPattern {
 #[action(namespace = hive_workspace, no_json)]
 pub struct ActivitySetFilter {
     pub categories: String,
+}
+
+/// Switch the Observe landing view.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ActivitySetView {
+    pub view: String,
 }
 
 /// Approve an approval request by ID.

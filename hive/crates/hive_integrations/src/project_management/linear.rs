@@ -230,27 +230,20 @@ impl LinearClient {
         let auth_value = HeaderValue::from_str(&format!("Bearer {api_key}"))
             .context("invalid characters in Linear API key")?;
         headers.insert(AUTHORIZATION, auth_value);
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let client = Client::builder()
             .default_headers(headers)
             .build()
             .context("failed to build HTTP client for Linear")?;
 
-        Ok(Self {
-            base_url,
-            client,
-        })
+        Ok(Self { base_url, client })
     }
 
     /// Return the configured base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
-
 
     /// Execute a GraphQL query and parse the typed response.
     async fn graphql<T: serde::de::DeserializeOwned>(
@@ -317,14 +310,8 @@ impl LinearClient {
             assignee,
             labels,
             sprint,
-            created_at: issue
-                .created_at
-                .as_deref()
-                .and_then(Self::parse_datetime),
-            updated_at: issue
-                .updated_at
-                .as_deref()
-                .and_then(Self::parse_datetime),
+            created_at: issue.created_at.as_deref().and_then(Self::parse_datetime),
+            updated_at: issue.updated_at.as_deref().and_then(Self::parse_datetime),
             platform: PMPlatform::Linear,
             url: issue.url.clone(),
         }
@@ -425,10 +412,7 @@ impl LinearClient {
 
         if let Some(ref priority) = filters.priority {
             let num = Self::priority_to_linear(*priority);
-            filter.insert(
-                "priority".into(),
-                serde_json::json!({ "eq": num }),
-            );
+            filter.insert("priority".into(), serde_json::json!({ "eq": num }));
         }
 
         if !filters.labels.is_empty() {
@@ -579,11 +563,7 @@ impl ProjectManagementProvider for LinearClient {
             .collect())
     }
 
-    async fn list_issues(
-        &self,
-        project_id: &str,
-        filters: &IssueFilters,
-    ) -> Result<Vec<Issue>> {
+    async fn list_issues(&self, project_id: &str, filters: &IssueFilters) -> Result<Vec<Issue>> {
         let filter = Self::build_filter_json(filters);
 
         let query = format!(
@@ -607,10 +587,7 @@ impl ProjectManagementProvider for LinearClient {
 
         let data: TeamIssuesData = self.graphql(&query, Some(vars)).await?;
 
-        let issues = data
-            .team
-            .map(|t| t.issues.nodes)
-            .unwrap_or_default();
+        let issues = data.team.map(|t| t.issues.nodes).unwrap_or_default();
 
         Ok(issues.iter().map(Self::convert_issue).collect())
     }
@@ -782,14 +759,9 @@ impl ProjectManagementProvider for LinearClient {
 
         Ok(Comment {
             id: comment.id,
-            author: comment
-                .user
-                .map(|u| u.display_name.unwrap_or(u.name)),
+            author: comment.user.map(|u| u.display_name.unwrap_or(u.name)),
             body: comment.body,
-            created_at: comment
-                .created_at
-                .as_deref()
-                .and_then(Self::parse_datetime),
+            created_at: comment.created_at.as_deref().and_then(Self::parse_datetime),
         })
     }
 
@@ -895,10 +867,7 @@ impl ProjectManagementProvider for LinearClient {
             }
         };
 
-        let cycles = data
-            .team
-            .map(|t| t.cycles.nodes)
-            .unwrap_or_default();
+        let cycles = data.team.map(|t| t.cycles.nodes).unwrap_or_default();
 
         Ok(cycles
             .into_iter()
@@ -963,7 +932,10 @@ mod tests {
 
     #[test]
     fn test_map_priority_urgent() {
-        assert_eq!(LinearClient::map_priority(Some(1.0)), IssuePriority::Critical);
+        assert_eq!(
+            LinearClient::map_priority(Some(1.0)),
+            IssuePriority::Critical
+        );
     }
 
     #[test]
@@ -1063,14 +1035,26 @@ mod tests {
 
     #[test]
     fn test_status_to_linear_type() {
-        assert_eq!(LinearClient::status_to_linear_type(IssueStatus::Backlog), "backlog");
-        assert_eq!(LinearClient::status_to_linear_type(IssueStatus::Todo), "unstarted");
+        assert_eq!(
+            LinearClient::status_to_linear_type(IssueStatus::Backlog),
+            "backlog"
+        );
+        assert_eq!(
+            LinearClient::status_to_linear_type(IssueStatus::Todo),
+            "unstarted"
+        );
         assert_eq!(
             LinearClient::status_to_linear_type(IssueStatus::InProgress),
             "started"
         );
-        assert_eq!(LinearClient::status_to_linear_type(IssueStatus::InReview), "started");
-        assert_eq!(LinearClient::status_to_linear_type(IssueStatus::Done), "completed");
+        assert_eq!(
+            LinearClient::status_to_linear_type(IssueStatus::InReview),
+            "started"
+        );
+        assert_eq!(
+            LinearClient::status_to_linear_type(IssueStatus::Done),
+            "completed"
+        );
         assert_eq!(
             LinearClient::status_to_linear_type(IssueStatus::Cancelled),
             "cancelled"
@@ -1097,9 +1081,7 @@ mod tests {
                 display_name: Some("Alice Smith".into()),
             }),
             labels: LinearLabelConnection {
-                nodes: vec![LinearLabel {
-                    name: "bug".into(),
-                }],
+                nodes: vec![LinearLabel { name: "bug".into() }],
             },
             cycle: Some(LinearCycleRef {
                 id: "cycle-1".into(),

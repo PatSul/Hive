@@ -311,9 +311,7 @@ impl Render for ChatInputView {
                                     .unwrap_or_else(|| "file".to_string());
                                 let toggle_path = path.to_string_lossy().to_string();
                                 div()
-                                    .id(ElementId::Name(
-                                        format!("ctx-{}", name).into(),
-                                    ))
+                                    .id(ElementId::Name(format!("ctx-{}", name).into()))
                                     .flex()
                                     .items_center()
                                     .gap(theme.space_1)

@@ -1,6 +1,6 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
@@ -75,8 +75,8 @@ impl SessionKeys {
         pairing_token.copy_from_slice(&okm[32..64]);
         device_id.copy_from_slice(&okm[64..80]);
 
-        let cipher = Aes256Gcm::new_from_slice(&session_key)
-            .expect("32-byte key is valid for AES-256-GCM");
+        let cipher =
+            Aes256Gcm::new_from_slice(&session_key).expect("32-byte key is valid for AES-256-GCM");
 
         Self {
             session_key,
@@ -170,8 +170,8 @@ impl PairedDeviceStore {
         }
         let data = std::fs::read_to_string(path)
             .map_err(|e| anyhow!("Failed to read device store: {}", e))?;
-        let store: Self =
-            serde_json::from_str(&data).map_err(|e| anyhow!("Failed to parse device store: {}", e))?;
+        let store: Self = serde_json::from_str(&data)
+            .map_err(|e| anyhow!("Failed to parse device store: {}", e))?;
         Ok(store)
     }
 

@@ -116,16 +116,12 @@ impl ComposeAgent {
 
         let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
         let model = {
-            let svc = ai_service
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let svc = ai_service.lock().map_err(|e| format!("Lock error: {e}"))?;
             svc.default_model().to_string()
         };
 
         let response = handle.block_on(async {
-            let mut svc = ai_service
-                .lock()
-                .map_err(|e| format!("Lock error: {e}"))?;
+            let mut svc = ai_service.lock().map_err(|e| format!("Lock error: {e}"))?;
             svc.chat(messages, &model, None)
                 .await
                 .map_err(|e| format!("AI chat error: {e}"))

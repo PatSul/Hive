@@ -98,18 +98,41 @@ impl ChannelStore {
     /// Ensure the default channels exist. Called once on startup.
     pub fn ensure_default_channels(&mut self) {
         let defaults = vec![
-            ("general", "#general", "\u{1F4AC}", "Main channel — all agents available", vec![
-                "Investigate", "Implement", "Verify", "Critique", "Debug", "CodeReview",
-            ]),
-            ("code-review", "#code-review", "\u{1F50D}", "Code review discussions with review agents", vec![
-                "CodeReview", "Critique",
-            ]),
-            ("debug", "#debug", "\u{1F41B}", "Debugging sessions with debug agents", vec![
-                "Debug", "Investigate",
-            ]),
-            ("research", "#research", "\u{1F4D6}", "Research and investigation tasks", vec![
-                "Investigate", "Implement",
-            ]),
+            (
+                "general",
+                "#general",
+                "\u{1F4AC}",
+                "Main channel — all agents available",
+                vec![
+                    "Investigate",
+                    "Implement",
+                    "Verify",
+                    "Critique",
+                    "Debug",
+                    "CodeReview",
+                ],
+            ),
+            (
+                "code-review",
+                "#code-review",
+                "\u{1F50D}",
+                "Code review discussions with review agents",
+                vec!["CodeReview", "Critique"],
+            ),
+            (
+                "debug",
+                "#debug",
+                "\u{1F41B}",
+                "Debugging sessions with debug agents",
+                vec!["Debug", "Investigate"],
+            ),
+            (
+                "research",
+                "#research",
+                "\u{1F4D6}",
+                "Research and investigation tasks",
+                vec!["Investigate", "Implement"],
+            ),
         ];
 
         for (id, name, icon, desc, agents) in defaults {
@@ -179,7 +202,9 @@ impl ChannelStore {
         if let Some(idx) = self.channels.iter().position(|c| c.id == channel_id) {
             self.channels[idx].messages.push(message);
             self.channels[idx].updated_at = Utc::now();
-            let path = self.channels_dir.join(format!("{}.json", self.channels[idx].id));
+            let path = self
+                .channels_dir
+                .join(format!("{}.json", self.channels[idx].id));
             let json = serde_json::to_string_pretty(&self.channels[idx]).unwrap_or_default();
             let _ = std::fs::write(path, json);
         }

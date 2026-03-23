@@ -197,6 +197,18 @@ const KEY_VENICE: &str = "api_key_venice";
 const KEY_HUE: &str = "api_key_hue";
 const KEY_CLOUD_JWT: &str = "cloud_jwt";
 
+// Messaging provider token storage keys
+const KEY_SLACK_BOT_TOKEN: &str = "messaging_slack_bot_token";
+const KEY_DISCORD_BOT_TOKEN: &str = "messaging_discord_bot_token";
+const KEY_DISCORD_GUILD_ID: &str = "messaging_discord_guild_id";
+const KEY_TELEGRAM_BOT_TOKEN: &str = "messaging_telegram_bot_token";
+const KEY_WHATSAPP_PHONE_ID: &str = "messaging_whatsapp_phone_id";
+const KEY_WHATSAPP_ACCESS_TOKEN: &str = "messaging_whatsapp_access_token";
+const KEY_SIGNAL_NUMBER: &str = "messaging_signal_number";
+const KEY_MATRIX_ACCESS_TOKEN: &str = "messaging_matrix_access_token";
+const KEY_GOOGLE_CHAT_ACCESS_TOKEN: &str = "messaging_google_chat_access_token";
+const KEY_WEBCHAT_API_TOKEN: &str = "messaging_webchat_api_token";
+
 // OAuth token storage keys
 const KEY_OAUTH_GOOGLE: &str = "oauth_google";
 const KEY_OAUTH_MICROSOFT: &str = "oauth_microsoft";
@@ -363,6 +375,34 @@ pub struct HiveConfig {
     #[serde(skip)]
     pub venice_api_key: Option<String>,
 
+    // Messaging provider tokens — stored in SecureStorage
+    #[serde(skip)]
+    pub slack_bot_token: Option<String>,
+    #[serde(skip)]
+    pub discord_bot_token: Option<String>,
+    #[serde(skip)]
+    pub discord_guild_id: Option<String>,
+    #[serde(skip)]
+    pub telegram_bot_token: Option<String>,
+    #[serde(skip)]
+    pub whatsapp_phone_id: Option<String>,
+    #[serde(skip)]
+    pub whatsapp_access_token: Option<String>,
+    #[serde(skip)]
+    pub signal_number: Option<String>,
+    #[serde(default)]
+    pub signal_api_url: Option<String>,
+    #[serde(default)]
+    pub matrix_homeserver: Option<String>,
+    #[serde(skip)]
+    pub matrix_access_token: Option<String>,
+    #[serde(skip)]
+    pub google_chat_access_token: Option<String>,
+    #[serde(default)]
+    pub google_chat_sa_key: Option<String>,
+    #[serde(skip)]
+    pub webchat_api_token: Option<String>,
+
     // OAuth client IDs — user-provided per-platform
     pub google_oauth_client_id: Option<String>,
     pub microsoft_oauth_client_id: Option<String>,
@@ -446,6 +486,19 @@ impl Default for HiveConfig {
             log_level: "info".into(),
             close_to_tray_notice_seen: false,
             connected_accounts: Vec::new(),
+            slack_bot_token: None,
+            discord_bot_token: None,
+            discord_guild_id: None,
+            telegram_bot_token: None,
+            whatsapp_phone_id: None,
+            whatsapp_access_token: None,
+            signal_number: None,
+            signal_api_url: None,
+            matrix_homeserver: None,
+            matrix_access_token: None,
+            google_chat_access_token: None,
+            google_chat_sa_key: None,
+            webchat_api_token: None,
             google_oauth_client_id: None,
             microsoft_oauth_client_id: None,
             github_oauth_client_id: None,
@@ -637,6 +690,7 @@ fn migrate_plaintext_keys(raw_json: &str) -> Result<(LegacyKeys, String)> {
 /// and are **never** written to `config.json`.
 pub struct ConfigManager {
     config: Arc<RwLock<HiveConfig>>,
+    config_path: PathBuf,
     secure_storage: Option<SecureStorage>,
     keys_path: PathBuf,
     _watcher: Option<RecommendedWatcher>,
@@ -651,6 +705,17 @@ impl ConfigManager {
 
         let config_path = HiveConfig::config_path()?;
         let keys_path = keys_file_path()?;
+        Self::new_with_paths(config_path, keys_path)
+    }
+
+    /// Creates a ConfigManager scoped to explicit config and key paths.
+    pub fn new_with_paths(config_path: PathBuf, keys_path: PathBuf) -> Result<Self> {
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if let Some(parent) = keys_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         // Initialize secure storage (graceful if it fails -- keys just won't be available)
         let secure_storage = match SecureStorage::new() {
@@ -666,12 +731,19 @@ impl ConfigManager {
         let config = Arc::new(RwLock::new(config));
 
         // Reuse the same derived key for hot-reload (avoids a second Argon2 derivation).
+        let reload_config_path = config_path.clone();
         let reload_keys_path = keys_path.clone();
         let reload_ss = secure_storage.as_ref().map(|ss| ss.duplicate());
-        let watcher = Self::setup_watcher(Arc::clone(&config), reload_keys_path, reload_ss)?;
+        let watcher = Self::setup_watcher(
+            Arc::clone(&config),
+            reload_config_path,
+            reload_keys_path,
+            reload_ss,
+        )?;
 
         Ok(Self {
             config,
+            config_path,
             secure_storage,
             keys_path,
             _watcher: Some(watcher),
@@ -684,7 +756,12 @@ impl ConfigManager {
         keys_path: &PathBuf,
         secure_storage: &Option<SecureStorage>,
     ) -> Result<HiveConfig> {
-        HiveConfig::ensure_dirs()?;
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if let Some(parent) = keys_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         if config_path.exists() {
             let raw_json = std::fs::read_to_string(config_path)
@@ -760,6 +837,20 @@ impl ConfigManager {
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
             config.cloud_jwt = get_secure_key(ss, &key_map, KEY_CLOUD_JWT);
+
+            // Messaging provider tokens
+            config.slack_bot_token = get_secure_key(ss, &key_map, KEY_SLACK_BOT_TOKEN);
+            config.discord_bot_token = get_secure_key(ss, &key_map, KEY_DISCORD_BOT_TOKEN);
+            config.discord_guild_id = get_secure_key(ss, &key_map, KEY_DISCORD_GUILD_ID);
+            config.telegram_bot_token = get_secure_key(ss, &key_map, KEY_TELEGRAM_BOT_TOKEN);
+            config.whatsapp_phone_id = get_secure_key(ss, &key_map, KEY_WHATSAPP_PHONE_ID);
+            config.whatsapp_access_token =
+                get_secure_key(ss, &key_map, KEY_WHATSAPP_ACCESS_TOKEN);
+            config.signal_number = get_secure_key(ss, &key_map, KEY_SIGNAL_NUMBER);
+            config.matrix_access_token = get_secure_key(ss, &key_map, KEY_MATRIX_ACCESS_TOKEN);
+            config.google_chat_access_token =
+                get_secure_key(ss, &key_map, KEY_GOOGLE_CHAT_ACCESS_TOKEN);
+            config.webchat_api_token = get_secure_key(ss, &key_map, KEY_WEBCHAT_API_TOKEN);
         }
     }
 
@@ -774,7 +865,7 @@ impl ConfigManager {
     pub fn update(&self, f: impl FnOnce(&mut HiveConfig)) -> Result<()> {
         let mut config = self.config.write();
         f(&mut config);
-        config.save()?;
+        config.save_to_path(&self.config_path)?;
         self.save_api_keys(&config)?;
         Ok(())
     }
@@ -796,6 +887,17 @@ impl ConfigManager {
             "mistral" => config.mistral_api_key.clone(),
             "venice" => config.venice_api_key.clone(),
             "hue" => config.hue_api_key.clone(),
+            // Messaging provider tokens
+            "slack_bot" => config.slack_bot_token.clone(),
+            "discord_bot" => config.discord_bot_token.clone(),
+            "discord_guild" => config.discord_guild_id.clone(),
+            "telegram_bot" => config.telegram_bot_token.clone(),
+            "whatsapp_phone" => config.whatsapp_phone_id.clone(),
+            "whatsapp_access" => config.whatsapp_access_token.clone(),
+            "signal_number" => config.signal_number.clone(),
+            "matrix_access" => config.matrix_access_token.clone(),
+            "google_chat_access" => config.google_chat_access_token.clone(),
+            "webchat" => config.webchat_api_token.clone(),
             _ => None,
         }
     }
@@ -819,6 +921,17 @@ impl ConfigManager {
                 "mistral" => config.mistral_api_key = key.clone(),
                 "venice" => config.venice_api_key = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
+                // Messaging provider tokens
+                "slack_bot" => config.slack_bot_token = key.clone(),
+                "discord_bot" => config.discord_bot_token = key.clone(),
+                "discord_guild" => config.discord_guild_id = key.clone(),
+                "telegram_bot" => config.telegram_bot_token = key.clone(),
+                "whatsapp_phone" => config.whatsapp_phone_id = key.clone(),
+                "whatsapp_access" => config.whatsapp_access_token = key.clone(),
+                "signal_number" => config.signal_number = key.clone(),
+                "matrix_access" => config.matrix_access_token = key.clone(),
+                "google_chat_access" => config.google_chat_access_token = key.clone(),
+                "webchat" => config.webchat_api_token = key.clone(),
                 _ => anyhow::bail!("Unknown provider: {provider}"),
             }
         }
@@ -853,6 +966,39 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_CLOUD_JWT, &config.cloud_jwt)?;
+
+        // Messaging provider tokens
+        set_secure_key(ss, &mut key_map, KEY_SLACK_BOT_TOKEN, &config.slack_bot_token)?;
+        set_secure_key(ss, &mut key_map, KEY_DISCORD_BOT_TOKEN, &config.discord_bot_token)?;
+        set_secure_key(ss, &mut key_map, KEY_DISCORD_GUILD_ID, &config.discord_guild_id)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_TELEGRAM_BOT_TOKEN,
+            &config.telegram_bot_token,
+        )?;
+        set_secure_key(ss, &mut key_map, KEY_WHATSAPP_PHONE_ID, &config.whatsapp_phone_id)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_WHATSAPP_ACCESS_TOKEN,
+            &config.whatsapp_access_token,
+        )?;
+        set_secure_key(ss, &mut key_map, KEY_SIGNAL_NUMBER, &config.signal_number)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_MATRIX_ACCESS_TOKEN,
+            &config.matrix_access_token,
+        )?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_GOOGLE_CHAT_ACCESS_TOKEN,
+            &config.google_chat_access_token,
+        )?;
+        set_secure_key(ss, &mut key_map, KEY_WEBCHAT_API_TOKEN, &config.webchat_api_token)?;
+
         save_key_map(&self.keys_path, &key_map)
     }
 
@@ -906,9 +1052,7 @@ impl ConfigManager {
     /// Remove a connected account from the config.
     pub fn remove_connected_account(&self, platform: AccountPlatform) -> Result<()> {
         self.update(|config| {
-            config
-                .connected_accounts
-                .retain(|a| a.platform != platform);
+            config.connected_accounts.retain(|a| a.platform != platform);
         })
     }
 
@@ -940,7 +1084,10 @@ impl ConfigManager {
     /// [`ConfigPortable`], with the encryption key derived from `password`
     /// via Argon2id.
     pub fn export_config(&self, password: &str) -> Result<Vec<u8>> {
-        use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+        use aes_gcm::{
+            Aes256Gcm, Key, Nonce,
+            aead::{Aead, KeyInit},
+        };
         use argon2::{Algorithm, Argon2, Params, Version};
 
         // 1. Clone current config
@@ -961,10 +1108,7 @@ impl ConfigManager {
         let mut oauth_tokens = HashMap::new();
         for platform in AccountPlatform::ALL {
             if let Some(token_data) = self.get_oauth_token(platform) {
-                oauth_tokens.insert(
-                    platform.label().to_lowercase(),
-                    token_data,
-                );
+                oauth_tokens.insert(platform.label().to_lowercase(), token_data);
             }
         }
 
@@ -976,8 +1120,8 @@ impl ConfigManager {
             exported_at: chrono::Utc::now().to_rfc3339(),
             source_version: env!("CARGO_PKG_VERSION").to_string(),
         };
-        let json = serde_json::to_string(&portable)
-            .context("Failed to serialize config for export")?;
+        let json =
+            serde_json::to_string(&portable).context("Failed to serialize config for export")?;
 
         // 5. Generate random salt and nonce
         let salt: [u8; 16] = rand::random();
@@ -1016,14 +1160,20 @@ impl ConfigManager {
     /// Decrypts the blob, replaces the current config, and re-encrypts all
     /// API keys and OAuth tokens with the local `SecureStorage`.
     pub fn import_config(&self, data: &[u8], password: &str) -> Result<()> {
-        use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+        use aes_gcm::{
+            Aes256Gcm, Key, Nonce,
+            aead::{Aead, KeyInit},
+        };
         use argon2::{Algorithm, Argon2, Params, Version};
 
         const HEADER_LEN: usize = 4 + 1 + 16 + 12; // magic + version + salt + nonce
 
         // 1. Validate minimum length
         if data.len() < HEADER_LEN {
-            anyhow::bail!("Import data too short: expected at least {HEADER_LEN} bytes, got {}", data.len());
+            anyhow::bail!(
+                "Import data too short: expected at least {HEADER_LEN} bytes, got {}",
+                data.len()
+            );
         }
 
         // 2. Validate magic bytes
@@ -1060,8 +1210,8 @@ impl ConfigManager {
             .map_err(|_| anyhow::anyhow!("Decryption failed: wrong password or corrupted data"))?;
 
         // 7. Deserialize ConfigPortable from JSON
-        let portable: ConfigPortable = serde_json::from_slice(&plaintext)
-            .context("Failed to deserialize imported config")?;
+        let portable: ConfigPortable =
+            serde_json::from_slice(&plaintext).context("Failed to deserialize imported config")?;
 
         // 8. Replace current config (non-secret fields)
         self.update(|config| {
@@ -1091,11 +1241,7 @@ impl ConfigManager {
         // 11. Re-populate in-memory API keys from the newly saved key store
         {
             let mut config = self.config.write();
-            Self::populate_keys_from_storage(
-                &mut config,
-                &self.keys_path,
-                &self.secure_storage,
-            );
+            Self::populate_keys_from_storage(&mut config, &self.keys_path, &self.secure_storage);
         }
 
         info!("Config imported successfully");
@@ -1115,11 +1261,12 @@ impl ConfigManager {
 
     fn setup_watcher(
         config: Arc<RwLock<HiveConfig>>,
+        config_path: PathBuf,
         keys_path: PathBuf,
         secure_storage: Option<SecureStorage>,
     ) -> Result<RecommendedWatcher> {
-        let config_path = HiveConfig::config_path()?;
-        let watch_dir = config_path.parent()
+        let watch_dir = config_path
+            .parent()
             .context("config path has no parent directory")?
             .to_path_buf();
 
@@ -1127,14 +1274,8 @@ impl ConfigManager {
             if let Ok(event) = res
                 && event.paths.iter().any(|p| p.ends_with("config.json"))
             {
-                match HiveConfig::load() {
-                    Ok(mut new_config) => {
-                        // Re-populate keys from SecureStorage on hot reload
-                        Self::populate_keys_from_storage(
-                            &mut new_config,
-                            &keys_path,
-                            &secure_storage,
-                        );
+                match Self::load_with_migration(&config_path, &keys_path, &secure_storage) {
+                    Ok(new_config) => {
                         *config.write() = new_config;
                         info!("Config hot-reloaded");
                     }
@@ -1529,10 +1670,7 @@ mod tests {
 
     /// Build a minimal ConfigManager for testing export/import, bypassing
     /// the file watcher and real `~/.hive/` directories.
-    fn test_config_manager(
-        config_path: &PathBuf,
-        keys_path: &PathBuf,
-    ) -> ConfigManager {
+    fn test_config_manager(config_path: &PathBuf, keys_path: &PathBuf) -> ConfigManager {
         let ss = test_secure_storage(keys_path);
 
         // Write a default config.json so the path exists
@@ -1541,6 +1679,7 @@ mod tests {
 
         ConfigManager {
             config: Arc::new(RwLock::new(config)),
+            config_path: config_path.clone(),
             secure_storage: Some(ss),
             keys_path: keys_path.clone(),
             _watcher: None,
@@ -1553,15 +1692,19 @@ mod tests {
         let mgr = test_config_manager(&config_path, &keys_path);
 
         // Set some API keys
-        mgr.set_api_key("anthropic", Some("sk-ant-export-test".into())).unwrap();
-        mgr.set_api_key("openai", Some("sk-openai-export".into())).unwrap();
-        mgr.set_api_key("groq", Some("gsk-groq-export".into())).unwrap();
+        mgr.set_api_key("anthropic", Some("sk-ant-export-test".into()))
+            .unwrap();
+        mgr.set_api_key("openai", Some("sk-openai-export".into()))
+            .unwrap();
+        mgr.set_api_key("groq", Some("gsk-groq-export".into()))
+            .unwrap();
 
         // Set a non-default config value
         mgr.update(|c| {
             c.theme = "light".into();
             c.daily_budget_usd = 42.0;
-        }).unwrap();
+        })
+        .unwrap();
 
         // Export
         let password = "strong-test-password-123";
@@ -1592,10 +1735,7 @@ mod tests {
             mgr2.get_api_key("openai").as_deref(),
             Some("sk-openai-export"),
         );
-        assert_eq!(
-            mgr2.get_api_key("groq").as_deref(),
-            Some("gsk-groq-export"),
-        );
+        assert_eq!(mgr2.get_api_key("groq").as_deref(), Some("gsk-groq-export"),);
         // Keys not set should remain None
         assert!(mgr2.get_api_key("huggingface").is_none());
     }

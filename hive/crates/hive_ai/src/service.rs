@@ -15,15 +15,15 @@ use crate::providers::anthropic::AnthropicProvider;
 use crate::providers::gemini::GeminiProvider;
 use crate::providers::generic_local::GenericLocalProvider;
 use crate::providers::groq::GroqProvider;
-use crate::providers::mistral::MistralProvider;
-use crate::providers::venice::VeniceProvider;
-use crate::providers::xai::XaiProvider;
 use crate::providers::huggingface::HuggingFaceProvider;
 use crate::providers::litellm::LiteLLMProvider;
 use crate::providers::lmstudio::LMStudioProvider;
+use crate::providers::mistral::MistralProvider;
 use crate::providers::ollama::OllamaProvider;
 use crate::providers::openai::OpenAIProvider;
 use crate::providers::openrouter::OpenRouterProvider;
+use crate::providers::venice::VeniceProvider;
+use crate::providers::xai::XaiProvider;
 use crate::providers::{AiProvider, ProviderError};
 use crate::routing::ModelRouter;
 use crate::types::{
@@ -355,9 +355,7 @@ impl AiService {
         // Capability-aware auto-routing: use discovered + registered cloud models.
         let available = self.available_models_for_routing();
         let decision = self.router.route_with_capabilities(
-            messages,
-            &available,
-            None, // no explicit model
+            messages, &available, None, // no explicit model
             None, // no classification context
         );
 
@@ -451,7 +449,10 @@ impl AiService {
             cache_system_prompt: false,
         };
 
-        info!("Starting stream to {:?} model={}", provider_type, resolved_model);
+        info!(
+            "Starting stream to {:?} model={}",
+            provider_type, resolved_model
+        );
         provider.stream_chat(&request).await
     }
 
@@ -540,7 +541,12 @@ impl AiService {
             cache_system_prompt: false,
         };
 
-        Some((draft_provider, draft_request, primary_provider, primary_request))
+        Some((
+            draft_provider,
+            draft_request,
+            primary_provider,
+            primary_request,
+        ))
     }
 
     /// Estimate the cost of a message before sending.
@@ -854,11 +860,17 @@ mod tests {
     #[test]
     fn test_resolve_provider_smart_uses_capability_routing() {
         let svc = AiService::new(test_config());
-        let messages = vec![ChatMessage::text(MessageRole::User, "Write a Rust function to sort a vector")];
+        let messages = vec![ChatMessage::text(
+            MessageRole::User,
+            "Write a Rust function to sort a vector",
+        )];
 
         // Trigger auto-routing by using the default model name.
         let result = svc.resolve_provider_smart(&messages, &svc.config.default_model.clone());
-        assert!(result.is_some(), "Should resolve a provider via capability routing");
+        assert!(
+            result.is_some(),
+            "Should resolve a provider via capability routing"
+        );
 
         let (_pt, _provider, resolved_model) = result.unwrap();
         // The model should have been selected by the capability router from

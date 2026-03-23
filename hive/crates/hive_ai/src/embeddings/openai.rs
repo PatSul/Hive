@@ -41,7 +41,9 @@ impl OpenAiEmbeddings {
 impl EmbeddingProvider for OpenAiEmbeddings {
     async fn embed(&self, texts: &[&str]) -> Result<EmbeddingResult, EmbeddingError> {
         if self.api_key.is_empty() {
-            return Err(EmbeddingError::AuthError("OpenAI API key not configured".into()));
+            return Err(EmbeddingError::AuthError(
+                "OpenAI API key not configured".into(),
+            ));
         }
 
         let request = EmbeddingRequest {
@@ -68,7 +70,9 @@ impl EmbeddingProvider for OpenAiEmbeddings {
         }
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(EmbeddingError::Other(format!("HTTP {status}: {error_text}")));
+            return Err(EmbeddingError::Other(format!(
+                "HTTP {status}: {error_text}"
+            )));
         }
 
         let body: EmbeddingResponse = response

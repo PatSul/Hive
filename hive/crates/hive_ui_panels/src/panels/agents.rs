@@ -2,12 +2,11 @@ use gpui::*;
 use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
+use hive_ui_core::HiveTheme;
 use hive_ui_core::{
     AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents, AgentsReloadWorkflows,
-    AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent,
-    AgentsSelectRemoteSkill,
+    AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent, AgentsSelectRemoteSkill,
 };
-use hive_ui_core::HiveTheme;
 
 use super::chat::DisclosureLevel;
 
@@ -314,7 +313,11 @@ impl AgentsPanel {
             .p(theme.space_4)
             .gap(theme.space_4)
             .child(render_header(data, theme))
-            .child(render_remote_agents_section(data, remote_prompt_input, theme))
+            .child(render_remote_agents_section(
+                data,
+                remote_prompt_input,
+                theme,
+            ))
             .child(render_workflows_section(data, theme))
             .child(render_active_runs_section(&data.active_runs, theme))
             .child(render_run_history_section(&data.run_history, theme))
@@ -347,11 +350,12 @@ fn render_header(data: &AgentsPanelData, theme: &HiveTheme) -> AnyElement {
             div()
                 .text_size(theme.font_size_sm)
                 .text_color(theme.text_muted)
-                .child(
-                    data.workflow_hint.clone().unwrap_or_else(|| {
-                        format!("User workflows are loaded from {}", data.workflow_source_dir)
-                    }),
-                ),
+                .child(data.workflow_hint.clone().unwrap_or_else(|| {
+                    format!(
+                        "User workflows are loaded from {}",
+                        data.workflow_source_dir
+                    )
+                })),
         )
         .into_any_element()
 }
@@ -447,7 +451,11 @@ fn render_remote_agents_section(
         .flex()
         .flex_col()
         .gap(theme.space_3)
-        .child(section_title("Remote A2A Agents", data.remote_agents.len(), theme));
+        .child(section_title(
+            "Remote A2A Agents",
+            data.remote_agents.len(),
+            theme,
+        ));
 
     if let Some(hint) = &data.remote_hint {
         section = section.child(section_note(hint.clone(), theme));
@@ -587,42 +595,38 @@ fn render_remote_agent_card(
                         }),
                 )
                 .child(div().flex_1())
-                .child(
-                    control_button(
-                        if selected { "Selected" } else { "Select" },
-                        if selected {
-                            theme.accent_green
-                        } else {
-                            theme.accent_aqua
-                        },
-                        theme.text_on_accent,
-                        move |_event, window, cx| {
-                            window.dispatch_action(
-                                Box::new(AgentsSelectRemoteAgent {
-                                    agent_name: select_agent_name.clone(),
-                                }),
-                                cx,
-                            );
-                        },
-                        theme,
-                    ),
-                )
-                .child(
-                    control_button(
-                        "Discover",
-                        theme.bg_primary,
-                        theme.text_primary,
-                        move |_event, window, cx| {
-                            window.dispatch_action(
-                                Box::new(AgentsDiscoverRemoteAgent {
-                                    agent_name: discover_agent_name.clone(),
-                                }),
-                                cx,
-                            );
-                        },
-                        theme,
-                    ),
-                ),
+                .child(control_button(
+                    if selected { "Selected" } else { "Select" },
+                    if selected {
+                        theme.accent_green
+                    } else {
+                        theme.accent_aqua
+                    },
+                    theme.text_on_accent,
+                    move |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(AgentsSelectRemoteAgent {
+                                agent_name: select_agent_name.clone(),
+                            }),
+                            cx,
+                        );
+                    },
+                    theme,
+                ))
+                .child(control_button(
+                    "Discover",
+                    theme.bg_primary,
+                    theme.text_primary,
+                    move |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(AgentsDiscoverRemoteAgent {
+                                agent_name: discover_agent_name.clone(),
+                            }),
+                            cx,
+                        );
+                    },
+                    theme,
+                )),
         )
         .child(
             div()
@@ -802,36 +806,38 @@ fn render_remote_prompt_card(
                             "This agent has not been discovered yet. Run will discover it first."
                         }),
                 )
-                .child(
-                    control_button(
-                        if run_busy { "Running..." } else { "Run Remote Task" },
+                .child(control_button(
+                    if run_busy {
+                        "Running..."
+                    } else {
+                        "Run Remote Task"
+                    },
+                    if run_busy {
+                        theme.bg_primary
+                    } else {
+                        theme.accent_cyan
+                    },
+                    if run_busy {
+                        theme.text_muted
+                    } else {
+                        theme.text_on_accent
+                    },
+                    move |_event, window, cx| {
                         if run_busy {
-                            theme.bg_primary
-                        } else {
-                            theme.accent_cyan
-                        },
-                        if run_busy {
-                            theme.text_muted
-                        } else {
-                            theme.text_on_accent
-                        },
-                        move |_event, window, cx| {
-                            if run_busy {
-                                return;
-                            }
-                            let prompt = prompt_input_for_run.read(cx).value().to_string();
-                            window.dispatch_action(
-                                Box::new(AgentsRunRemoteAgent {
-                                    agent_name: run_agent_name.clone(),
-                                    prompt,
-                                    skill_id: run_skill_id.clone(),
-                                }),
-                                cx,
-                            );
-                        },
-                        theme,
-                    ),
-                ),
+                            return;
+                        }
+                        let prompt = prompt_input_for_run.read(cx).value().to_string();
+                        window.dispatch_action(
+                            Box::new(AgentsRunRemoteAgent {
+                                agent_name: run_agent_name.clone(),
+                                prompt,
+                                skill_id: run_skill_id.clone(),
+                            }),
+                            cx,
+                        );
+                    },
+                    theme,
+                )),
         )
         .into_any_element()
 }
@@ -887,10 +893,7 @@ fn render_skill_chip(
         .into_any_element()
 }
 
-fn render_remote_run_history_section(
-    runs: &[RemoteTaskDisplay],
-    theme: &HiveTheme,
-) -> AnyElement {
+fn render_remote_run_history_section(runs: &[RemoteTaskDisplay], theme: &HiveTheme) -> AnyElement {
     let mut section = div()
         .flex()
         .flex_col()
@@ -924,7 +927,10 @@ fn render_remote_run_history_section(
 
 fn render_remote_run_card(run: &RemoteTaskDisplay, theme: &HiveTheme) -> AnyElement {
     let success = run.error.is_none()
-        && matches!(run.state.to_ascii_lowercase().as_str(), "completed" | "success");
+        && matches!(
+            run.state.to_ascii_lowercase().as_str(),
+            "completed" | "success"
+        );
     let status_color = if success {
         theme.accent_green
     } else if run.error.is_some() {
@@ -932,16 +938,12 @@ fn render_remote_run_card(run: &RemoteTaskDisplay, theme: &HiveTheme) -> AnyElem
     } else {
         theme.accent_yellow
     };
-    let mut meta = div()
-        .flex()
-        .flex_row()
-        .gap(theme.space_3)
-        .child(
-            div()
-                .text_size(theme.font_size_xs)
-                .text_color(theme.text_muted)
-                .child(format!("Task: {}", run.task_id)),
-        );
+    let mut meta = div().flex().flex_row().gap(theme.space_3).child(
+        div()
+            .text_size(theme.font_size_xs)
+            .text_color(theme.text_muted)
+            .child(format!("Task: {}", run.task_id)),
+    );
     if let Some(skill) = run.skill_id.as_ref() {
         meta = meta.child(
             div()
@@ -1106,7 +1108,11 @@ fn render_workflows_section(data: &AgentsPanelData, theme: &HiveTheme) -> AnyEle
         .flex()
         .flex_col()
         .gap(theme.space_3)
-        .child(section_title("Automation Workflows", data.workflows.len(), theme));
+        .child(section_title(
+            "Automation Workflows",
+            data.workflows.len(),
+            theme,
+        ));
 
     if data.workflows.is_empty() {
         section = section.child(
@@ -1204,29 +1210,29 @@ fn render_workflow_card(workflow: &WorkflowDisplay, theme: &HiveTheme) -> AnyEle
                         .text_color(theme.text_muted)
                         .child(workflow.source.clone()),
                 )
-                        .child(
-                            div()
-                                .id(ElementId::Name(format!("run-workflow-{safe_id}").into()))
-                                .px(theme.space_2)
-                                .py(px(3.0))
+                .child(
+                    div()
+                        .id(ElementId::Name(format!("run-workflow-{safe_id}").into()))
+                        .px(theme.space_2)
+                        .py(px(3.0))
                         .rounded(theme.radius_sm)
                         .bg(theme.accent_aqua)
                         .text_size(theme.font_size_xs)
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.text_on_accent)
                         .hover(|style| style.bg(theme.accent_cyan))
-                                .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-                                    window.dispatch_action(
-                                        Box::new(AgentsRunWorkflow {
-                                            workflow_id: run_id.clone(),
-                                            instruction: String::new(),
-                                            source: "workflow".into(),
-                                            source_id: source_id.clone(),
-                                        }),
-                                        cx,
-                                    );
-                                })
-                                .child("Run"),
+                        .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
+                            window.dispatch_action(
+                                Box::new(AgentsRunWorkflow {
+                                    workflow_id: run_id.clone(),
+                                    instruction: String::new(),
+                                    source: "workflow".into(),
+                                    source_id: source_id.clone(),
+                                }),
+                                cx,
+                            );
+                        })
+                        .child("Run"),
                 ),
         )
         .child(
@@ -1268,7 +1274,11 @@ fn render_workflow_commands(workflow: &WorkflowDisplay, theme: &HiveTheme) -> Di
                         .text_color(theme.text_muted)
                         .child("•"),
                 )
-                .child(div().text_color(theme.text_secondary).child(command.clone())),
+                .child(
+                    div()
+                        .text_color(theme.text_secondary)
+                        .child(command.clone()),
+                ),
         );
     }
 

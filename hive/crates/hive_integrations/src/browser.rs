@@ -452,11 +452,7 @@ impl BrowserAutomation {
     }
 
     /// Evaluate arbitrary JavaScript in the page context.
-    pub async fn evaluate_script(
-        &self,
-        url: &str,
-        js_code: &str,
-    ) -> Result<serde_json::Value> {
+    pub async fn evaluate_script(&self, url: &str, js_code: &str) -> Result<serde_json::Value> {
         debug!(url = %url, "evaluating script in page context");
 
         let script = self.generate_script(&[
@@ -715,9 +711,7 @@ impl BrowserAutomation {
             "    browser = await {browser_type}.launch({{ headless: {headless} }});"
         ));
         lines.push("    const context = await browser.newContext();".to_string());
-        lines.push(format!(
-            "    context.setDefaultTimeout({timeout});"
-        ));
+        lines.push(format!("    context.setDefaultTimeout({timeout});"));
         lines.push("    const page = await context.newPage();".to_string());
         lines.push("    let _result = {};".to_string());
         lines.push(String::new());
@@ -765,9 +759,15 @@ impl BrowserAutomation {
                 }
 
                 BrowserAction::GetContent => {
-                    lines.push("    const bodyText = await page.evaluate(() => document.body.innerText);".to_string());
+                    lines.push(
+                        "    const bodyText = await page.evaluate(() => document.body.innerText);"
+                            .to_string(),
+                    );
                     lines.push("    const links = await page.evaluate(() => {".to_string());
-                    lines.push("      return Array.from(document.querySelectorAll('a[href]')).map(a => ({".to_string());
+                    lines.push(
+                        "      return Array.from(document.querySelectorAll('a[href]')).map(a => ({"
+                            .to_string(),
+                    );
                     lines.push("        text: a.innerText.trim().substring(0, 200),".to_string());
                     lines.push("        href: a.href,".to_string());
                     lines.push("        is_external: a.hostname !== location.hostname".to_string());
@@ -777,7 +777,10 @@ impl BrowserAutomation {
                     lines.push("      const meta = {};".to_string());
                     lines.push("      document.querySelectorAll('meta[name], meta[property]').forEach(el => {".to_string());
                     lines.push("        const key = el.getAttribute('name') || el.getAttribute('property');".to_string());
-                    lines.push("        if (key) meta[key] = el.getAttribute('content') || '';".to_string());
+                    lines.push(
+                        "        if (key) meta[key] = el.getAttribute('content') || '';"
+                            .to_string(),
+                    );
                     lines.push("      });".to_string());
                     lines.push("      return meta;".to_string());
                     lines.push("    });".to_string());
@@ -791,16 +794,13 @@ impl BrowserAutomation {
                     for field in fields {
                         let sel = escape_js_string(&field.selector);
                         let val = escape_js_string(&field.value);
-                        lines.push(format!(
-                            "    await page.locator('{sel}').fill('{val}');"
-                        ));
+                        lines.push(format!("    await page.locator('{sel}').fill('{val}');"));
                     }
                     lines.push(
-                        "    await page.locator('form').first().evaluate(form => form.submit());".to_string(),
+                        "    await page.locator('form').first().evaluate(form => form.submit());"
+                            .to_string(),
                     );
-                    lines.push(
-                        "    await page.waitForLoadState('domcontentloaded');".to_string(),
-                    );
+                    lines.push("    await page.waitForLoadState('domcontentloaded');".to_string());
                     lines.push(
                         "    _result = { success: true, submitted_url: page.url(), response_status: 200 };"
                             .to_string(),
@@ -809,12 +809,8 @@ impl BrowserAutomation {
 
                 BrowserAction::Click { selector } => {
                     let sel = escape_js_string(selector);
-                    lines.push(format!(
-                        "    await page.locator('{sel}').first().click();"
-                    ));
-                    lines.push(
-                        "    _result = { clicked: true };".to_string(),
-                    );
+                    lines.push(format!("    await page.locator('{sel}').first().click();"));
+                    lines.push("    _result = { clicked: true };".to_string());
                 }
 
                 BrowserAction::EvaluateScript { code } => {
@@ -863,9 +859,7 @@ impl BrowserAutomation {
                         "    const pdfBuf = await page.pdf({ format: 'A4', printBackground: true });"
                             .to_string(),
                     );
-                    lines.push(
-                        "    _result = { data: pdfBuf.toString('base64') };".to_string(),
-                    );
+                    lines.push("    _result = { data: pdfBuf.toString('base64') };".to_string());
                 }
 
                 BrowserAction::InterceptNetwork { url_pattern } => {
@@ -873,14 +867,10 @@ impl BrowserAutomation {
                     // Rewrite: navigate with interception enabled
                     lines.push("    const captured = [];".to_string());
                     lines.push("    page.on('response', async (resp) => {".to_string());
-                    lines.push(format!(
-                        "      if (resp.url().includes('{pat}')) {{"
-                    ));
+                    lines.push(format!("      if (resp.url().includes('{pat}')) {{"));
                     lines.push("        captured.push({".to_string());
                     lines.push("          url: resp.url(),".to_string());
-                    lines.push(
-                        "          method: resp.request().method(),".to_string(),
-                    );
+                    lines.push("          method: resp.request().method(),".to_string());
                     lines.push("          status: resp.status(),".to_string());
                     lines.push(
                         "          content_type: resp.headers()['content-type'] || '',".to_string(),
@@ -892,14 +882,14 @@ impl BrowserAutomation {
                     lines.push("        });".to_string());
                     lines.push("      }".to_string());
                     lines.push("    });".to_string());
-                    lines.push(
-                        "    await page.waitForTimeout(5000);".to_string(),
-                    );
+                    lines.push("    await page.waitForTimeout(5000);".to_string());
                     lines.push("    _result = captured;".to_string());
                 }
 
                 BrowserAction::AccessibilityAudit => {
-                    lines.push("    const snapshot = await page.accessibility.snapshot();".to_string());
+                    lines.push(
+                        "    const snapshot = await page.accessibility.snapshot();".to_string(),
+                    );
                     lines.push("    const violations = [];".to_string());
                     lines.push("    let passes = 0;".to_string());
                     lines.push("    let total = 0;".to_string());
@@ -920,19 +910,27 @@ impl BrowserAutomation {
                     lines.push("      if (node.children) { node.children.forEach(c => walk(c, depth + 1)); }".to_string());
                     lines.push("    }".to_string());
                     lines.push("    walk(snapshot, 0);".to_string());
-                    lines.push(
-                        "    _result = { violations, passes, total };".to_string(),
-                    );
+                    lines.push("    _result = { violations, passes, total };".to_string());
                 }
 
                 BrowserAction::PerformanceMetrics => {
                     lines.push("    await page.waitForLoadState('networkidle');".to_string());
                     lines.push("    const perfData = await page.evaluate(() => {".to_string());
-                    lines.push("      const perf = performance.getEntriesByType('navigation')[0] || {};".to_string());
-                    lines.push("      const paint = performance.getEntriesByType('paint');".to_string());
-                    lines.push("      const fcp = paint.find(e => e.name === 'first-contentful-paint');".to_string());
+                    lines.push(
+                        "      const perf = performance.getEntriesByType('navigation')[0] || {};"
+                            .to_string(),
+                    );
+                    lines.push(
+                        "      const paint = performance.getEntriesByType('paint');".to_string(),
+                    );
+                    lines.push(
+                        "      const fcp = paint.find(e => e.name === 'first-contentful-paint');"
+                            .to_string(),
+                    );
                     lines.push("      return {".to_string());
-                    lines.push("        first_contentful_paint_ms: fcp ? fcp.startTime : 0,".to_string());
+                    lines.push(
+                        "        first_contentful_paint_ms: fcp ? fcp.startTime : 0,".to_string(),
+                    );
                     lines.push("        largest_contentful_paint_ms: 0,".to_string());
                     lines.push("        time_to_interactive_ms: perf.domInteractive ? perf.domInteractive - perf.fetchStart : 0,".to_string());
                     lines.push("        total_blocking_time_ms: 0,".to_string());
@@ -950,11 +948,17 @@ impl BrowserAutomation {
                     lines.push("          }).observe({ type: 'largest-contentful-paint', buffered: true });".to_string());
                     lines.push("          new PerformanceObserver((list) => {".to_string());
                     lines.push("            for (const entry of list.getEntries()) {".to_string());
-                    lines.push("              if (!entry.hadRecentInput) cls += entry.value;".to_string());
+                    lines.push(
+                        "              if (!entry.hadRecentInput) cls += entry.value;".to_string(),
+                    );
                     lines.push("            }".to_string());
-                    lines.push("          }).observe({ type: 'layout-shift', buffered: true });".to_string());
+                    lines.push(
+                        "          }).observe({ type: 'layout-shift', buffered: true });"
+                            .to_string(),
+                    );
                     lines.push("        } catch (_) {}".to_string());
-                    lines.push("        setTimeout(() => resolve({ lcp, cls }), 1000);".to_string());
+                    lines
+                        .push("        setTimeout(() => resolve({ lcp, cls }), 1000);".to_string());
                     lines.push("      });".to_string());
                     lines.push("    });".to_string());
                     lines.push("    perfData.largest_contentful_paint_ms = lcpAndCls.lcp || perfData.largest_contentful_paint_ms;".to_string());
@@ -1242,7 +1246,8 @@ impl BrowserAutomation {
             bail!("Playwright script produced no output");
         }
 
-        serde_json::from_str(stdout_trimmed).context("failed to parse Playwright script JSON output")
+        serde_json::from_str(stdout_trimmed)
+            .context("failed to parse Playwright script JSON output")
     }
 
     /// Determine the `node` binary to use.
@@ -1261,19 +1266,11 @@ impl BrowserAutomation {
     }
 
     fn npm_command() -> &'static str {
-        if cfg!(windows) {
-            "npm.cmd"
-        } else {
-            "npm"
-        }
+        if cfg!(windows) { "npm.cmd" } else { "npm" }
     }
 
     fn npx_command() -> &'static str {
-        if cfg!(windows) {
-            "npx.cmd"
-        } else {
-            "npx"
-        }
+        if cfg!(windows) { "npx.cmd" } else { "npx" }
     }
 
     /// Build the NODE_PATH so `require('playwright')` can find the
@@ -1339,8 +1336,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>> {
 
     // Simple base64 decoder without pulling in an external crate.
     // Node outputs standard base64 with padding.
-    let table: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let table: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     fn decode_char(table: &[u8; 64], c: u8) -> Result<u8> {
         if c == b'+' || c == b'-' {
@@ -1407,7 +1403,11 @@ mod tests {
 
     #[test]
     fn test_browser_type_serde_roundtrip() {
-        for bt in [BrowserType::Chromium, BrowserType::Firefox, BrowserType::WebKit] {
+        for bt in [
+            BrowserType::Chromium,
+            BrowserType::Firefox,
+            BrowserType::WebKit,
+        ] {
             let json = serde_json::to_string(&bt).unwrap();
             let parsed: BrowserType = serde_json::from_str(&json).unwrap();
             assert_eq!(bt, parsed);
@@ -2152,8 +2152,7 @@ mod tests {
 
     #[test]
     fn test_node_path_with_playwright_path() {
-        let ba = BrowserAutomation::new()
-            .with_playwright_path("/opt/node_modules/.bin/playwright");
+        let ba = BrowserAutomation::new().with_playwright_path("/opt/node_modules/.bin/playwright");
         let path = ba.node_path();
         assert_eq!(path, "/opt/node_modules/.bin");
     }

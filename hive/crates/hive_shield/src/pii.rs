@@ -120,7 +120,8 @@ static PII_PATTERNS: Lazy<Vec<PiiPattern>> = Lazy::new(|| {
     vec![
         PiiPattern {
             pii_type: PiiType::Email,
-            regex: Regex::new(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}").expect("valid regex: email"),
+            regex: Regex::new(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+                .expect("valid regex: email"),
             confidence: 0.95,
         },
         PiiPattern {
@@ -130,7 +131,8 @@ static PII_PATTERNS: Lazy<Vec<PiiPattern>> = Lazy::new(|| {
         },
         PiiPattern {
             pii_type: PiiType::CreditCard,
-            regex: Regex::new(r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b").expect("valid regex: credit card"),
+            regex: Regex::new(r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b")
+                .expect("valid regex: credit card"),
             confidence: 0.85,
         },
         PiiPattern {
@@ -140,7 +142,8 @@ static PII_PATTERNS: Lazy<Vec<PiiPattern>> = Lazy::new(|| {
         },
         PiiPattern {
             pii_type: PiiType::IpAddress,
-            regex: Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").expect("valid regex: IP address"),
+            regex: Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
+                .expect("valid regex: IP address"),
             confidence: 0.75,
         },
     ]

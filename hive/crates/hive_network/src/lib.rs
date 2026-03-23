@@ -37,7 +37,6 @@ pub mod message;
 pub mod node;
 pub mod peer;
 pub mod router;
-pub mod sync;
 pub mod transport;
 
 // ── Re-exports for convenience ──────────────────────────────────────────

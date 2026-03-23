@@ -279,6 +279,19 @@ impl ContextEngine {
         });
     }
 
+    /// Remove all ephemeral sources (File, Symbol, Test, etc.) while keeping
+    /// persistent ones (ProjectKnowledge, LearnedPreference). Call this at the
+    /// start of each message's context assembly to avoid TF-IDF index bloat.
+    pub fn clear_ephemeral(&mut self) {
+        self.sources.retain(|s| {
+            matches!(
+                s.source_type,
+                SourceType::ProjectKnowledge | SourceType::LearnedPreference
+            )
+        });
+        self.idf_cache.clear();
+    }
+
     /// Add a project knowledge file (HIVE.md, README.md, etc.) as a context source.
     pub fn add_project_knowledge(&mut self, label: &str, content: &str) {
         if content.is_empty() {
@@ -290,21 +303,6 @@ impl ContextEngine {
             source_type: SourceType::ProjectKnowledge,
             last_modified: Utc::now(),
         });
-    }
-
-    /// Remove all ephemeral context sources, keeping only durable ones
-    /// (ProjectKnowledge and LearnedPreference). Resets the IDF cache.
-    ///
-    /// Call this at the start of each message's context assembly to prevent
-    /// stale file/symbol sources from accumulating across messages.
-    pub fn clear_ephemeral(&mut self) {
-        self.sources.retain(|s| {
-            matches!(
-                s.source_type,
-                SourceType::ProjectKnowledge | SourceType::LearnedPreference
-            )
-        });
-        self.idf_cache.clear();
     }
 
     /// Recursively walk `dir_path`, read text files, and add them as

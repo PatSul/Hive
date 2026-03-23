@@ -11,9 +11,8 @@ use crate::message::{Envelope, MessageKind};
 
 /// A handler function that processes an envelope and optionally returns a
 /// response envelope.
-pub type MessageHandler = Arc<
-    dyn Fn(Envelope) -> Pin<Box<dyn Future<Output = Option<Envelope>> + Send>> + Send + Sync,
->;
+pub type MessageHandler =
+    Arc<dyn Fn(Envelope) -> Pin<Box<dyn Future<Output = Option<Envelope>> + Send>> + Send + Sync>;
 
 /// Routes incoming envelopes to the appropriate handler based on their
 /// [`MessageKind`].

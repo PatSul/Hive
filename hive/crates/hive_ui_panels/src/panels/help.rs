@@ -858,12 +858,24 @@ fn render_keyboard_shortcuts(theme: &HiveTheme) -> AnyElement {
                 .font_weight(FontWeight::BOLD)
                 .child("Workflow Builder"),
         )
-        .child(shortcut_row("Ctrl/Cmd + Shift + W", "Open Workflow Builder", theme))
+        .child(shortcut_row(
+            "Ctrl/Cmd + Shift + W",
+            "Open Workflow Builder",
+            theme,
+        ))
         .child(shortcut_row("Ctrl/Cmd + S", "Save workflow", theme))
         .child(shortcut_row("Ctrl/Cmd + Shift + R", "Run workflow", theme))
-        .child(shortcut_row("Delete / Backspace", "Delete selected node", theme))
+        .child(shortcut_row(
+            "Delete / Backspace",
+            "Delete selected node",
+            theme,
+        ))
         .child(shortcut_row("Ctrl/Cmd + Z", "Undo last action", theme))
-        .child(shortcut_row("Ctrl/Cmd + Shift + Z", "Redo last action", theme))
+        .child(shortcut_row(
+            "Ctrl/Cmd + Shift + Z",
+            "Redo last action",
+            theme,
+        ))
         .child(separator(theme))
         .child(shortcut_row("Enter", "Send message", theme))
         .child(shortcut_row("Shift + Enter", "New line in chat", theme))

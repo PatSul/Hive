@@ -22,8 +22,7 @@ pub enum ContainerStatus {
 }
 
 /// Resource limits applied to a container.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ResourceLimits {
     /// Maximum memory in megabytes.
     pub memory_mb: Option<u64>,
@@ -34,7 +33,6 @@ pub struct ResourceLimits {
     /// Maximum execution timeout in seconds.
     pub timeout_secs: Option<u64>,
 }
-
 
 /// A bind-mount volume specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,7 +317,9 @@ impl DockerSandbox {
             debug!(id = %id, "starting container (simulated)");
         }
 
-        let container = self.containers.get_mut(id)
+        let container = self
+            .containers
+            .get_mut(id)
             .context(format!("Container disappeared unexpectedly: {id}"))?;
         container.status = ContainerStatus::Running;
         container.started_at = Some(Utc::now());
@@ -357,7 +357,9 @@ impl DockerSandbox {
             debug!(id = %id, "stopping container (simulated)");
         }
 
-        let container = self.containers.get_mut(id)
+        let container = self
+            .containers
+            .get_mut(id)
             .context(format!("Container disappeared unexpectedly: {id}"))?;
         container.status = ContainerStatus::Stopped;
         container.stopped_at = Some(Utc::now());
@@ -395,7 +397,9 @@ impl DockerSandbox {
             debug!(id = %id, "pausing container (simulated)");
         }
 
-        let container = self.containers.get_mut(id)
+        let container = self
+            .containers
+            .get_mut(id)
             .context(format!("Container disappeared unexpectedly: {id}"))?;
         container.status = ContainerStatus::Paused;
         Ok(())
@@ -432,7 +436,9 @@ impl DockerSandbox {
             debug!(id = %id, "unpausing container (simulated)");
         }
 
-        let container = self.containers.get_mut(id)
+        let container = self
+            .containers
+            .get_mut(id)
             .context(format!("Container disappeared unexpectedly: {id}"))?;
         container.status = ContainerStatus::Running;
         Ok(())

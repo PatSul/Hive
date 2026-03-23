@@ -11,9 +11,9 @@ use async_trait::async_trait;
 use tracing::debug;
 
 use super::{
-    cell_to_json_value, parse_separated_output, run_cli_command, ColumnInfo, DatabaseConfig,
-    DatabaseProvider, DatabaseType, ForeignKey, IndexInfo, QueryResult, SchemaInfo,
-    TableDescription, TableInfo,
+    ColumnInfo, DatabaseConfig, DatabaseProvider, DatabaseType, ForeignKey, IndexInfo, QueryResult,
+    SchemaInfo, TableDescription, TableInfo, cell_to_json_value, parse_separated_output,
+    run_cli_command,
 };
 
 /// MySQL provider backed by the `mysql` command-line client.
@@ -277,9 +277,7 @@ impl DatabaseProvider for MySQLProvider {
     ) -> Result<Vec<HashMap<String, serde_json::Value>>> {
         debug!(schema = %schema, table = %table, limit = limit, "sampling MySQL rows");
 
-        let sql = format!(
-            "SELECT * FROM `{schema}`.`{table}` LIMIT {limit}"
-        );
+        let sql = format!("SELECT * FROM `{schema}`.`{table}` LIMIT {limit}");
 
         let output = self.mysql_query_with_headers(&sql).await?;
         let lines: Vec<&str> = output.lines().collect();
@@ -288,10 +286,7 @@ impl DatabaseProvider for MySQLProvider {
             return Ok(Vec::new());
         }
 
-        let headers: Vec<String> = lines[0]
-            .split('\t')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let headers: Vec<String> = lines[0].split('\t').map(|s| s.trim().to_string()).collect();
 
         let mut results = Vec::new();
         for line in &lines[1..] {
@@ -328,10 +323,7 @@ impl DatabaseProvider for MySQLProvider {
             });
         }
 
-        let columns: Vec<String> = lines[0]
-            .split('\t')
-            .map(|s| s.trim().to_string())
-            .collect();
+        let columns: Vec<String> = lines[0].split('\t').map(|s| s.trim().to_string()).collect();
 
         let mut rows = Vec::new();
         for line in &lines[1..] {
@@ -358,11 +350,7 @@ impl DatabaseProvider for MySQLProvider {
     async fn get_context_summary(&self) -> Result<String> {
         debug!("building MySQL context summary");
 
-        let database = self
-            .config
-            .database
-            .as_deref()
-            .unwrap_or("(unknown)");
+        let database = self.config.database.as_deref().unwrap_or("(unknown)");
 
         let sql = format!(
             "SELECT t.table_schema, \
@@ -424,7 +412,11 @@ mod tests {
 
     fn make_provider() -> MySQLProvider {
         MySQLProvider::new(DatabaseConfig::mysql(
-            "localhost", 3306, "testdb", "root", "password",
+            "localhost",
+            3306,
+            "testdb",
+            "root",
+            "password",
         ))
     }
 

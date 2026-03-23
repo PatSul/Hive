@@ -277,11 +277,12 @@ impl PersonaRegistry {
     pub fn get_evolved(&self, kind: &PersonaKind) -> Option<Persona> {
         let persona = self.get(kind)?;
         if let Some(ref provider) = self.prompt_override
-            && let Some(evolved_prompt) = provider.get_prompt(kind) {
-                let mut evolved = persona.clone();
-                evolved.system_prompt = evolved_prompt;
-                return Some(evolved);
-            }
+            && let Some(evolved_prompt) = provider.get_prompt(kind)
+        {
+            let mut evolved = persona.clone();
+            evolved.system_prompt = evolved_prompt;
+            return Some(evolved);
+        }
         Some(persona.clone())
     }
 
@@ -489,9 +490,9 @@ mod tests {
                     prompt_tokens: 50,
                     completion_tokens: 100,
                     total_tokens: 150,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,
@@ -715,9 +716,9 @@ mod tests {
             prompt_tokens: 1_000_000,
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            };
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        };
         let cost = estimate_persona_cost("claude-sonnet-4", &usage);
         // $3 input + $15 output = $18
         assert!((cost - 18.0).abs() < 0.01);

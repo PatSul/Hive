@@ -30,7 +30,10 @@ async fn test_full_memory_lifecycle() {
 
     // 2. Query should find relevant chunks
     let results = memory.query("authentication login", 5).await.unwrap();
-    assert!(!results.chunks.is_empty(), "Should find indexed code chunks");
+    assert!(
+        !results.chunks.is_empty(),
+        "Should find indexed code chunks"
+    );
 
     // 3. Remember a preference
     memory
@@ -124,7 +127,10 @@ async fn test_multiple_memories_and_recall_ordering() {
     let stats = memory.stats().await.unwrap();
     assert_eq!(stats.total_memories, 3);
 
-    let recalled = memory.recall("backend technology decisions", 10).await.unwrap();
+    let recalled = memory
+        .recall("backend technology decisions", 10)
+        .await
+        .unwrap();
     assert_eq!(recalled.len(), 3, "Should recall all stored memories");
 }
 

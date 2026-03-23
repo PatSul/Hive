@@ -506,21 +506,12 @@ impl Conversation {
         let branched_messages = self.messages[..=message_index].to_vec();
 
         // Recompute cost/token totals for the branched subset.
-        let total_cost: f64 = branched_messages
-            .iter()
-            .filter_map(|m| m.cost)
-            .sum();
-        let total_tokens: u32 = branched_messages
-            .iter()
-            .filter_map(|m| m.tokens)
-            .sum();
+        let total_cost: f64 = branched_messages.iter().filter_map(|m| m.cost).sum();
+        let total_tokens: u32 = branched_messages.iter().filter_map(|m| m.tokens).sum();
 
         Ok(Self {
             id: uuid::Uuid::new_v4().to_string(),
-            title: branch_name
-                .as_deref()
-                .unwrap_or(&self.title)
-                .to_string(),
+            title: branch_name.as_deref().unwrap_or(&self.title).to_string(),
             messages: branched_messages,
             model: self.model.clone(),
             total_cost,
@@ -1090,8 +1081,12 @@ mod tests {
         });
         store.save(&parent).unwrap();
 
-        let b1 = store.branch_conversation("root", 0, Some("b1".into())).unwrap();
-        let b2 = store.branch_conversation("root", 0, Some("b2".into())).unwrap();
+        let b1 = store
+            .branch_conversation("root", 0, Some("b1".into()))
+            .unwrap();
+        let b2 = store
+            .branch_conversation("root", 0, Some("b2".into()))
+            .unwrap();
 
         let branches = store.get_branches("root").unwrap();
         assert_eq!(branches.len(), 2);
@@ -1120,7 +1115,9 @@ mod tests {
         });
         store.save(&root).unwrap();
 
-        let child = store.branch_conversation("tree-root", 0, Some("child".into())).unwrap();
+        let child = store
+            .branch_conversation("tree-root", 0, Some("child".into()))
+            .unwrap();
 
         let tree = store.get_conversation_tree("tree-root").unwrap();
         assert_eq!(tree.len(), 2);
@@ -1147,11 +1144,18 @@ mod tests {
         });
         store.save(&parent).unwrap();
 
-        store.branch_conversation("parent-sum", 0, Some("my-branch".into())).unwrap();
+        store
+            .branch_conversation("parent-sum", 0, Some("my-branch".into()))
+            .unwrap();
 
         let summaries = store.list_summaries().unwrap();
-        let branch_summary = summaries.iter().find(|s| s.branch_name.as_deref() == Some("my-branch"));
+        let branch_summary = summaries
+            .iter()
+            .find(|s| s.branch_name.as_deref() == Some("my-branch"));
         assert!(branch_summary.is_some());
-        assert_eq!(branch_summary.unwrap().parent_id.as_deref(), Some("parent-sum"));
+        assert_eq!(
+            branch_summary.unwrap().parent_id.as_deref(),
+            Some("parent-sum")
+        );
     }
 }

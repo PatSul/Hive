@@ -308,9 +308,9 @@ mod tests {
         // JSON equivalent — what TOON replaces
         let json_rows: Vec<serde_json::Value> = symbols
             .iter()
-            .map(|s| {
-                serde_json::json!({"kind": s.kind.to_string(), "name": s.name, "file": s.file})
-            })
+            .map(
+                |s| serde_json::json!({"kind": s.kind.to_string(), "name": s.name, "file": s.file}),
+            )
             .collect();
         let json_output = serde_json::to_string(&json_rows).unwrap();
 

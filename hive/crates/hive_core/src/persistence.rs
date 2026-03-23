@@ -348,9 +348,9 @@ impl Database {
         };
 
         // Concatenate all message content (space separated).
-        let mut stmt = self.conn.prepare(
-            "SELECT content FROM messages WHERE conversation_id = ?1 ORDER BY id ASC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT content FROM messages WHERE conversation_id = ?1 ORDER BY id ASC")?;
         let contents: Vec<String> = stmt
             .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
@@ -582,10 +582,9 @@ impl Database {
     /// Deletes log entries older than the given ISO 8601 datetime string.
     /// Returns the number of rows deleted.
     pub fn delete_logs_before(&self, before: &str) -> Result<usize> {
-        let deleted = self.conn.execute(
-            "DELETE FROM logs WHERE created_at < ?1",
-            params![before],
-        )?;
+        let deleted = self
+            .conn
+            .execute("DELETE FROM logs WHERE created_at < ?1", params![before])?;
         Ok(deleted)
     }
 
@@ -631,7 +630,10 @@ impl Database {
             let content = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
-                    warn!("Skipping unreadable conversation file {}: {e}", path.display());
+                    warn!(
+                        "Skipping unreadable conversation file {}: {e}",
+                        path.display()
+                    );
                     continue;
                 }
             };
@@ -1118,8 +1120,15 @@ mod tests {
         let db = test_db();
         db.save_conversation("c1", "General Chat", "claude")
             .unwrap();
-        db.save_message("c1", "user", "Tell me about photosynthesis", None, None, None)
-            .unwrap();
+        db.save_message(
+            "c1",
+            "user",
+            "Tell me about photosynthesis",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
         db.save_conversation("c2", "Another Chat", "claude")
             .unwrap();
@@ -1134,7 +1143,8 @@ mod tests {
     #[test]
     fn test_fts_search_porter_stemming() {
         let db = test_db();
-        db.save_conversation("c1", "Running Tips", "claude").unwrap();
+        db.save_conversation("c1", "Running Tips", "claude")
+            .unwrap();
         db.save_message("c1", "user", "I love programming in Rust", None, None, None)
             .unwrap();
 

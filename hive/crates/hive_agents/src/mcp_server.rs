@@ -70,17 +70,17 @@ impl McpServer {
         }
     }
 
-    /// Wire memory and context tools into the MCP server.
+    /// Replace stub memory/context handlers with real service-backed implementations.
     ///
     /// Registers 3 tools that expose Hive's memory subsystem to external
     /// MCP clients: `query_memory`, `list_memories`, and `search_context`.
+    /// Call this after `AppCollectiveMemory` and `AppContextEngine` globals are set.
     pub fn wire_memory_tools(
         &mut self,
         collective_memory: Arc<crate::collective_memory::CollectiveMemory>,
         context_engine: Arc<std::sync::Mutex<hive_ai::ContextEngine>>,
     ) {
         use crate::collective_memory::MemoryCategory;
-        use crate::mcp_client::McpTool;
 
         // -- query_memory ---------------------------------------------------
         let mem_query = collective_memory.clone();
@@ -93,7 +93,7 @@ impl McpServer {
                     "type": "object",
                     "properties": {
                         "query": { "type": "string", "description": "Search query" },
-                        "category": { "type": "string", "description": "Optional category filter" },
+                        "category": { "type": "string", "description": "Optional category filter (SuccessPattern, FailurePattern, ModelInsight, ConflictResolution, CodePattern, UserPreference, General)" },
                         "limit": { "type": "integer", "description": "Max results (default 10)" }
                     },
                     "required": ["query"]
@@ -603,7 +603,8 @@ impl McpServer {
             self.register(
                 McpTool {
                     name: "click".into(),
-                    description: "Simulate a mouse click at specific screen coordinates (x, y).".into(),
+                    description: "Simulate a mouse click at specific screen coordinates (x, y)."
+                        .into(),
                     input_schema: json!({
                         "type": "object",
                         "properties": {
@@ -623,9 +624,12 @@ impl McpServer {
                         .and_then(|v| v.as_i64())
                         .ok_or("Missing required argument 'y'")? as i32;
 
-                    let mut driver = crate::ui_automation::UiDriver::new().map_err(|e| format!("Driver init failed: {e}"))?;
-                    driver.click(x, y).map_err(|e| format!("Click failed: {e}"))?;
-                    
+                    let mut driver = crate::ui_automation::UiDriver::new()
+                        .map_err(|e| format!("Driver init failed: {e}"))?;
+                    driver
+                        .click(x, y)
+                        .map_err(|e| format!("Click failed: {e}"))?;
+
                     Ok(json!(format!("Clicked at {}, {}", x, y)))
                 }),
             );
@@ -651,9 +655,12 @@ impl McpServer {
                         .and_then(|v| v.as_str())
                         .ok_or("Missing required argument 'text'")?;
 
-                    let mut driver = crate::ui_automation::UiDriver::new().map_err(|e| format!("Driver init failed: {e}"))?;
-                    driver.type_text(text).map_err(|e| format!("Type failed: {e}"))?;
-                    
+                    let mut driver = crate::ui_automation::UiDriver::new()
+                        .map_err(|e| format!("Driver init failed: {e}"))?;
+                    driver
+                        .type_text(text)
+                        .map_err(|e| format!("Type failed: {e}"))?;
+
                     Ok(json!(format!("Typed '{}'", text)))
                 }),
             );
@@ -671,9 +678,12 @@ impl McpServer {
                     }),
                 },
                 Box::new(move |_args| {
-                    let mut driver = crate::ui_automation::UiDriver::new().map_err(|e| format!("Driver init failed: {e}"))?;
-                    driver.press_enter().map_err(|e| format!("Enter failed: {e}"))?;
-                    
+                    let mut driver = crate::ui_automation::UiDriver::new()
+                        .map_err(|e| format!("Driver init failed: {e}"))?;
+                    driver
+                        .press_enter()
+                        .map_err(|e| format!("Enter failed: {e}"))?;
+
                     Ok(json!("Pressed Enter".to_string()))
                 }),
             );
@@ -708,9 +718,9 @@ fn resolve_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
                 let canonical_parent = parent
                     .canonicalize()
                     .map_err(|e| format!("Invalid path: {e}"))?;
-                let file_name = resolved
-                    .file_name()
-                    .ok_or_else(|| format!("Invalid path: no filename in {}", resolved.display()))?;
+                let file_name = resolved.file_name().ok_or_else(|| {
+                    format!("Invalid path: no filename in {}", resolved.display())
+                })?;
                 canonical_parent.join(file_name)
             } else {
                 return Err(format!("Invalid path: {}", resolved.display()));
@@ -719,7 +729,13 @@ fn resolve_path(root: &Path, path_str: &str) -> Result<PathBuf, String> {
     };
 
     let path_str_lower = canonical.to_string_lossy().to_lowercase();
-    for segment in &[".ssh", ".aws", ".gnupg", ".config/gcloud", ".config\\gcloud"] {
+    for segment in &[
+        ".ssh",
+        ".aws",
+        ".gnupg",
+        ".config/gcloud",
+        ".config\\gcloud",
+    ] {
         if path_str_lower.contains(segment) {
             return Err(format!("Access to sensitive path blocked: {segment}"));
         }
@@ -750,11 +766,9 @@ fn execute_command_blocking(
         let cmd = command.to_string();
         let root = executor.working_dir().to_path_buf();
 
-        
-
         std::thread::spawn(move || {
-            let threaded_executor =
-                CommandExecutor::new(root).map_err(|e| format!("Invalid working directory: {e}"))?;
+            let threaded_executor = CommandExecutor::new(root)
+                .map_err(|e| format!("Invalid working directory: {e}"))?;
             let rt = tokio::runtime::Runtime::new()
                 .map_err(|e| format!("Failed to create runtime: {e}"))?;
             rt.block_on(threaded_executor.execute(&cmd))
@@ -763,8 +777,8 @@ fn execute_command_blocking(
         .join()
         .map_err(|_| "Command execution thread panicked".to_string())?
     } else {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create runtime: {e}"))?;
+        let rt =
+            tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {e}"))?;
         rt.block_on(executor.execute(command))
             .map_err(|e| format!("Command execution failed: {e}"))
     }
@@ -799,7 +813,7 @@ mod tests {
         let tools = server.list_tools();
 
         // 9 builtins + integration tools (count may grow as integrations are added)
-        assert_eq!(tools.len(), 85);
+        assert_eq!(tools.len(), 88);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
@@ -832,7 +846,7 @@ mod tests {
         assert!(resp.is_success());
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 85);
+        assert_eq!(tools.len(), 88);
     }
 
     // -- Initialize tests --

@@ -199,9 +199,9 @@ impl SemanticSearchService {
             } else if path.is_file()
                 && let Some(results) =
                     self.search_file(path, &query_terms, &query_ctx, context_lines)
-                {
-                    all_results.extend(results);
-                }
+            {
+                all_results.extend(results);
+            }
         }
 
         // Sort by descending score
@@ -256,9 +256,9 @@ impl SemanticSearchService {
             } else if path.is_file()
                 && let Some(file_results) =
                     self.search_file(&path, query_terms, query_ctx, context_lines)
-                {
-                    results.extend(file_results);
-                }
+            {
+                results.extend(file_results);
+            }
         }
         results
     }

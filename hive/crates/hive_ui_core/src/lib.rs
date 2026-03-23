@@ -7,6 +7,6 @@ pub mod welcome;
 
 pub use actions::*;
 pub use globals::*;
-pub use sidebar::{Panel, Sidebar};
+pub use sidebar::{Panel, ShellDestination, Sidebar};
 pub use theme::HiveTheme;
 pub use welcome::WelcomeScreen;

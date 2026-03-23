@@ -6,9 +6,8 @@ use crate::components::render_wallet_card;
 use crate::components::render_wizard_stepper;
 use hive_ui_core::HiveTheme;
 use hive_ui_core::{
-    TokenLaunchCreateWallet, TokenLaunchDeploy, TokenLaunchImportWallet,
-    TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSelectChain,
-    TokenLaunchSelectWallet, TokenLaunchSetStep,
+    TokenLaunchCreateWallet, TokenLaunchDeploy, TokenLaunchImportWallet, TokenLaunchResetRpcConfig,
+    TokenLaunchSaveRpcConfig, TokenLaunchSelectChain, TokenLaunchSelectWallet, TokenLaunchSetStep,
 };
 
 // ---------------------------------------------------------------------------
@@ -720,7 +719,11 @@ fn render_token_details(
         )
         // Input fields
         .child(input_row("Token Name", &inputs.token_name, theme))
-        .child(input_row("Token Symbol (3-5 chars)", &inputs.token_symbol, theme))
+        .child(input_row(
+            "Token Symbol (3-5 chars)",
+            &inputs.token_symbol,
+            theme,
+        ))
         .child(input_row("Total Supply", &inputs.total_supply, theme))
         .child(input_row("Decimals", &inputs.decimals, theme))
         .into_any_element()
@@ -962,19 +965,19 @@ fn render_wallet_step(
                 .justify_center()
                 .gap(theme.space_3)
                 .child(
-                    accent_button("Create New Wallet", theme.accent_aqua, theme)
-                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
-                            window.dispatch_action(Box::new(TokenLaunchCreateWallet), cx);
-                        }),
-                )
-                .child(
-                    secondary_button("Import Existing", theme).on_mouse_down(
+                    accent_button("Create New Wallet", theme.accent_aqua, theme).on_mouse_down(
                         MouseButton::Left,
                         |_event, window, cx| {
-                            window.dispatch_action(Box::new(TokenLaunchImportWallet), cx);
+                            window.dispatch_action(Box::new(TokenLaunchCreateWallet), cx);
                         },
                     ),
-                ),
+                )
+                .child(secondary_button("Import Existing", theme).on_mouse_down(
+                    MouseButton::Left,
+                    |_event, window, cx| {
+                        window.dispatch_action(Box::new(TokenLaunchImportWallet), cx);
+                    },
+                )),
         )
         .child(
             div()
@@ -983,22 +986,18 @@ fn render_wallet_step(
                 .items_center()
                 .justify_center()
                 .gap(theme.space_3)
-                .child(
-                    secondary_button("Save RPC", theme).on_mouse_down(
-                        MouseButton::Left,
-                        |_event, window, cx| {
-                            window.dispatch_action(Box::new(TokenLaunchSaveRpcConfig), cx);
-                        },
-                    ),
-                )
-                .child(
-                    secondary_button("Reset RPC", theme).on_mouse_down(
-                        MouseButton::Left,
-                        |_event, window, cx| {
-                            window.dispatch_action(Box::new(TokenLaunchResetRpcConfig), cx);
-                        },
-                    ),
-                ),
+                .child(secondary_button("Save RPC", theme).on_mouse_down(
+                    MouseButton::Left,
+                    |_event, window, cx| {
+                        window.dispatch_action(Box::new(TokenLaunchSaveRpcConfig), cx);
+                    },
+                ))
+                .child(secondary_button("Reset RPC", theme).on_mouse_down(
+                    MouseButton::Left,
+                    |_event, window, cx| {
+                        window.dispatch_action(Box::new(TokenLaunchResetRpcConfig), cx);
+                    },
+                )),
         )
         .child(fund_status)
         .child(cost_display)

@@ -7,8 +7,8 @@ pub mod reminders;
 pub mod storage;
 pub mod tick_driver;
 
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 
 use approval::ApprovalService;
 use calendar::CalendarService;
@@ -48,7 +48,11 @@ impl AssistantService {
     /// Open a persistent assistant database at the given path.
     pub fn open(db_path: &str) -> Result<Self, String> {
         let storage = Arc::new(AssistantStorage::open(db_path)?);
-        Ok(Self::from_storage(storage, EmailService::new(), CalendarService::new()))
+        Ok(Self::from_storage(
+            storage,
+            EmailService::new(),
+            CalendarService::new(),
+        ))
     }
 
     /// Open a persistent assistant database with pre-configured OAuth tokens.
@@ -69,7 +73,11 @@ impl AssistantService {
     /// Create an in-memory assistant service (useful for tests).
     pub fn in_memory() -> Result<Self, String> {
         let storage = Arc::new(AssistantStorage::in_memory()?);
-        Ok(Self::from_storage(storage, EmailService::new(), CalendarService::new()))
+        Ok(Self::from_storage(
+            storage,
+            EmailService::new(),
+            CalendarService::new(),
+        ))
     }
 
     fn from_storage(
@@ -183,8 +191,8 @@ impl AssistantService {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use chrono::{Duration, Utc};
+    use std::path::Path;
 
     use crate::AssistantService;
     use crate::approval::ApprovalLevel;
@@ -264,8 +272,8 @@ mod tests {
             )
             .unwrap();
 
-        let personal = service
-            .daily_briefing_for_project(Some(Path::new("/Users/example/personal")));
+        let personal =
+            service.daily_briefing_for_project(Some(Path::new("/Users/example/personal")));
         assert_eq!(personal.active_reminders.len(), 1);
         assert_eq!(personal.active_reminders[0].title, "Buy coffee");
     }

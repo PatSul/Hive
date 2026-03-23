@@ -3,7 +3,7 @@
 mod tray;
 
 use std::borrow::Cow;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use gpui::*;
@@ -12,37 +12,36 @@ use tracing::{error, info, warn};
 use hive_ai::service::AiServiceConfig;
 use hive_ai::tts::TtsProviderType;
 use hive_ai::tts::service::TtsServiceConfig;
-use hive_core::config::{ConfigManager, HiveConfig};
+use hive_core::config::{AccountPlatform, ConfigManager, HiveConfig};
 use hive_core::logging;
 use hive_core::notifications::{AppNotification, NotificationType};
 use hive_core::persistence::Database;
 use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
-    AppA2aClient, AppActivityService, AppAgentNotifications, AppAiService, AppApprovalGate, AppAssistant, AppAutomation,
-    AppAws, AppAzure, AppBitbucket, AppBrowser,
-    AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppDatabase,
-    AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab, AppHeartbeatScheduler,
-    AppIde, AppIntegrationDb,
-    AppHueClient, AppKnowledge, AppKubernetes, AppLearning, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager, AppPersonas,
-    AppContextEngine, AppHiveMemory, AppPluginManager, AppProjectManagement, AppRagService, AppRpcConfig, AppScheduler,
-    AppSecurity, AppSemanticSearch, AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService,
-    AppLocalAiDetection, AppReminderRx, AppTts, AppUiActionTx, AppUpdater, AppVoiceAssistant,
-    AppWallets,
+    AppA2aClient, AppActivityService, AppAgentNotifications, AppAiService, AppApprovalGate,
+    AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser, AppChannels, AppCli,
+    AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppContextEngine, AppCrossChannel,
+    AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab,
+    AppHeartbeatScheduler,
+    AppHiveMemory, AppHueClient, AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes,
+    AppLearning, AppLocalAiDetection, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork,
+    AppNotifications, AppOllamaManager, AppPersonas, AppPluginManager, AppProjectManagement,
+    AppRagService, AppReminderRx, AppRpcConfig, AppScheduler, AppSecurity, AppSemanticSearch,
+    AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService, AppTts, AppUiActionTx,
+    AppUpdater, AppVoiceAssistant, AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
-    SwitchToChat, SwitchToFiles, SwitchToHistory, SwitchToKanban, SwitchToLogs,
-    SwitchToMonitor, SwitchToSpecs, SwitchToWorkflows,
+    SwitchToChat, SwitchToFiles, SwitchToHistory, SwitchToKanban, SwitchToLogs, SwitchToMonitor,
+    SwitchToSpecs, SwitchToWorkflows,
 };
 
 const VERSION: &str = env!("HIVE_VERSION");
 
 /// Temporary global to pass the UI action receiver from `init_services` to
 /// `open_main_window`.  Taken (consumed) once the window's polling loop starts.
-struct UiActionRx(
-    Option<mpsc::Receiver<hive_ui::core_types::action_bridge::UiActionRequest>>,
-);
+struct UiActionRx(Option<mpsc::Receiver<hive_ui::core_types::action_bridge::UiActionRequest>>);
 impl Global for UiActionRx {}
 
 // ---------------------------------------------------------------------------
@@ -103,20 +102,26 @@ actions!(hive, [Quit, TogglePrivacy, OpenSettings]);
 
 /// Initialize backend services and store them as GPUI globals.
 fn init_services(cx: &mut App) -> anyhow::Result<()> {
-    let config_manager =
-        ConfigManager::new().inspect_err(|e| error!("Config manager init failed: {e}"))?;
-    info!(
-        "Config loaded (privacy_mode={})",
-        config_manager.get().privacy_mode
-    );
-    cx.set_global(AppConfig(config_manager));
+    if !cx.has_global::<AppConfig>() {
+        let config_manager =
+            ConfigManager::new().inspect_err(|e| error!("Config manager init failed: {e}"))?;
+        info!(
+            "Config loaded (privacy_mode={})",
+            config_manager.get().privacy_mode
+        );
+        cx.set_global(AppConfig(config_manager));
+    }
 
-    cx.set_global(AppSecurity(SecurityGateway::new()));
-    info!("SecurityGateway initialized");
+    if !cx.has_global::<AppSecurity>() {
+        cx.set_global(AppSecurity(SecurityGateway::new()));
+        info!("SecurityGateway initialized");
+    }
 
-    cx.set_global(AppNotifications(
-        hive_core::notifications::NotificationStore::new(),
-    ));
+    if !cx.has_global::<AppNotifications>() {
+        cx.set_global(AppNotifications(
+            hive_core::notifications::NotificationStore::new(),
+        ));
+    }
 
     // Build AI service from config (needed before wiring LearnerTierAdjuster).
     let config = cx.global::<AppConfig>().0.get().clone();
@@ -240,26 +245,37 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     // Voice assistant — text-to-intent classification with TTS.
     {
         let mut voice = hive_agents::VoiceAssistant::new();
-        if let Some(tts_arc) = cx.has_global::<AppTts>().then(|| cx.global::<AppTts>().0.clone()) {
+        if let Some(tts_arc) = cx
+            .has_global::<AppTts>()
+            .then(|| cx.global::<AppTts>().0.clone())
+        {
             voice.set_tts(tts_arc);
         }
-        cx.set_global(AppVoiceAssistant(std::sync::Arc::new(std::sync::Mutex::new(voice))));
+        cx.set_global(AppVoiceAssistant(std::sync::Arc::new(
+            std::sync::Mutex::new(voice),
+        )));
         info!("VoiceAssistant initialized");
     }
 
     // RAG Service — document indexing + TF-IDF retrieval for context injection.
     let rag_service = hive_ai::RagService::new(50, 10);
-    cx.set_global(AppRagService(std::sync::Arc::new(std::sync::Mutex::new(rag_service))));
+    cx.set_global(AppRagService(std::sync::Arc::new(std::sync::Mutex::new(
+        rag_service,
+    ))));
     info!("RagService initialized");
 
     // Semantic Search Service — file-content search with relevance scoring.
     let semantic_search = hive_ai::SemanticSearchService::new(1000);
-    cx.set_global(AppSemanticSearch(std::sync::Arc::new(std::sync::Mutex::new(semantic_search))));
+    cx.set_global(AppSemanticSearch(std::sync::Arc::new(
+        std::sync::Mutex::new(semantic_search),
+    )));
     info!("SemanticSearchService initialized");
 
     // Context Engine — smart context curation with TF-IDF + heuristic boosts.
     let context_engine = hive_ai::ContextEngine::new();
-    cx.set_global(AppContextEngine(std::sync::Arc::new(std::sync::Mutex::new(context_engine))));
+    cx.set_global(AppContextEngine(std::sync::Arc::new(
+        std::sync::Mutex::new(context_engine),
+    )));
     info!("ContextEngine initialized");
 
     // HiveMemory — LanceDB-backed vector embeddings + chunking.
@@ -282,24 +298,23 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                 ))
             }
         };
-        let rt = tokio::runtime::Handle::try_current()
-            .or_else(|_| {
-                tokio::runtime::Runtime::new().map(|rt| {
-                    let handle = rt.handle().clone();
-                    // Leak the runtime so it lives for the app's duration.
-                    std::mem::forget(rt);
-                    handle
-                })
-            });
+        let rt = tokio::runtime::Handle::try_current().or_else(|_| {
+            tokio::runtime::Runtime::new().map(|rt| {
+                let handle = rt.handle().clone();
+                // Leak the runtime so it lives for the app's duration.
+                std::mem::forget(rt);
+                handle
+            })
+        });
         if let Ok(handle) = rt {
             match handle.block_on(hive_ai::memory::HiveMemory::open(
                 &memory_path.to_string_lossy(),
                 embedder,
             )) {
                 Ok(memory) => {
-                    cx.set_global(AppHiveMemory(std::sync::Arc::new(
-                        tokio::sync::Mutex::new(memory),
-                    )));
+                    cx.set_global(AppHiveMemory(std::sync::Arc::new(tokio::sync::Mutex::new(
+                        memory,
+                    ))));
                     info!("HiveMemory initialized (LanceDB)");
                 }
                 Err(e) => warn!("HiveMemory init failed: {e}"),
@@ -323,39 +338,46 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             hive_ai::FleetLearningService::new()
         }
     };
-    cx.set_global(AppFleetLearning(std::sync::Arc::new(std::sync::Mutex::new(fleet))));
+    cx.set_global(AppFleetLearning(std::sync::Arc::new(
+        std::sync::Mutex::new(fleet),
+    )));
 
     // Collective Memory
     let collective_db_path = HiveConfig::base_dir()
         .map(|d| d.join("collective_memory.db"))
         .unwrap_or_else(|_| std::path::PathBuf::from("collective_memory.db"));
-    let memory = hive_agents::collective_memory::CollectiveMemory::open(&collective_db_path.to_string_lossy())
-        .unwrap_or_else(|_| hive_agents::collective_memory::CollectiveMemory::in_memory().unwrap());
+    let memory = hive_agents::collective_memory::CollectiveMemory::open(
+        &collective_db_path.to_string_lossy(),
+    )
+    .unwrap_or_else(|_| hive_agents::collective_memory::CollectiveMemory::in_memory().unwrap());
     cx.set_global(AppCollectiveMemory(std::sync::Arc::new(memory)));
     info!("CollectiveMemory initialized");
 
     // Standup Service
     let standup = hive_agents::standup::StandupService::new();
-    cx.set_global(AppStandupService(std::sync::Arc::new(std::sync::Mutex::new(standup))));
+    cx.set_global(AppStandupService(std::sync::Arc::new(
+        std::sync::Mutex::new(standup),
+    )));
     info!("StandupService initialized");
 
     // Competence Detector
     let competence = hive_agents::competence_detection::CompetenceDetector::with_defaults();
-    cx.set_global(AppCompetenceDetector(std::sync::Arc::new(std::sync::Mutex::new(competence))));
+    cx.set_global(AppCompetenceDetector(std::sync::Arc::new(
+        std::sync::Mutex::new(competence),
+    )));
     info!("CompetenceDetector initialized");
 
     // Activity event bus with SQLite persistence.
     let activity_db_path = HiveConfig::base_dir()
         .map(|d| d.join("activity.db"))
         .unwrap_or_else(|_| std::path::PathBuf::from("activity.db"));
-    let activity_log = hive_agents::ActivityLog::open(&activity_db_path)
-        .unwrap_or_else(|e| {
-            warn!("ActivityLog open failed, using in-memory: {e}");
-            hive_agents::ActivityLog::open_in_memory().expect("in-memory ActivityLog")
-        });
-    let activity_service = std::sync::Arc::new(
-        hive_agents::ActivityService::new_with_log(std::sync::Arc::new(activity_log)),
-    );
+    let activity_log = hive_agents::ActivityLog::open(&activity_db_path).unwrap_or_else(|e| {
+        warn!("ActivityLog open failed, using in-memory: {e}");
+        hive_agents::ActivityLog::open_in_memory().expect("in-memory ActivityLog")
+    });
+    let activity_service = std::sync::Arc::new(hive_agents::ActivityService::new_with_log(
+        std::sync::Arc::new(activity_log),
+    ));
     cx.set_global(AppActivityService(activity_service.clone()));
     info!("ActivityService initialized");
 
@@ -494,11 +516,15 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))
             .join("skills");
         let loader = hive_agents::skill_format::SkillLoader::new(skills_dir.clone());
-        cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::with_loader(loader)));
+        cx.set_global(AppSkills(hive_agents::skills::SkillsRegistry::with_loader(
+            loader,
+        )));
         info!("SkillsRegistry initialized (file-backed, ~/.hive/skills/)");
 
         // Legacy file-based skill manager kept for backward compat.
-        cx.set_global(AppSkillManager(hive_agents::skills::SkillManager::new(skills_dir)));
+        cx.set_global(AppSkillManager(hive_agents::skills::SkillManager::new(
+            skills_dir,
+        )));
         info!("SkillManager initialized (user skills)");
     }
 
@@ -544,7 +570,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     // Built-in MCP tool server — file I/O, command exec, search, git.
     cx.set_global(AppMcpServer(hive_agents::mcp_server::McpServer::new(
-        workspace_root,
+        workspace_root.clone(),
     )));
     info!("McpServer initialized (built-in + integration tools)");
 
@@ -641,17 +667,68 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         info!("Scheduler initialized");
 
         let (reminder_tx, reminder_rx) = std::sync::mpsc::channel();
+        let scheduler_path_for_jobs = scheduler_path.clone();
+        let workspace_root_for_jobs = workspace_root.clone();
         let tick_config = hive_assistant::tick_driver::TickDriverConfig {
             interval: Duration::from_secs(60),
             assistant_db_path: assistant_db_str.clone(),
             reminder_tx: Some(reminder_tx),
+            job_executor: Some(std::sync::Arc::new(move |job_id: &str| {
+                let scheduler_path = scheduler_path_for_jobs.clone();
+                let workspace_root = workspace_root_for_jobs.clone();
+                let job_id = job_id.to_string();
+                std::thread::spawn(move || {
+                    let workflow_id =
+                        hive_core::scheduler::Scheduler::load_from_file(&scheduler_path)
+                            .ok()
+                            .and_then(|scheduler| {
+                                scheduler.get_job(&job_id).map(|job| job.name.clone())
+                            })
+                            .unwrap_or_else(|| job_id.clone());
+
+                    let mut automation = hive_agents::AutomationService::new();
+                    let _ = automation.initialize_workflows(&workspace_root);
+                    let Some(workflow) = automation
+                        .clone_workflow(&workflow_id)
+                        .or_else(|| automation.clone_workflow(&job_id))
+                    else {
+                        warn!(
+                            "Scheduled job fired (id={job_id}) but no workflow matched '{}' (expected workflow id in job name)",
+                            workflow_id
+                        );
+                        return;
+                    };
+
+                    match hive_agents::automation::AutomationService::execute_workflow_blocking(
+                        &workflow,
+                        workspace_root.clone(),
+                    ) {
+                        Ok(run) => {
+                            if run.success {
+                                info!(
+                                    "Scheduled workflow '{}' completed ({} step(s))",
+                                    run.workflow_id, run.steps_completed
+                                );
+                            } else {
+                                warn!(
+                                    "Scheduled workflow '{}' failed after {} step(s): {}",
+                                    run.workflow_id,
+                                    run.steps_completed,
+                                    run.error.as_deref().unwrap_or("unknown error")
+                                );
+                            }
+                        }
+                        Err(e) => warn!("Scheduled workflow execution failed: {e}"),
+                    }
+                });
+            })),
         };
         hive_assistant::tick_driver::start_tick_driver(scheduler, tick_config);
         info!("Tick driver started (scheduler + reminders, 60s interval)");
 
-        cx.set_global(AppReminderRx(std::sync::Arc::new(
-            std::sync::Mutex::new(reminder_rx),
-        )));
+        cx.set_global(AppReminderRx(std::sync::Arc::new(std::sync::Mutex::new(
+            reminder_rx,
+        ))));
     }
 
     // Wallet store — load existing wallets or start empty.
@@ -689,13 +766,125 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     // --- Integration hubs (conditionally initialized) ---
 
-    // Messaging hub — always create, providers added when tokens configured.
-    let messaging = std::sync::Arc::new(hive_integrations::messaging::MessagingHub::new());
+    // Messaging hub — register configured providers, then wrap in Arc.
+    let mut messaging = hive_integrations::messaging::MessagingHub::new();
+
+    if let Some(token) = &config.slack_bot_token {
+        match hive_integrations::messaging::SlackProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Slack messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Slack provider: {e}"),
+        }
+    }
+    if let (Some(token), Some(guild_id)) = (&config.discord_bot_token, &config.discord_guild_id) {
+        match hive_integrations::messaging::DiscordProvider::new(token, guild_id) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Discord messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Discord provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.telegram_bot_token {
+        match hive_integrations::messaging::TelegramProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Telegram messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Telegram provider: {e}"),
+        }
+    }
+    if let (Some(phone_id), Some(token)) =
+        (&config.whatsapp_phone_id, &config.whatsapp_access_token)
+    {
+        match hive_integrations::messaging::WhatsAppProvider::new(phone_id, token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("WhatsApp messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create WhatsApp provider: {e}"),
+        }
+    }
+    if let Some(number) = &config.signal_number {
+        match hive_integrations::messaging::SignalProvider::new(number) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Signal messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Signal provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.matrix_access_token {
+        match hive_integrations::messaging::MatrixProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Matrix messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Matrix provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.google_chat_access_token {
+        match hive_integrations::messaging::GoogleChatProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("Google Chat messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create Google Chat provider: {e}"),
+        }
+    }
+    if let Some(token) = &config.webchat_api_token {
+        match hive_integrations::messaging::WebChatProvider::new(token) {
+            Ok(p) => {
+                messaging.register_provider(Box::new(p));
+                info!("WebChat messaging provider registered");
+            }
+            Err(e) => warn!("Failed to create WebChat provider: {e}"),
+        }
+    }
+    // Teams uses Microsoft OAuth token from connected accounts.
+    if let Some(acct) = config
+        .connected_accounts
+        .iter()
+        .find(|a| a.platform == AccountPlatform::Microsoft)
+    {
+        // Retrieve the OAuth token from SecureStorage via ConfigManager.
+        if let Some(oauth) = cx.global::<AppConfig>().0.get_oauth_token(acct.platform) {
+            match hive_integrations::messaging::TeamsProvider::new(&oauth.access_token, "default") {
+                Ok(p) => {
+                    messaging.register_provider(Box::new(p));
+                    info!("Teams messaging provider registered");
+                }
+                Err(e) => warn!("Failed to create Teams provider: {e}"),
+            }
+        }
+    }
+
+    info!(
+        "MessagingHub initialized with {} provider(s)",
+        messaging.provider_count()
+    );
+    let messaging = std::sync::Arc::new(messaging);
     cx.set_global(AppMessaging(messaging));
-    info!("MessagingHub initialized");
+
+    // Cross-channel memory service — load persisted state if available.
+    let cross_channel = match HiveConfig::base_dir() {
+        Ok(dir) => {
+            let path = dir.join("cross_channel.json");
+            hive_integrations::messaging::CrossChannelService::load_from_file(&path)
+                .unwrap_or_else(|_| hive_integrations::messaging::CrossChannelService::new())
+        }
+        Err(_) => hive_integrations::messaging::CrossChannelService::new(),
+    };
+    cx.set_global(AppCrossChannel(std::sync::Arc::new(std::sync::Mutex::new(
+        cross_channel,
+    ))));
+    info!("CrossChannelService initialized");
 
     // Project management hub — always create, providers added when tokens configured.
-    let pm = std::sync::Arc::new(hive_integrations::project_management::ProjectManagementHub::new());
+    let pm =
+        std::sync::Arc::new(hive_integrations::project_management::ProjectManagementHub::new());
     cx.set_global(AppProjectManagement(pm));
     info!("ProjectManagementHub initialized");
 
@@ -789,8 +978,9 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     info!("OllamaManager initialized");
 
     // Local AI provider detection — probe well-known ports in background.
-    let local_ai_results: std::sync::Arc<std::sync::Mutex<Vec<hive_terminal::local_ai::LocalProviderInfo>>> =
-        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let local_ai_results: std::sync::Arc<
+        std::sync::Mutex<Vec<hive_terminal::local_ai::LocalProviderInfo>>,
+    > = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     cx.set_global(AppLocalAiDetection(local_ai_results.clone()));
     {
         let results = local_ai_results;
@@ -806,10 +996,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                         detector.detect_all().await
                     });
                     let available: Vec<_> = detected.iter().filter(|p| p.available).collect();
-                    info!(
-                        "Local AI detection: found {} provider(s)",
-                        available.len()
-                    );
+                    info!("Local AI detection: found {} provider(s)", available.len());
                     for provider in &available {
                         info!(
                             "  - {} at {} ({} model(s))",
@@ -832,8 +1019,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         .zip(config.hue_api_key.as_deref())
         .map(|(bridge_ip, api_key)| {
             std::sync::Arc::new(hive_integrations::smart_home::PhilipsHueClient::new(
-                bridge_ip,
-                api_key,
+                bridge_ip, api_key,
             ))
         });
     cx.set_global(AppHueClient(hue_client));
@@ -929,13 +1115,27 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             google_docs: None,
             google_tasks: None,
             google_contacts: None,
-            bitbucket: Some(cx.global::<AppBitbucket>().0.clone()),
-            gitlab: Some(cx.global::<AppGitLab>().0.clone()),
+            bitbucket: cx
+                .has_global::<AppBitbucket>()
+                .then(|| cx.global::<AppBitbucket>().0.clone()),
+            gitlab: cx
+                .has_global::<AppGitLab>()
+                .then(|| cx.global::<AppGitLab>().0.clone()),
             webhooks: Arc::new(std::sync::Mutex::new(
                 hive_integrations::webhooks::WebhookRegistry::new(),
             )),
         };
-        cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
+        cx.global_mut::<AppMcpServer>()
+            .0
+            .wire_integrations(services);
+        if cx.has_global::<AppCollectiveMemory>() && cx.has_global::<AppContextEngine>() {
+            let collective_memory = Arc::clone(&cx.global::<AppCollectiveMemory>().0);
+            let context_engine = Arc::clone(&cx.global::<AppContextEngine>().0);
+            cx.global_mut::<AppMcpServer>()
+                .0
+                .wire_memory_tools(collective_memory, context_engine);
+            info!("MCP memory/context tools wired to live services");
+        }
         info!("MCP integration tools wired to live services");
     }
 
@@ -951,8 +1151,8 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     // its own tokio runtime. The GPUI global receives a read-only handle that
     // shares the node's live peer registry.
     {
-        let network_base_dir = HiveConfig::base_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"));
+        let network_base_dir =
+            HiveConfig::base_dir().unwrap_or_else(|_| std::path::PathBuf::from(".hive"));
         let network_config_path = network_base_dir.join("network.json");
         let net_config = hive_network::NetworkConfig::load_or_default(&network_config_path);
 
@@ -1020,8 +1220,12 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     if config.remote_enabled {
         let remote_local_port = config.remote_local_port;
         let remote_web_port = config.remote_web_port;
-        let data_dir = HiveConfig::base_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from(".hive"));
+        let data_dir = HiveConfig::base_dir().unwrap_or_else(|_| std::path::PathBuf::from(".hive"));
+        let network_handle = if cx.has_global::<AppNetwork>() {
+            Some(cx.global::<AppNetwork>().0.clone())
+        } else {
+            None
+        };
 
         std::thread::Builder::new()
             .name("hive-remote".into())
@@ -1032,12 +1236,16 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                     .expect("Remote daemon tokio runtime");
                 rt.block_on(async {
                     let daemon_config = hive_remote::daemon::DaemonConfig {
+                        config_root: None,
                         data_dir,
                         local_port: remote_local_port,
                         web_port: remote_web_port,
                         shutdown_grace_secs: 30,
                     };
-                    match hive_remote::daemon::HiveDaemon::new(daemon_config) {
+                    match hive_remote::daemon::HiveDaemon::new_with_network(
+                        daemon_config,
+                        network_handle,
+                    ) {
                         Ok(daemon) => {
                             let daemon = std::sync::Arc::new(tokio::sync::RwLock::new(daemon));
                             let router = hive_remote::web_server::build_router(daemon);
@@ -1055,7 +1263,10 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                 });
             })
             .ok();
-        info!("Remote control daemon starting on port {}", config.remote_web_port);
+        info!(
+            "Remote control daemon starting on port {}",
+            config.remote_web_port
+        );
     }
 
     // A2A (Agent-to-Agent) protocol server — exposes Hive agents as A2A skills.
@@ -1075,12 +1286,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                         )];
 
                         ai_service
-                            .prepare_stream(
-                                probe_messages,
-                                ai_service.default_model(),
-                                None,
-                                None,
-                            )
+                            .prepare_stream(probe_messages, ai_service.default_model(), None, None)
                             .map(|(provider, request)| {
                                 let executor =
                                     hive_a2a::ProviderExecutor::new(provider, request.model);
@@ -1107,10 +1313,8 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                                     .expect("A2A server tokio runtime");
                                 rt.block_on(async {
                                     if let Err(e) =
-                                        hive_a2a::start_server_with_handler(
-                                            a2a_config, a2a_handler,
-                                        )
-                                        .await
+                                        hive_a2a::start_server_with_handler(a2a_config, a2a_handler)
+                                            .await
                                     {
                                         error!("[A2A] Server error: {}", e);
                                     }
@@ -1128,6 +1332,26 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                 warn!("A2A config load failed (non-fatal): {}", e);
             }
         }
+    }
+
+    Ok(())
+}
+
+fn init_bootstrap_globals(cx: &mut App) -> anyhow::Result<()> {
+    if !cx.has_global::<AppConfig>() {
+        let config_manager =
+            ConfigManager::new().inspect_err(|e| error!("Config manager init failed: {e}"))?;
+        info!(
+            "Bootstrap config loaded (privacy_mode={})",
+            config_manager.get().privacy_mode
+        );
+        cx.set_global(AppConfig(config_manager));
+    }
+
+    if !cx.has_global::<AppNotifications>() {
+        cx.set_global(AppNotifications(
+            hive_core::notifications::NotificationStore::new(),
+        ));
     }
 
     Ok(())
@@ -1329,6 +1553,133 @@ fn notify_error(cx: &mut App, message: impl Into<String>) {
     }
 }
 
+fn start_ui_action_bridge(cx: &mut App) {
+    let Some(action_rx) = cx
+        .has_global::<UiActionRx>()
+        .then(|| cx.global_mut::<UiActionRx>().0.take())
+        .flatten()
+    else {
+        return;
+    };
+
+    cx.spawn(async move |app: &mut AsyncApp| {
+        loop {
+            loop {
+                match action_rx.try_recv() {
+                    Ok(req) => {
+                        let result = app
+                            .update(|cx| {
+                                let action =
+                                    match hive_ui::core_types::action_bridge::make_action(
+                                        &req.action_name,
+                                        req.params,
+                                    ) {
+                                        Ok(a) => a,
+                                        Err(e) => return Err(e),
+                                    };
+
+                                let windows = cx.windows();
+                                if let Some(handle) = windows.first() {
+                                    let _ = handle.update(cx, |_, window, cx| {
+                                        window.dispatch_action(action, cx);
+                                    });
+                                    Ok(serde_json::json!({"dispatched": req.action_name}))
+                                } else {
+                                    Err("No open window to dispatch action".to_string())
+                                }
+                            })
+                            .unwrap_or_else(|e| Err(format!("GPUI update failed: {e}")));
+
+                        let _ = req.response_tx.send(result);
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => return,
+                }
+            }
+
+            app.background_executor()
+                .timer(Duration::from_millis(50))
+                .await;
+        }
+    })
+    .detach();
+
+    info!("UI action bridge polling loop started");
+}
+
+fn start_background_update_check(cx: &mut App) {
+    if !(cx.has_global::<AppConfig>() && cx.global::<AppConfig>().0.get().auto_update) {
+        return;
+    }
+    if !cx.has_global::<AppUpdater>() {
+        return;
+    }
+
+    let updater = cx.global::<AppUpdater>().0.clone();
+    cx.spawn(async move |app: &mut AsyncApp| {
+        app.background_executor()
+            .timer(Duration::from_secs(5))
+            .await;
+
+        loop {
+            let updater_clone = updater.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let result = updater_clone.check_for_updates();
+                let _ = tx.send(result);
+            });
+
+            let check_result = loop {
+                match rx.try_recv() {
+                    Ok(result) => break result,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        app.background_executor()
+                            .timer(Duration::from_millis(500))
+                            .await;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        break Err(anyhow::anyhow!("Update check thread died"));
+                    }
+                }
+            };
+
+            match check_result {
+                Ok(Some(update_info)) => {
+                    info!(
+                        "Update available: v{} (release: {})",
+                        update_info.version, update_info.release_url
+                    );
+                    let version = update_info.version.clone();
+                    let _ = app.update(|cx| {
+                        if cx.has_global::<AppNotifications>() {
+                            cx.global_mut::<AppNotifications>().0.push(
+                                AppNotification::new(
+                                    NotificationType::Info,
+                                    format!(
+                                        "Hive v{version} is available. Click the update badge in the status bar to install."
+                                    ),
+                                )
+                                .with_title("Update Available"),
+                            );
+                        }
+                    });
+                }
+                Ok(None) => {
+                    info!("No updates available");
+                }
+                Err(e) => {
+                    warn!("Update check failed: {e}");
+                }
+            }
+
+            app.background_executor()
+                .timer(Duration::from_secs(4 * 60 * 60))
+                .await;
+        }
+    })
+    .detach();
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -1342,9 +1693,8 @@ fn main() {
     Application::new().with_assets(Assets).run(|cx| {
         gpui_component::init(cx);
 
-        if let Err(e) = init_services(cx) {
-            error!("Service initialization failed: {e:#}");
-            notify_error(cx, format!("Failed to initialize services: {e}"));
+        if let Err(e) = init_bootstrap_globals(cx) {
+            error!("Bootstrap initialization failed: {e:#}");
         }
 
         register_actions(cx);
@@ -1410,127 +1760,25 @@ fn main() {
 
         open_main_window(cx).expect("Failed to open window");
 
-        // UI action bridge polling loop — receives UiActionRequests from MCP
-        // tool handlers and dispatches them as GPUI actions on the main window.
-        if let Some(action_rx) = cx.global_mut::<UiActionRx>().0.take() {
-            cx.spawn(async move |app: &mut AsyncApp| {
-                loop {
-                    loop {
-                        match action_rx.try_recv() {
-                            Ok(req) => {
-                                let result = app.update(|cx| {
-                                    let action = match hive_ui::core_types::action_bridge::make_action(
-                                        &req.action_name,
-                                        req.params,
-                                    ) {
-                                        Ok(a) => a,
-                                        Err(e) => return Err(e),
-                                    };
+        cx.spawn(async move |app: &mut AsyncApp| {
+            app.background_executor()
+                .timer(Duration::from_millis(10))
+                .await;
 
-                                    // Dispatch the action on the first open window.
-                                    let windows = cx.windows();
-                                    if let Some(handle) = windows.first() {
-                                        let _ = handle.update(cx, |_, window, cx| {
-                                            window.dispatch_action(action, cx);
-                                        });
-                                        Ok(serde_json::json!({"dispatched": req.action_name}))
-                                    } else {
-                                        Err("No open window to dispatch action".to_string())
-                                    }
-                                }).unwrap_or_else(|e| Err(format!("GPUI update failed: {e}")));
-
-                                let _ = req.response_tx.send(result);
-                            }
-                            Err(mpsc::TryRecvError::Empty) => break,
-                            Err(mpsc::TryRecvError::Disconnected) => return,
-                        }
-                    }
-
-                    app.background_executor()
-                        .timer(Duration::from_millis(50))
-                        .await;
+            let _ = app.update(|cx| {
+                if let Err(e) = init_services(cx) {
+                    error!("Service initialization failed: {e:#}");
+                    notify_error(cx, format!("Failed to initialize services: {e}"));
                 }
-            })
-            .detach();
-            info!("UI action bridge polling loop started");
-        }
+                start_ui_action_bridge(cx);
+                start_background_update_check(cx);
+            });
+        })
+        .detach();
 
         // Bring the app to the foreground and ensure macOS shows its dock icon.
         // Without this, running the binary directly (e.g. `cargo run`) may not
         // display the app in the dock.
         cx.activate(true);
-
-        // Background update check — runs 5s after startup and every 4 hours.
-        // The blocking HTTP call runs on an OS thread; results are polled on the
-        // main thread to update the status bar.
-        if cx.has_global::<AppConfig>() && cx.global::<AppConfig>().0.get().auto_update {
-            let updater = cx.global::<AppUpdater>().0.clone();
-            cx.spawn(async move |app: &mut AsyncApp| {
-                // Wait 5 seconds before first check to avoid slowing startup.
-                app.background_executor()
-                    .timer(Duration::from_secs(5))
-                    .await;
-
-                loop {
-                    // Run the blocking HTTP check on a background OS thread.
-                    let updater_clone = updater.clone();
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    std::thread::spawn(move || {
-                        let result = updater_clone.check_for_updates();
-                        let _ = tx.send(result);
-                    });
-
-                    // Poll for the result.
-                    let check_result = loop {
-                        match rx.try_recv() {
-                            Ok(result) => break result,
-                            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                app.background_executor()
-                                    .timer(Duration::from_millis(500))
-                                    .await;
-                            }
-                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                break Err(anyhow::anyhow!("Update check thread died"));
-                            }
-                        }
-                    };
-
-                    match check_result {
-                        Ok(Some(update_info)) => {
-                            info!(
-                                "Update available: v{} (release: {})",
-                                update_info.version, update_info.release_url
-                            );
-                            let version = update_info.version.clone();
-                            let _ = app.update(|cx| {
-                                if cx.has_global::<AppNotifications>() {
-                                    cx.global_mut::<AppNotifications>().0.push(
-                                        AppNotification::new(
-                                            NotificationType::Info,
-                                            format!(
-                                                "Hive v{version} is available. Click the update badge in the status bar to install."
-                                            ),
-                                        )
-                                        .with_title("Update Available"),
-                                    );
-                                }
-                            });
-                        }
-                        Ok(None) => {
-                            info!("No updates available");
-                        }
-                        Err(e) => {
-                            warn!("Update check failed: {e}");
-                        }
-                    }
-
-                    // Re-check every 4 hours.
-                    app.background_executor()
-                        .timer(Duration::from_secs(4 * 60 * 60))
-                        .await;
-                }
-            })
-            .detach();
-        }
     });
 }

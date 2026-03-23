@@ -127,9 +127,10 @@ impl AgentPersistenceService {
             let entry = entry?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json")
-                && let Some(stem) = path.file_stem() {
-                    ids.push(stem.to_string_lossy().into_owned());
-                }
+                && let Some(stem) = path.file_stem()
+            {
+                ids.push(stem.to_string_lossy().into_owned());
+            }
         }
         ids.sort();
         Ok(ids)

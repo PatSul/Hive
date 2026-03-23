@@ -1,9 +1,9 @@
 use gpui::*;
 use gpui_component::{Icon, IconName};
 
+use hive_ui_core::AgentsRunWorkflow;
 use hive_ui_core::HiveTheme;
 use hive_ui_core::KanbanAddTask;
-use hive_ui_core::AgentsRunWorkflow;
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -36,7 +36,9 @@ impl TaskStatus {
 }
 
 /// Priority level for a task, ordered from lowest to highest urgency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum Priority {
     Low,
     Medium,

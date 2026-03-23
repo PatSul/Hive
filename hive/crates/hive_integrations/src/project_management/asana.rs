@@ -222,9 +222,7 @@ impl AsanaClient {
             }
         }
 
-        envelope
-            .data
-            .context("Asana response contained no data")
+        envelope.data.context("Asana response contained no data")
     }
 
     /// Perform an authenticated POST request and parse the response data.
@@ -261,9 +259,7 @@ impl AsanaClient {
             }
         }
 
-        envelope
-            .data
-            .context("Asana response contained no data")
+        envelope.data.context("Asana response contained no data")
     }
 
     /// Perform an authenticated PUT request and parse the response data.
@@ -300,9 +296,7 @@ impl AsanaClient {
             }
         }
 
-        envelope
-            .data
-            .context("Asana response contained no data")
+        envelope.data.context("Asana response contained no data")
     }
 
     /// Get the first workspace for the authenticated user.
@@ -326,10 +320,7 @@ impl AsanaClient {
     fn convert_task(task: &AsanaTask) -> Issue {
         let status = Self::map_status(task);
         let priority = Self::map_priority(task);
-        let assignee = task
-            .assignee
-            .as_ref()
-            .and_then(|a| a.name.clone());
+        let assignee = task.assignee.as_ref().and_then(|a| a.name.clone());
         let labels: Vec<String> = task.tags.iter().map(|t| t.name.clone()).collect();
 
         // Derive a key from the section name if available.
@@ -349,14 +340,8 @@ impl AsanaClient {
             assignee,
             labels,
             sprint: section_name,
-            created_at: task
-                .created_at
-                .as_deref()
-                .and_then(Self::parse_datetime),
-            updated_at: task
-                .modified_at
-                .as_deref()
-                .and_then(Self::parse_datetime),
+            created_at: task.created_at.as_deref().and_then(Self::parse_datetime),
+            updated_at: task.modified_at.as_deref().and_then(Self::parse_datetime),
             platform: PMPlatform::Asana,
             url: task.permalink_url.clone(),
         }
@@ -369,11 +354,7 @@ impl AsanaClient {
         }
 
         // Check section name for status inference.
-        if let Some(section) = task
-            .memberships
-            .first()
-            .and_then(|m| m.section.as_ref())
-        {
+        if let Some(section) = task.memberships.first().and_then(|m| m.section.as_ref()) {
             let section_lower = section.name.to_lowercase();
             if section_lower.contains("backlog") {
                 return IssueStatus::Backlog;
@@ -571,11 +552,7 @@ impl ProjectManagementProvider for AsanaClient {
             .collect())
     }
 
-    async fn list_issues(
-        &self,
-        project_id: &str,
-        filters: &IssueFilters,
-    ) -> Result<Vec<Issue>> {
+    async fn list_issues(&self, project_id: &str, filters: &IssueFilters) -> Result<Vec<Issue>> {
         let opt_fields = Self::task_opt_fields();
         let mut url = format!(
             "{}/projects/{}/tasks?opt_fields={}&limit=100",
@@ -660,7 +637,10 @@ impl ProjectManagementProvider for AsanaClient {
                 let tag_payload = serde_json::json!({
                     "data": { "tag": tag_gid }
                 });
-                if let Err(e) = self.post_one::<serde_json::Value>(&tag_url, &tag_payload).await {
+                if let Err(e) = self
+                    .post_one::<serde_json::Value>(&tag_url, &tag_payload)
+                    .await
+                {
                     warn!(
                         task_gid = %task.gid,
                         tag = %tag_gid,
@@ -740,10 +720,7 @@ impl ProjectManagementProvider for AsanaClient {
                         if let Some(project_gid) =
                             task_p.memberships.first().and_then(|m| m.project.as_ref())
                         {
-                            match self
-                                .find_section_for_status(&project_gid.gid, status)
-                                .await
-                            {
+                            match self.find_section_for_status(&project_gid.gid, status).await {
                                 Ok(section_gid) => {
                                     let section_url = format!(
                                         "{}/sections/{}/addTask",
@@ -791,8 +768,9 @@ impl ProjectManagementProvider for AsanaClient {
                 let tag_payload = serde_json::json!({
                     "data": { "tag": tag_gid }
                 });
-                if let Err(e) =
-                    self.post_one::<serde_json::Value>(&tag_url, &tag_payload).await
+                if let Err(e) = self
+                    .post_one::<serde_json::Value>(&tag_url, &tag_payload)
+                    .await
                 {
                     warn!(
                         issue_id = %issue_id,
@@ -821,10 +799,7 @@ impl ProjectManagementProvider for AsanaClient {
             id: story.gid,
             author: story.created_by.and_then(|u| u.name),
             body: story.text.unwrap_or_default(),
-            created_at: story
-                .created_at
-                .as_deref()
-                .and_then(Self::parse_datetime),
+            created_at: story.created_at.as_deref().and_then(Self::parse_datetime),
         })
     }
 
@@ -904,11 +879,7 @@ mod tests {
     use super::*;
 
     fn make_client() -> AsanaClient {
-        AsanaClient::with_base_url(
-            "asana_test_token",
-            "https://app.asana.com/api/1.0",
-        )
-        .unwrap()
+        AsanaClient::with_base_url("asana_test_token", "https://app.asana.com/api/1.0").unwrap()
     }
 
     #[test]
@@ -919,8 +890,7 @@ mod tests {
 
     #[test]
     fn test_custom_base_url_strips_trailing_slash() {
-        let client =
-            AsanaClient::with_base_url("tok", "https://app.asana.com/api/1.0/").unwrap();
+        let client = AsanaClient::with_base_url("tok", "https://app.asana.com/api/1.0/").unwrap();
         assert_eq!(client.base_url(), "https://app.asana.com/api/1.0");
     }
 

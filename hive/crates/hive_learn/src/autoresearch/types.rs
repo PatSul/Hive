@@ -78,10 +78,26 @@ mod tests {
         let run = EvalRunResult {
             pass_rate: 0.75,
             results: vec![
-                EvalResult { question_id: "a".into(), passed: true, reasoning: "ok".into() },
-                EvalResult { question_id: "b".into(), passed: true, reasoning: "ok".into() },
-                EvalResult { question_id: "c".into(), passed: true, reasoning: "ok".into() },
-                EvalResult { question_id: "d".into(), passed: false, reasoning: "bad".into() },
+                EvalResult {
+                    question_id: "a".into(),
+                    passed: true,
+                    reasoning: "ok".into(),
+                },
+                EvalResult {
+                    question_id: "b".into(),
+                    passed: true,
+                    reasoning: "ok".into(),
+                },
+                EvalResult {
+                    question_id: "c".into(),
+                    passed: true,
+                    reasoning: "ok".into(),
+                },
+                EvalResult {
+                    question_id: "d".into(),
+                    passed: false,
+                    reasoning: "bad".into(),
+                },
             ],
             sample_outputs: vec!["output1".into()],
         };
@@ -113,8 +129,13 @@ mod tests {
         let reasons = vec![
             AutoResearchStopReason::MaxIterationsReached,
             AutoResearchStopReason::PerfectScore,
-            AutoResearchStopReason::NoImprovementPlateau { consecutive_failures: 3 },
-            AutoResearchStopReason::BudgetExhausted { spent: 0.50, budget: 0.45 },
+            AutoResearchStopReason::NoImprovementPlateau {
+                consecutive_failures: 3,
+            },
+            AutoResearchStopReason::BudgetExhausted {
+                spent: 0.50,
+                budget: 0.45,
+            },
             AutoResearchStopReason::UserCancelled,
             AutoResearchStopReason::EmptyEvalSuite,
             AutoResearchStopReason::NoBaselinePrompt,

@@ -12,9 +12,7 @@ pub enum RelayFrame {
         node_id: String,
     },
     /// Authenticate a previously paired device.
-    Authenticate {
-        pairing_token: String,
-    },
+    Authenticate { pairing_token: String },
     /// Create a new encrypted room.
     CreateRoom {
         room_id: String,
@@ -37,10 +35,7 @@ pub enum RelayFrame {
     /// Heartbeat response.
     Pong,
     /// An error reported by the relay.
-    Error {
-        code: u16,
-        message: String,
-    },
+    Error { code: u16, message: String },
 }
 
 /// An encrypted payload transported inside a [`RelayFrame::Forward`].

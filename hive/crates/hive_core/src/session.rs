@@ -137,10 +137,7 @@ mod tests {
         );
         assert_eq!(
             loaded.recent_workspaces,
-            vec![
-                "/home/user/project".to_string(),
-                "/tmp".to_string()
-            ]
+            vec!["/home/user/project".to_string(), "/tmp".to_string()]
         );
         assert_eq!(loaded.open_files, vec!["main.rs", "lib.rs"]);
         assert_eq!(loaded.chat_draft.as_deref(), Some("half-typed message"));
@@ -251,10 +248,7 @@ mod tests {
         let path = session_path_in(&tmp);
 
         let state = SessionState {
-            pinned_workspaces: vec![
-                "/home/user/pinned1".into(),
-                "/home/user/pinned2".into(),
-            ],
+            pinned_workspaces: vec!["/home/user/pinned1".into(), "/home/user/pinned2".into()],
             ..Default::default()
         };
 

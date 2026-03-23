@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use a2a_rs::{AgentCard, TaskState};
+use async_trait::async_trait;
 use hive_agents::integration_tools::{A2aAgentRecord, A2aTaskRecord, OutboundA2aService};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -204,7 +204,9 @@ impl A2aClientService {
             })
             .cloned()
             .ok_or_else(|| {
-                A2aError::Config(format!("No configured remote A2A agent matches '{identifier}'"))
+                A2aError::Config(format!(
+                    "No configured remote A2A agent matches '{identifier}'"
+                ))
             })
     }
 }
@@ -297,8 +299,8 @@ impl From<RemoteAgentRunResult> for A2aTaskRecord {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     use a2a_rs::{AgentCapabilities, AgentSkill, Artifact, Part, Task, TaskStatus};
     use axum::extract::State;
@@ -346,9 +348,7 @@ mod tests {
         }
     }
 
-    async fn test_card_handler(
-        State(state): State<TestState>,
-    ) -> Json<AgentCard> {
+    async fn test_card_handler(State(state): State<TestState>) -> Json<AgentCard> {
         state.card_hits.fetch_add(1, Ordering::SeqCst);
         Json(test_card(&state.base_url))
     }

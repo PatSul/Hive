@@ -274,9 +274,8 @@ impl StdioTransport {
 
         // Block dangerous bare executables regardless of args/casing.
         // This is intentionally stricter than SecurityGateway patterns.
-        const BLOCKED_EXECUTABLES: &[&str] = &[
-            "rm", "del", "format", "mkfs", "dd", "shutdown", "reboot",
-        ];
+        const BLOCKED_EXECUTABLES: &[&str] =
+            &["rm", "del", "format", "mkfs", "dd", "shutdown", "reboot"];
         let command_basename = command
             .trim()
             .rsplit(['\\', '/'])
@@ -431,7 +430,8 @@ impl StdioTransport {
                 .ok_or_else(|| anyhow::anyhow!("Child process closed stdout before responding"))?;
 
             if msg.is_notification() {
-                let notification = msg.into_notification()
+                let notification = msg
+                    .into_notification()
                     .expect("is_notification() was true so into_notification() must succeed");
                 debug!(
                     method = %notification.method,
@@ -563,9 +563,7 @@ impl SseTransport {
                         "SSE stream closed before sending 'endpoint' event (server '{server_name}')"
                     )
                 })?
-                .with_context(|| {
-                    format!("Error reading SSE stream from server '{server_name}'")
-                })?;
+                .with_context(|| format!("Error reading SSE stream from server '{server_name}'"))?;
 
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -597,7 +595,8 @@ impl SseTransport {
                 if event_type == Some("endpoint") {
                     if let Some(ref data) = event_data {
                         // The endpoint URL may be relative or absolute.
-                        let resolved = if data.starts_with("http://") || data.starts_with("https://")
+                        let resolved = if data.starts_with("http://")
+                            || data.starts_with("https://")
                         {
                             data.clone()
                         } else {
@@ -729,8 +728,7 @@ impl SseTransport {
 
             // We only care about `message` events (or events with no explicit type,
             // which SSE treats as `message`). The `endpoint` event was already handled.
-            let is_message =
-                event_type.as_deref() == Some("message") || event_type.is_none();
+            let is_message = event_type.as_deref() == Some("message") || event_type.is_none();
 
             if is_message {
                 if let Some(ref data) = event_data {
@@ -775,12 +773,7 @@ impl SseTransport {
             .json(request)
             .send()
             .await
-            .with_context(|| {
-                format!(
-                    "Failed to POST JSON-RPC request to {}",
-                    self.post_url
-                )
-            })?;
+            .with_context(|| format!("Failed to POST JSON-RPC request to {}", self.post_url))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -810,10 +803,7 @@ impl SseTransport {
             .send()
             .await
             .with_context(|| {
-                format!(
-                    "Failed to POST JSON-RPC notification to {}",
-                    self.post_url
-                )
+                format!("Failed to POST JSON-RPC notification to {}", self.post_url)
             })?;
 
         let status = response.status();
@@ -860,12 +850,12 @@ impl SseTransport {
             let msg = tokio::time::timeout_at(deadline, self.read_message())
                 .await
                 .map_err(|_| {
-                    anyhow::anyhow!(
-                        "Timed out waiting for SSE response with id {expected_id}"
-                    )
+                    anyhow::anyhow!("Timed out waiting for SSE response with id {expected_id}")
                 })?? // First ? unwraps the timeout, second ? unwraps the read_message result.
                 .ok_or_else(|| {
-                    anyhow::anyhow!("SSE stream closed before receiving response with id {expected_id}")
+                    anyhow::anyhow!(
+                        "SSE stream closed before receiving response with id {expected_id}"
+                    )
                 })?;
 
             if msg.is_notification() {

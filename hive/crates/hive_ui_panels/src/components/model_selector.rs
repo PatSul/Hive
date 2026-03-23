@@ -353,9 +353,9 @@ impl ModelSelectorView {
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt.block_on(
-                    hive_ai::providers::openai_catalog::fetch_openai_models(&api_key),
-                ),
+                Ok(rt) => rt.block_on(hive_ai::providers::openai_catalog::fetch_openai_models(
+                    &api_key,
+                )),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -447,9 +447,9 @@ impl ModelSelectorView {
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt.block_on(
-                    hive_ai::providers::google_catalog::fetch_google_models(&api_key),
-                ),
+                Ok(rt) => rt.block_on(hive_ai::providers::google_catalog::fetch_google_models(
+                    &api_key,
+                )),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -494,9 +494,9 @@ impl ModelSelectorView {
         let (tx, rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt.block_on(
-                    hive_ai::providers::groq_catalog::fetch_groq_models(&api_key),
-                ),
+                Ok(rt) => rt.block_on(hive_ai::providers::groq_catalog::fetch_groq_models(
+                    &api_key,
+                )),
                 Err(e) => Err(format!("tokio runtime: {e}")),
             };
             let _ = tx.send(result);
@@ -735,7 +735,11 @@ impl ModelSelectorView {
         let loading_statuses = [
             (self.or_fetch_status, "OpenRouter", ProviderType::OpenRouter),
             (self.openai_fetch_status, "OpenAI", ProviderType::OpenAI),
-            (self.anthropic_fetch_status, "Anthropic", ProviderType::Anthropic),
+            (
+                self.anthropic_fetch_status,
+                "Anthropic",
+                ProviderType::Anthropic,
+            ),
             (self.google_fetch_status, "Google", ProviderType::Google),
             (self.groq_fetch_status, "Groq", ProviderType::Groq),
         ];
@@ -844,10 +848,7 @@ impl ModelSelectorView {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|_this, _e, window, _cx| {
-                            window.dispatch_action(
-                                Box::new(SwitchToModels),
-                                _cx,
-                            );
+                            window.dispatch_action(Box::new(SwitchToModels), _cx);
                         }),
                     )
                     .child("Manage Models\u{2026}"),
@@ -877,10 +878,8 @@ impl ModelSelectorView {
             models.iter().take(MAX_VISIBLE_PER_GROUP).collect()
         };
 
-        let has_more = !is_collapsed
-            && !is_expanded
-            && !is_searching
-            && total_count > MAX_VISIBLE_PER_GROUP;
+        let has_more =
+            !is_collapsed && !is_expanded && !is_searching && total_count > MAX_VISIBLE_PER_GROUP;
         let remaining = total_count.saturating_sub(MAX_VISIBLE_PER_GROUP);
 
         let mut entries: Vec<AnyElement> = Vec::new();

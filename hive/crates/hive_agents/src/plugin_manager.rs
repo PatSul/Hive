@@ -41,7 +41,9 @@ impl PluginManager {
         let trimmed = content.strip_prefix("---")?;
         // The opening `---` must be followed by a newline (or be at EOF for an
         // edge case, but we require body).
-        let trimmed = trimmed.strip_prefix('\n').or_else(|| trimmed.strip_prefix("\r\n"))?;
+        let trimmed = trimmed
+            .strip_prefix('\n')
+            .or_else(|| trimmed.strip_prefix("\r\n"))?;
 
         // Find the closing `---` on its own line.
         let end = trimmed.find("\n---")?;
@@ -140,11 +142,7 @@ impl PluginManager {
     /// Looks for `.claude-plugin/plugin.json` or `plugin.json` in the repo
     /// root. If found, fetches the full plugin. Otherwise, looks for
     /// `SKILL.md` files and wraps them as a synthetic plugin.
-    pub async fn fetch_from_github(
-        &self,
-        owner: &str,
-        repo: &str,
-    ) -> Result<PluginPreview> {
+    pub async fn fetch_from_github(&self, owner: &str, repo: &str) -> Result<PluginPreview> {
         // 1. Determine default branch
         let repo_url = format!("https://api.github.com/repos/{owner}/{repo}");
         let repo_json: serde_json::Value = self
@@ -169,9 +167,8 @@ impl PluginManager {
         debug!("GitHub {owner}/{repo}: default branch = {branch}");
 
         // 2. Fetch recursive file tree
-        let tree_url = format!(
-            "https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
-        );
+        let tree_url =
+            format!("https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1");
         let tree_json: serde_json::Value = self
             .client
             .get(&tree_url)
@@ -239,14 +236,8 @@ impl PluginManager {
         let manifest = Self::parse_manifest(&manifest_content)?;
 
         // Determine skills directory (default "skills")
-        let skills_dir = manifest
-            .skills_path
-            .as_deref()
-            .unwrap_or("skills");
-        let commands_dir = manifest
-            .commands_path
-            .as_deref()
-            .unwrap_or("commands");
+        let skills_dir = manifest.skills_path.as_deref().unwrap_or("skills");
+        let commands_dir = manifest.commands_path.as_deref().unwrap_or("commands");
 
         // Resolve paths relative to manifest location
         let prefix = if let Some(idx) = manifest_path.rfind('/') {
@@ -269,17 +260,13 @@ impl PluginManager {
         // Collect skill files
         let skill_files: Vec<&String> = paths
             .iter()
-            .filter(|p| {
-                p.starts_with(&skills_prefix)
-                    && (p.ends_with(".md") || p.ends_with(".MD"))
-            })
+            .filter(|p| p.starts_with(&skills_prefix) && (p.ends_with(".md") || p.ends_with(".MD")))
             .collect();
 
         let command_files: Vec<&String> = paths
             .iter()
             .filter(|p| {
-                p.starts_with(&commands_prefix)
-                    && (p.ends_with(".md") || p.ends_with(".MD"))
+                p.starts_with(&commands_prefix) && (p.ends_with(".md") || p.ends_with(".MD"))
             })
             .collect();
 
@@ -362,9 +349,8 @@ impl PluginManager {
         branch: &str,
         path: &str,
     ) -> Result<String> {
-        let url = format!(
-            "https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}"
-        );
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch}");
         let json: serde_json::Value = self
             .client
             .get(&url)
@@ -499,8 +485,8 @@ impl PluginManager {
                     path.display()
                 );
             };
-            let content = std::fs::read_to_string(&manifest_path)
-                .context("failed to read plugin.json")?;
+            let content =
+                std::fs::read_to_string(&manifest_path).context("failed to read plugin.json")?;
             Self::load_plugin_directory(path, &content)
         } else {
             bail!("Path does not exist: {}", path.display());
@@ -579,7 +565,10 @@ impl PluginManager {
         if let Some(last) = cache.last_checked {
             let elapsed = Utc::now().signed_duration_since(last);
             if elapsed.num_seconds() < 3600 {
-                debug!("Skipping plugin update check — last checked {}s ago", elapsed.num_seconds());
+                debug!(
+                    "Skipping plugin update check — last checked {}s ago",
+                    elapsed.num_seconds()
+                );
                 return Vec::new();
             }
         }
@@ -602,9 +591,7 @@ impl PluginManager {
                 }
                 // Fall back to plugin.json
                 let path = "plugin.json";
-                let content = self
-                    .fetch_github_file(&owner, &repo, "HEAD", path)
-                    .await?;
+                let content = self.fetch_github_file(&owner, &repo, "HEAD", path).await?;
                 Self::parse_manifest(&content)
             }
             .await;
@@ -654,11 +641,7 @@ impl PluginManager {
                     let value = value
                         .strip_prefix('"')
                         .and_then(|v| v.strip_suffix('"'))
-                        .or_else(|| {
-                            value
-                                .strip_prefix('\'')
-                                .and_then(|v| v.strip_suffix('\''))
-                        })
+                        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
                         .unwrap_or(value);
                     if !value.is_empty() {
                         return Some(value.to_owned());
@@ -697,8 +680,7 @@ impl PluginManager {
 
 /// Decode a standard base64 string (RFC 4648) into bytes.
 fn decode_base64(input: &str) -> Result<Vec<u8>> {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     fn val(c: u8) -> Result<u8> {
         match c {

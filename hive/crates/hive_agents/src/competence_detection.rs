@@ -115,10 +115,21 @@ pub enum GapSeverity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestedAction {
-    SearchDirectory { domain: String },
-    ResearchTopic { topic: String, suggested_domains: Vec<String> },
-    AuthorSkill { domain: String, description: String },
-    ResearchAndAuthor { topic: String, suggested_domains: Vec<String> },
+    SearchDirectory {
+        domain: String,
+    },
+    ResearchTopic {
+        topic: String,
+        suggested_domains: Vec<String>,
+    },
+    AuthorSkill {
+        domain: String,
+        description: String,
+    },
+    ResearchAndAuthor {
+        topic: String,
+        suggested_domains: Vec<String>,
+    },
 }
 
 /// Tuning knobs for the competence detector.
@@ -301,7 +312,10 @@ impl CompetenceDetector {
         let mut gaps = Vec::new();
 
         if matching_skills.is_empty() {
-            let domain = keywords.first().cloned().unwrap_or_else(|| "unknown".into());
+            let domain = keywords
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "unknown".into());
             if directory_match.is_some() {
                 gaps.push(CompetenceGap {
                     domain: domain.clone(),
@@ -327,7 +341,12 @@ impl CompetenceDetector {
             None
         };
 
-        info!(confidence, should_learn, gaps = gaps.len(), "quick_assess complete");
+        info!(
+            confidence,
+            should_learn,
+            gaps = gaps.len(),
+            "quick_assess complete"
+        );
 
         CompetenceAssessment {
             confidence,
@@ -412,7 +431,11 @@ impl CompetenceDetector {
         let memory_signal = (relevant_memories as f64 / 3.0).min(1.0);
 
         // --- AI signal -------------------------------------------------------
-        let skill_names: Vec<String> = skills.list_enabled().iter().map(|s| s.name.clone()).collect();
+        let skill_names: Vec<String> = skills
+            .list_enabled()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
         let system_prompt = "You are a competence assessor. Rate your confidence (0-10) that you can handle this request given these available skills. Respond with just a number 0-10.".to_string();
         let user_content = format!(
             "Available skills: [{}]. Request: {}",
@@ -460,7 +483,10 @@ impl CompetenceDetector {
         // --- gaps ------------------------------------------------------------
         let mut gaps = Vec::new();
         if matching_skills.is_empty() {
-            let domain = keywords.first().cloned().unwrap_or_else(|| "unknown".into());
+            let domain = keywords
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "unknown".into());
             gaps.push(CompetenceGap {
                 domain: domain.clone(),
                 gap_type: GapType::MissingSkill,
@@ -469,7 +495,10 @@ impl CompetenceDetector {
             });
         }
         if matching_patterns == 0 {
-            let domain = keywords.first().cloned().unwrap_or_else(|| "unknown".into());
+            let domain = keywords
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "unknown".into());
             gaps.push(CompetenceGap {
                 domain,
                 gap_type: GapType::NoPatterns,
@@ -478,7 +507,10 @@ impl CompetenceDetector {
             });
         }
         if relevant_memories == 0 {
-            let domain = keywords.first().cloned().unwrap_or_else(|| "unknown".into());
+            let domain = keywords
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "unknown".into());
             gaps.push(CompetenceGap {
                 domain,
                 gap_type: GapType::MissingKnowledge,
@@ -494,7 +526,12 @@ impl CompetenceDetector {
             None
         };
 
-        info!(confidence, should_learn, gaps = gaps.len(), "assess complete");
+        info!(
+            confidence,
+            should_learn,
+            gaps = gaps.len(),
+            "assess complete"
+        );
 
         Ok(CompetenceAssessment {
             confidence,
@@ -520,7 +557,9 @@ impl CompetenceDetector {
         executor: &E,
         pipeline: &SkillAuthoringPipeline,
     ) -> Result<(CompetenceAssessment, Option<SkillAuthoringResult>), String> {
-        let assessment = self.assess(request, marketplace, skills, memory, executor).await?;
+        let assessment = self
+            .assess(request, marketplace, skills, memory, executor)
+            .await?;
 
         if assessment.should_learn && self.config.auto_learn {
             info!("Auto-learn triggered — invoking skill-authoring pipeline");
@@ -541,7 +580,9 @@ impl CompetenceDetector {
                     .collect(),
             };
 
-            let result = pipeline.author_skill(&authoring_request, executor, marketplace, Some(memory)).await;
+            let result = pipeline
+                .author_skill(&authoring_request, executor, marketplace, Some(memory))
+                .await;
             Ok((assessment, Some(result)))
         } else {
             Ok((assessment, None))
@@ -559,11 +600,9 @@ impl CompetenceDetector {
         let worst = gaps.iter().max_by_key(|g| g.severity)?;
 
         match worst.gap_type {
-            GapType::MissingSkill => {
-                Some(SuggestedAction::SearchDirectory {
-                    domain: worst.domain.clone(),
-                })
-            }
+            GapType::MissingSkill => Some(SuggestedAction::SearchDirectory {
+                domain: worst.domain.clone(),
+            }),
             GapType::MissingKnowledge => {
                 if domains.is_empty() {
                     Some(SuggestedAction::ResearchAndAuthor {
@@ -577,18 +616,14 @@ impl CompetenceDetector {
                     })
                 }
             }
-            GapType::LowQualitySkill => {
-                Some(SuggestedAction::AuthorSkill {
-                    domain: worst.domain.clone(),
-                    description: worst.description.clone(),
-                })
-            }
-            GapType::NoPatterns => {
-                Some(SuggestedAction::ResearchTopic {
-                    topic: worst.domain.clone(),
-                    suggested_domains: domains,
-                })
-            }
+            GapType::LowQualitySkill => Some(SuggestedAction::AuthorSkill {
+                domain: worst.domain.clone(),
+                description: worst.description.clone(),
+            }),
+            GapType::NoPatterns => Some(SuggestedAction::ResearchTopic {
+                topic: worst.domain.clone(),
+                suggested_domains: domains,
+            }),
         }
     }
 }
@@ -616,7 +651,13 @@ mod tests {
             Ok(ChatResponse {
                 content: self.response.clone(),
                 model: "mock".to_string(),
-                usage: TokenUsage { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cache_creation_input_tokens: None, cache_read_input_tokens: None },
+                usage: TokenUsage {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
                 finish_reason: FinishReason::Stop,
                 thinking: None,
                 tool_calls: None,
@@ -645,9 +686,8 @@ mod tests {
 
     #[test]
     fn extract_keywords_top_5() {
-        let kws = extract_keywords(
-            "alpha bravo charlie delta echo foxtrot golf hotel india juliet",
-        );
+        let kws =
+            extract_keywords("alpha bravo charlie delta echo foxtrot golf hotel india juliet");
         assert!(kws.len() <= 5);
     }
 
@@ -720,7 +760,10 @@ mod tests {
         let has_missing = assessment.gaps.iter().any(|g| {
             g.gap_type == GapType::MissingSkill || g.gap_type == GapType::MissingKnowledge
         });
-        assert!(has_missing, "Should identify a missing skill or knowledge gap");
+        assert!(
+            has_missing,
+            "Should identify a missing skill or knowledge gap"
+        );
     }
 
     #[test]
@@ -734,11 +777,13 @@ mod tests {
             &marketplace,
             &skills,
         );
-        let has_gap = assessment
-            .gaps
-            .iter()
-            .any(|g| g.gap_type == GapType::MissingKnowledge || g.gap_type == GapType::MissingSkill);
-        assert!(has_gap, "Should identify a missing-knowledge or missing-skill gap");
+        let has_gap = assessment.gaps.iter().any(|g| {
+            g.gap_type == GapType::MissingKnowledge || g.gap_type == GapType::MissingSkill
+        });
+        assert!(
+            has_gap,
+            "Should identify a missing-knowledge or missing-skill gap"
+        );
     }
 
     // -- Threshold ----------------------------------------------------------
@@ -763,7 +808,8 @@ mod tests {
         let skills = SkillsRegistry::new();
         let marketplace = SkillMarketplace::new();
 
-        let assessment = detector.quick_assess("review code for security issues", &marketplace, &skills);
+        let assessment =
+            detector.quick_assess("review code for security issues", &marketplace, &skills);
         assert!(
             !assessment.should_learn || assessment.confidence >= 0.4,
             "High-confidence assessment should not trigger learning"

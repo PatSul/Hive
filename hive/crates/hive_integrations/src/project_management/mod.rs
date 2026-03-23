@@ -356,11 +356,7 @@ impl ProjectManagementHub {
     }
 
     /// Get sprints for a project on a specific platform.
-    pub async fn get_sprints(
-        &self,
-        platform: PMPlatform,
-        project_id: &str,
-    ) -> Result<Vec<Sprint>> {
+    pub async fn get_sprints(&self, platform: PMPlatform, project_id: &str) -> Result<Vec<Sprint>> {
         let provider = self.provider(platform)?;
         debug!(platform = %platform, project_id = %project_id, "getting sprints via hub");
         provider.get_sprints(project_id).await

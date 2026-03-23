@@ -2,8 +2,8 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 use hive_agents::prompt_template::{self, PromptTemplate};
-use hive_ui_core::actions::{PromptLibraryDelete, PromptLibraryLoad};
 use hive_ui_core::HiveTheme;
+use hive_ui_core::actions::{PromptLibraryDelete, PromptLibraryLoad};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -207,18 +207,16 @@ fn render_template_card(template: &PromptTemplate, theme: &HiveTheme) -> impl In
                     .flex_wrap()
                     .gap(theme.space_1)
                     .mt(theme.space_1)
-                    .children(
-                        template.context_files.iter().map(|f| {
-                            div()
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.accent_cyan)
-                                .px(theme.space_1)
-                                .rounded(theme.radius_sm)
-                                .bg(theme.bg_tertiary)
-                                .child(f.clone())
-                                .into_any_element()
-                        }),
-                    ),
+                    .children(template.context_files.iter().map(|f| {
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.accent_cyan)
+                            .px(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .bg(theme.bg_tertiary)
+                            .child(f.clone())
+                            .into_any_element()
+                    })),
             )
         })
         .when(!template.tags.is_empty(), |el| {
@@ -228,18 +226,16 @@ fn render_template_card(template: &PromptTemplate, theme: &HiveTheme) -> impl In
                     .flex_wrap()
                     .gap(theme.space_1)
                     .mt(theme.space_1)
-                    .children(
-                        template.tags.iter().map(|tag| {
-                            div()
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.accent_yellow)
-                                .px(theme.space_1)
-                                .rounded(theme.radius_sm)
-                                .bg(theme.bg_tertiary)
-                                .child(format!("#{tag}"))
-                                .into_any_element()
-                        }),
-                    ),
+                    .children(template.tags.iter().map(|tag| {
+                        div()
+                            .text_size(theme.font_size_xs)
+                            .text_color(theme.accent_yellow)
+                            .px(theme.space_1)
+                            .rounded(theme.radius_sm)
+                            .bg(theme.bg_tertiary)
+                            .child(format!("#{tag}"))
+                            .into_any_element()
+                    })),
             )
         })
 }

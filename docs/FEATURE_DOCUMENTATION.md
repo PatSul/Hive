@@ -13,7 +13,7 @@
 2. [hive_app — Application Shell](#2-hive_app--application-shell)
 3. [hive_core — Configuration & Security](#3-hive_core--configuration--security)
 4. [hive_ai — AI Provider Orchestration](#4-hive_ai--ai-provider-orchestration)
-5. [hive_ui — User Interface (24 Panels)](#5-hive_ui--user-interface-24-panels)
+5. [hive_ui — User Interface (27 Panels, 5 Shell Destinations)](#5-hive_ui--user-interface-27-panels-5-shell-destinations)
 6. [hive_agents — Multi-Agent Orchestration](#6-hive_agents--multi-agent-orchestration)
 7. [hive_terminal — Terminal & Execution](#7-hive_terminal--terminal--execution)
 8. [hive_fs — File System Operations](#8-hive_fs--file-system-operations)
@@ -319,53 +319,69 @@ New module for text-to-speech integration (in development).
 
 ---
 
-## 5. hive_ui — User Interface (24 Panels)
+## 5. hive_ui — User Interface (27 Panels, 5 Shell Destinations)
 
 ### Workspace Layout
 
 ```
-+----------------------------------------------+
-| Titlebar (34px) - Brand, version, controls   |
-+--------+-------------------------------------+
-|        |                                     |
-| Sidebar|      Active Panel Content           |
-| (52px) |                                     |
-|        |                                     |
-|        +-------------------------------------+
-|        | Chat Input (Chat panel only)        |
-+--------+-------------------------------------+
-| Status Bar (26px) - Model, cost, privacy     |
-+----------------------------------------------+
++--------------------------------------------------------------+
+| Titlebar - Brand, project switcher, shell actions            |
++----------------+---------------------------------------------+
+| Primary Shell  | Destination-local panel rail + main canvas  |
+| Destinations   | Optional context rail for Build / Observe   |
+| Home / Build / |                                             |
+| Automate /     |                                             |
+| Assist /       |                                             |
+| Observe        |                                             |
++----------------+---------------------------------------------+
+| Chat input (Chat panel) + status bar                         |
++--------------------------------------------------------------+
 ```
 
-### 24 Navigable Panels
+### Shell Destinations
 
-| # | Panel | Icon | Key Features |
-|---|-------|------|--------------|
-| 1 | **Chat** | Bot | Markdown rendering, code blocks with copy, streaming with cyan border, thinking sections (collapsible), model/cost badges per message, **tool approval gate** with diff preview for write_file calls |
-| 2 | **History** | Calendar | Search, conversation cards, relative timestamps, delete, refresh |
-| 3 | **Files** | Folder | Breadcrumb nav, file tree, search, new file/folder, open/delete, **built-in code viewer** (split layout with syntax highlighting, line numbers) |
-| 4 | **Specs** | File | Specification management with List/Detail/Edit modes, spec count badges, new spec creation (~570 lines) |
-| 5 | **Agents** | Bot | Multi-agent management with 6 persona displays (Investigator, Implementer, Verifier, Critic, Debugger, Code Reviewer), orchestration run tracking with progress/cost/elapsed (~700 lines) |
-| 6 | **Workflows** | — | Visual workflow builder with drag-and-drop nodes, multi-step automation |
-| 7 | **Channels** | — | Agent messaging channels (Telegram/Slack-style) |
-| 8 | **Kanban** | LayoutDashboard | Todo/InProgress/Done columns, task cards |
-| 9 | **Monitor** | Loader | Agent activity monitoring with 9 roles (Architect through TaskVerifier), system status tracking (Idle/Running/Paused/Error), run history, color-coded status dots (~881 lines) |
-| 10 | **Logs** | File | Filterable log viewer, auto-scroll, clear |
-| 11 | **Costs** | ChartPie | Today/monthly costs, budget progress bars, per-model breakdown, CSV export |
-| 12 | **Review** | Eye | Git diff viewer, stage/unstage, commit, file-level review with inline comments (~1,424 lines) |
-| 13 | **Skills** | Star | Skill marketplace with tabs (Installed/Directory/Create/AddSource), 8 categories, search filtering, integrity hash validation, ratings, skill authoring (~1,678 lines) |
-| 14 | **Routing** | Map | Model routing rule editor with provider status, tier configuration (~1,320 lines) |
-| 15 | **Models** | — | Model registry browser with provider catalogs |
-| 16 | **Learning** | TrendingUp | Self-improvement dashboard showing quality metrics/trends, learning log, user preferences with confidence scores, prompt suggestions per persona, routing insights, best/worst models (~617 lines) |
-| 17 | **Shield** | EyeOff | Security monitoring with event timeline (severity-colored), PII detection counts, secrets blocked, threats caught, provider access policies with trust levels (~676 lines) |
-| 18 | **Assistant** | Bell | Personal assistant dashboard with daily briefing (greeting, events, emails, reminders), upcoming events with conflict detection, email groups/previews, active reminders with overdue tracking, research progress, action history (~892 lines) |
-| 19 | **Token Launch** | Globe | Multi-step ERC-20/SPL token deployment wizard (~1,039 lines) |
-| 20 | **Network** | — | P2P federation peer browser |
-| 21 | **Terminal** | Dash | **Interactive shell** with real PTY (cmd.exe/bash), streaming stdout/stderr, command echo, kill/restart/clear controls |
-| 22 | **Settings** | Settings | API keys (masked input, status dots), local AI URLs, model routing, budget limits, general toggles, auto-save on blur (~1,145 lines) |
-| 23 | **Help** | Info | Keyboard shortcuts reference, getting started guide, troubleshooting |
-| 24 | **Quick Start** | — | Guided project onboarding with goal-driven AI |
+| Destination | Panels |
+|---|---|
+| Home | Home (`QuickStart`) |
+| Build | Chat, History, Files, Code Map, Prompts, Specs, Agents, Kanban, Git Ops, Terminal |
+| Automate | Workflows, Channels, Network |
+| Assist | Assistant |
+| Observe | Monitor, Activity, Logs, Costs, Learning, Shield |
+| Utility | Skills, Routing, Models, Token Launch, Settings, Help |
+
+### 27 Navigable Panels
+
+Panel ordering below matches `Panel::ALL` in the current shell and therefore the keyboard index mapping used by the app.
+
+| # | Panel | Shell Group | Key Features |
+|---|---|---|---|
+| 1 | **Chat** | Build | Streaming chat, tool approvals, markdown rendering, model/cost badges |
+| 2 | **History** | Build | Conversation history, relative timestamps, refresh, delete |
+| 3 | **Files** | Build | File browser, search, create/delete, built-in code viewer |
+| 4 | **Code Map** | Build | Project symbol browser grouped by file with search |
+| 5 | **Prompts** | Build | Prompt library with saved templates and reuse paths |
+| 6 | **Specs** | Build | Specification management and progress tracking |
+| 7 | **Agents** | Build | Multi-agent orchestration, remote agents, workflow runs |
+| 8 | **Workflows** | Automate | Visual workflow builder and execution |
+| 9 | **Channels** | Automate | Agent messaging channels and agent responses |
+| 10 | **Kanban** | Build | Persistent task board with drag-and-drop |
+| 11 | **Monitor** | Observe | Runtime status, system resources, provider availability |
+| 12 | **Activity** | Observe | Observe inbox for approvals, failures, runtime, spend, safety |
+| 13 | **Logs** | Observe | Filterable application log viewer |
+| 14 | **Costs** | Observe | Cost tracking, budgets, exports |
+| 15 | **Git Ops** | Build | Diff review, commit, push, PRs, branches, gitflow, LFS |
+| 16 | **Skills** | Utility | Skill marketplace, install/remove/toggle/create |
+| 17 | **Routing** | Utility | Model routing configuration and rules |
+| 18 | **Models** | Utility | Model registry browser and provider catalogs |
+| 19 | **Learning** | Observe | Self-improvement metrics, preferences, routing insights |
+| 20 | **Shield** | Observe | Security status, detections, protection settings |
+| 21 | **Assistant** | Assist | Briefing, reminders, approvals, connected assistant data |
+| 22 | **Launch** | Utility | Token launch and chain configuration flow |
+| 23 | **Network** | Automate | P2P federation peer browser |
+| 24 | **Terminal** | Build | Interactive shell with streaming output and controls |
+| 25 | **Settings** | Utility | Configuration, keys, toggles, imports/exports |
+| 26 | **Help** | Utility | Documentation, shortcuts, guides |
+| 27 | **Home (`QuickStart`)** | Home | Command center for resume, blockers, launch paths, and workspace switching |
 
 ### Chat Panel Features
 
