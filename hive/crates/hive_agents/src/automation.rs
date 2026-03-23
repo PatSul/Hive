@@ -199,7 +199,7 @@ fn default_true() -> bool {
 // ---------------------------------------------------------------------------
 
 /// In-memory service for creating, managing, and simulating automation workflows.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AutomationService {
     workflows: Vec<Workflow>,
     run_history: Vec<WorkflowRunResult>,

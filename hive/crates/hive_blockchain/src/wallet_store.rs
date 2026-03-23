@@ -73,7 +73,7 @@ pub struct WalletEntry {
 ///
 /// Wallets are indexed by their UUID. The store can be persisted to and
 /// loaded from a JSON file on disk.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletStore {
     wallets: HashMap<String, WalletEntry>,
 }

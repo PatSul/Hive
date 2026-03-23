@@ -1124,6 +1124,32 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             webhooks: Arc::new(std::sync::Mutex::new(
                 hive_integrations::webhooks::WebhookRegistry::new(),
             )),
+            rag: if cx.has_global::<AppRagService>() {
+                Some(cx.global::<AppRagService>().0.clone())
+            } else {
+                None
+            },
+            automation: if cx.has_global::<AppAutomation>() {
+                Some(Arc::new(std::sync::Mutex::new(
+                    cx.global::<AppAutomation>().0.clone(),
+                )))
+            } else {
+                None
+            },
+            wallet_store: if cx.has_global::<AppWallets>() {
+                Some(Arc::new(std::sync::Mutex::new(
+                    cx.global::<AppWallets>().0.clone(),
+                )))
+            } else {
+                None
+            },
+            rpc_config: if cx.has_global::<AppRpcConfig>() {
+                Some(Arc::new(std::sync::Mutex::new(
+                    cx.global::<AppRpcConfig>().0.clone(),
+                )))
+            } else {
+                None
+            },
         };
         cx.global_mut::<AppMcpServer>()
             .0
@@ -1290,10 +1316,14 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                             .map(|(provider, request)| {
                                 let executor =
                                     hive_a2a::ProviderExecutor::new(provider, request.model);
-                                let handler = hive_a2a::HiveTaskHandler::new(
+                                let mut handler = hive_a2a::HiveTaskHandler::new(
                                     std::sync::Arc::new(executor),
                                     a2a_config.server.defaults.clone(),
                                 );
+                                if cx.has_global::<AppRagService>() {
+                                    handler =
+                                        handler.with_rag(cx.global::<AppRagService>().0.clone());
+                                }
                                 std::sync::Arc::new(handler)
                                     as std::sync::Arc<dyn hive_a2a::TaskHandlerAdapter>
                             })

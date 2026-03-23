@@ -139,6 +139,10 @@ async fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
         webhooks: Arc::new(std::sync::Mutex::new(
             hive_integrations::webhooks::WebhookRegistry::new(),
         )),
+        rag: None,
+        automation: None,
+        wallet_store: None,
+        rpc_config: None,
     };
 
     let mut server = McpServer::new(workspace_root);

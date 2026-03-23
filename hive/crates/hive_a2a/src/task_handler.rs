@@ -110,6 +110,7 @@ pub struct HiveTaskHandler<E: AiExecutor + 'static> {
     executor: Arc<E>,
     defaults: ServerDefaults,
     active_tasks: Arc<Mutex<HashMap<String, ActiveTask>>>,
+    rag: Option<Arc<std::sync::Mutex<hive_ai::rag::RagService>>>,
 }
 
 impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
@@ -119,7 +120,14 @@ impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
             executor,
             defaults,
             active_tasks: Arc::new(Mutex::new(HashMap::new())),
+            rag: None,
         }
+    }
+
+    /// Attach a RAG service for context-aware Queen orchestration.
+    pub fn with_rag(mut self, rag: Arc<std::sync::Mutex<hive_ai::rag::RagService>>) -> Self {
+        self.rag = Some(rag);
+        self
     }
 
     /// Handle an incoming A2A message for the given task ID.
@@ -192,6 +200,7 @@ impl<E: AiExecutor + 'static> HiveTaskHandler<E> {
             &task_text,
             Arc::clone(&self.executor),
             &self.defaults,
+            self.rag.clone(),
         )
         .await;
 
@@ -329,12 +338,13 @@ pub async fn execute_skill<E: AiExecutor + 'static>(
     task_text: &str,
     executor: Arc<E>,
     defaults: &ServerDefaults,
+    rag: Option<Arc<std::sync::Mutex<hive_ai::rag::RagService>>>,
 ) -> Result<Artifact, A2aError> {
     match skill_id {
         SKILL_SINGLE => execute_single(task_text, executor.as_ref()).await,
         SKILL_HIVEMIND => execute_hivemind(task_text, executor, defaults).await,
         SKILL_COORDINATOR => execute_coordinator(task_text, executor, defaults).await,
-        SKILL_QUEEN => execute_queen(task_text, executor, defaults).await,
+        SKILL_QUEEN => execute_queen(task_text, executor, defaults, rag).await,
         other => Err(A2aError::UnsupportedSkill(other.to_string())),
     }
 }
@@ -417,6 +427,7 @@ async fn execute_queen<E: AiExecutor + 'static>(
     task_text: &str,
     executor: Arc<E>,
     defaults: &ServerDefaults,
+    rag: Option<Arc<std::sync::Mutex<hive_ai::rag::RagService>>>,
 ) -> Result<Artifact, A2aError> {
     let config = SwarmConfig {
         total_cost_limit_usd: defaults.max_budget_usd,
@@ -424,7 +435,10 @@ async fn execute_queen<E: AiExecutor + 'static>(
         ..SwarmConfig::default()
     };
 
-    let queen = Queen::new(config, executor);
+    let mut queen = Queen::new(config, executor);
+    if let Some(rag) = rag {
+        queen = queen.with_rag(rag);
+    }
     let result = queen.execute(task_text).await.map_err(A2aError::Provider)?;
 
     Ok(bridge::swarm_result_to_artifact(&result))
@@ -519,7 +533,7 @@ mod tests {
     async fn test_execute_single_skill() {
         let executor = Arc::new(MockExecutor);
         let defaults = ServerDefaults::default();
-        let artifact = execute_skill("single", "Hello world", executor, &defaults).await;
+        let artifact = execute_skill("single", "Hello world", executor, &defaults, None).await;
         assert!(artifact.is_ok());
         let artifact = artifact.unwrap();
         assert!(artifact.artifact_id.starts_with("single-"));
@@ -534,7 +548,7 @@ mod tests {
     async fn test_execute_unsupported_skill() {
         let executor = Arc::new(MockExecutor);
         let defaults = ServerDefaults::default();
-        let result = execute_skill("nonexistent", "test", executor, &defaults).await;
+        let result = execute_skill("nonexistent", "test", executor, &defaults, None).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             A2aError::UnsupportedSkill(name) => assert_eq!(name, "nonexistent"),

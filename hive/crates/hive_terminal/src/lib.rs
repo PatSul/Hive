@@ -15,4 +15,5 @@ pub use docker::{
 };
 pub use executor::{CommandExecutor, CommandOutput};
 pub use sandbox::{AgentSandbox, SandboxConfig, SharedSandbox, shared_sandbox};
+pub use local_ai::{LocalAiDetector, LocalProviderInfo, OllamaManager, OllamaModelInfo, PullProgress};
 pub use shell::{InteractiveShell, ShellOutput};

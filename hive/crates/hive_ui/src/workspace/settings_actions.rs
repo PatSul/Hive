@@ -4,12 +4,12 @@ use gpui::*;
 use tracing::{error, info, warn};
 
 use super::{
-    AppA2aClient, AppAiService, AppAws, AppAzure, AppBitbucket, AppBrowser, AppConfig,
-    AppContextEngine, AppDocker, AppDocsIndexer, AppGcp, AppGitLab, AppHueClient,
+    AppA2aClient, AppAiService, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
+    AppConfig, AppContextEngine, AppDocker, AppDocsIndexer, AppGcp, AppGitLab, AppHueClient,
     AppIntegrationDb, AppKnowledge, AppKubernetes, AppMcpServer, AppMessaging,
-    AppOllamaManager, AppProjectManagement, AppTheme, AppTts, project_context,
-    ContextFormatChanged, ExportConfig, HiveConfig, HiveWorkspace, ImportConfig,
-    NotificationType, SettingsSave, SettingsView, ThemeChanged,
+    AppOllamaManager, AppProjectManagement, AppRagService, AppRpcConfig, AppTheme, AppTts,
+    AppWallets, project_context, ContextFormatChanged, ExportConfig, HiveConfig, HiveWorkspace,
+    ImportConfig, NotificationType, SettingsSave, SettingsView, ThemeChanged,
 };
 
 pub(super) fn handle_settings_save(
@@ -648,6 +648,32 @@ fn rewire_mcp_integrations(workspace: &mut HiveWorkspace, cx: &mut Context<HiveW
         webhooks: Arc::new(std::sync::Mutex::new(
             hive_integrations::webhooks::WebhookRegistry::new(),
         )),
+        rag: if cx.has_global::<AppRagService>() {
+            Some(cx.global::<AppRagService>().0.clone())
+        } else {
+            None
+        },
+        automation: if cx.has_global::<AppAutomation>() {
+            Some(Arc::new(std::sync::Mutex::new(
+                cx.global::<AppAutomation>().0.clone(),
+            )))
+        } else {
+            None
+        },
+        wallet_store: if cx.has_global::<AppWallets>() {
+            Some(Arc::new(std::sync::Mutex::new(
+                cx.global::<AppWallets>().0.clone(),
+            )))
+        } else {
+            None
+        },
+        rpc_config: if cx.has_global::<AppRpcConfig>() {
+            Some(Arc::new(std::sync::Mutex::new(
+                cx.global::<AppRpcConfig>().0.clone(),
+            )))
+        } else {
+            None
+        },
     };
     cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
 

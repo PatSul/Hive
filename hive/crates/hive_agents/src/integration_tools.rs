@@ -406,6 +406,37 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
             webhook_fire_tool(),
             stub("Webhook registry available — fire events to subscribed webhooks"),
         ),
+        // --- RAG / Knowledge Search ---
+        (
+            search_rag_tool(),
+            stub("RAG index not initialized — index documents first"),
+        ),
+        // --- Wallet Management ---
+        (
+            wallet_create_tool(),
+            stub("Configure a wallet in Settings to manage wallets"),
+        ),
+        (
+            wallet_list_tool(),
+            stub("Configure a wallet in Settings to list wallets"),
+        ),
+        (
+            wallet_balance_tool(),
+            stub("Configure a wallet in Settings to check wallet balance"),
+        ),
+        // --- Workflow Management ---
+        (
+            list_workflows_tool(),
+            stub("Workflow engine not initialized"),
+        ),
+        (
+            describe_workflow_tool(),
+            stub("Workflow engine not initialized"),
+        ),
+        (
+            run_workflow_tool(),
+            stub("Workflow engine not initialized"),
+        ),
         // --- Local Search (SearXNG) ---
         (
             local_search_tool(),
@@ -2370,6 +2401,274 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         }) as ToolHandler,
     ));
 
+    // --- RAG / Knowledge Search ---
+    if let Some(ref rag) = services.rag {
+        let rag_svc = Arc::clone(rag);
+        tools.push((
+            search_rag_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let query = args["query"]
+                    .as_str()
+                    .ok_or("query is required")?
+                    .to_string();
+                let max_results = args["max_results"].as_u64().unwrap_or(10) as usize;
+                let min_similarity = args["min_similarity"]
+                    .as_f64()
+                    .unwrap_or(0.1) as f32;
+
+                let guard = rag_svc
+                    .lock()
+                    .map_err(|e| format!("RAG lock poisoned: {e}"))?;
+                let rag_query = hive_ai::rag::RagQuery {
+                    query,
+                    max_results,
+                    min_similarity,
+                };
+                match guard.query(&rag_query) {
+                    Ok(result) => {
+                        let stats = guard.stats();
+                        let chunks: Vec<serde_json::Value> = result
+                            .chunks
+                            .iter()
+                            .map(|c| {
+                                json!({
+                                    "file_path": c.chunk.source_file,
+                                    "content": c.chunk.content,
+                                    "score": c.score
+                                })
+                            })
+                            .collect();
+                        Ok(json!({
+                            "results": chunks,
+                            "total_indexed": stats.total_chunks,
+                            "context": result.context
+                        }))
+                    }
+                    Err(e) => Err(format!("RAG query failed: {e}")),
+                }
+            }) as ToolHandler,
+        ));
+    }
+
+    // --- Wallet Management ---
+    if let Some(ref ws) = services.wallet_store {
+        let ws_create = Arc::clone(ws);
+        tools.push((
+            wallet_create_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let name = args["name"]
+                    .as_str()
+                    .ok_or("name is required")?
+                    .to_string();
+                let chain_str = args["chain"]
+                    .as_str()
+                    .ok_or("chain is required")?
+                    .to_string();
+                let password = args["password"]
+                    .as_str()
+                    .ok_or("password is required")?
+                    .to_string();
+
+                let chain = match chain_str.as_str() {
+                    "base" => hive_blockchain::Chain::Base,
+                    "solana" => hive_blockchain::Chain::Solana,
+                    _ => hive_blockchain::Chain::Ethereum,
+                };
+                let (key_bytes, address) =
+                    hive_blockchain::generate_wallet_material(chain)
+                        .map_err(|e| format!("Key generation failed: {e}"))?;
+                let encrypted =
+                    hive_blockchain::encrypt_key(&key_bytes, &password)
+                        .map_err(|e| format!("Encryption failed: {e}"))?;
+
+                let mut guard = ws_create
+                    .lock()
+                    .map_err(|e| format!("WalletStore lock poisoned: {e}"))?;
+                let wallet_id =
+                    guard.add_wallet(name.clone(), chain, address.clone(), encrypted);
+
+                // Best-effort persist to disk.
+                if let Ok(base) = hive_core::config::HiveConfig::base_dir() {
+                    let _ = guard.save_to_file(&base.join("wallets.enc"));
+                }
+
+                Ok(json!({
+                    "wallet_id": wallet_id,
+                    "address": address,
+                    "chain": chain_str
+                }))
+            }) as ToolHandler,
+        ));
+
+        let ws_list = Arc::clone(ws);
+        tools.push((
+            wallet_list_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let guard = ws_list
+                    .lock()
+                    .map_err(|e| format!("WalletStore lock poisoned: {e}"))?;
+                let wallets: Vec<serde_json::Value> = guard
+                    .list_wallets()
+                    .iter()
+                    .map(|w| {
+                        json!({
+                            "id": w.id,
+                            "name": w.name,
+                            "chain": w.chain.label(),
+                            "address": w.address
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "wallets": wallets }))
+            }) as ToolHandler,
+        ));
+
+        let ws_balance = Arc::clone(ws);
+        tools.push((
+            wallet_balance_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let wallet_id = args["wallet_id"]
+                    .as_str()
+                    .ok_or("wallet_id is required")?
+                    .to_string();
+                let guard = ws_balance
+                    .lock()
+                    .map_err(|e| format!("WalletStore lock poisoned: {e}"))?;
+                let wallet = guard
+                    .get_wallet(&wallet_id)
+                    .ok_or_else(|| format!("Wallet '{}' not found", wallet_id))?;
+                let address = wallet.address.clone();
+                let chain = wallet.chain;
+                drop(guard); // Release lock before async call.
+
+                let unit = if chain.is_evm() { "ETH" } else { "SOL" };
+                block_on_async(async move {
+                    let balance = if chain.is_evm() {
+                        hive_blockchain::evm::get_balance(&address, chain).await
+                    } else {
+                        hive_blockchain::solana::get_balance(&address).await
+                    };
+                    match balance {
+                        Ok(bal) => Ok(json!({
+                            "address": address,
+                            "chain": chain.label(),
+                            "balance": bal,
+                            "unit": unit
+                        })),
+                        Err(e) => Err(format!("Balance check failed: {e}")),
+                    }
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    // --- Workflow Management ---
+    if let Some(ref auto) = services.automation {
+        let auto_list = Arc::clone(auto);
+        tools.push((
+            list_workflows_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let guard = auto_list
+                    .lock()
+                    .map_err(|e| format!("Automation lock poisoned: {e}"))?;
+                let workflows: Vec<serde_json::Value> = guard
+                    .list_workflows()
+                    .iter()
+                    .map(|w| {
+                        json!({
+                            "id": w.id,
+                            "name": w.name,
+                            "description": w.description,
+                            "status": format!("{:?}", w.status),
+                            "step_count": w.steps.len(),
+                            "run_count": w.run_count
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "workflows": workflows }))
+            }) as ToolHandler,
+        ));
+
+        let auto_describe = Arc::clone(auto);
+        tools.push((
+            describe_workflow_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let workflow_id = args["workflow_id"]
+                    .as_str()
+                    .ok_or("workflow_id is required")?
+                    .to_string();
+                let guard = auto_describe
+                    .lock()
+                    .map_err(|e| format!("Automation lock poisoned: {e}"))?;
+                let workflow = guard
+                    .get_workflow(&workflow_id)
+                    .ok_or_else(|| format!("Workflow '{}' not found", workflow_id))?;
+                let steps: Vec<serde_json::Value> = workflow
+                    .steps
+                    .iter()
+                    .map(|s| {
+                        json!({
+                            "id": s.id,
+                            "name": s.name,
+                            "action_type": format!("{:?}", s.action),
+                            "timeout_secs": s.timeout_secs,
+                            "retry_count": s.retry_count
+                        })
+                    })
+                    .collect();
+                Ok(json!({
+                    "id": workflow.id,
+                    "name": workflow.name,
+                    "description": workflow.description,
+                    "status": format!("{:?}", workflow.status),
+                    "trigger": format!("{:?}", workflow.trigger),
+                    "steps": steps,
+                    "run_count": workflow.run_count,
+                    "last_run": workflow.last_run.map(|t| t.to_rfc3339())
+                }))
+            }) as ToolHandler,
+        ));
+
+        let auto_run = Arc::clone(auto);
+        tools.push((
+            run_workflow_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let workflow_id = args["workflow_id"]
+                    .as_str()
+                    .ok_or("workflow_id is required")?
+                    .to_string();
+                let guard = auto_run
+                    .lock()
+                    .map_err(|e| format!("Automation lock poisoned: {e}"))?;
+                let workflow = guard
+                    .get_workflow(&workflow_id)
+                    .ok_or_else(|| format!("Workflow '{}' not found", workflow_id))?
+                    .clone();
+                drop(guard); // Release lock before blocking execution.
+
+                let working_dir = hive_core::config::HiveConfig::base_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                match crate::AutomationService::execute_workflow_blocking(
+                    &workflow,
+                    working_dir,
+                ) {
+                    Ok(result) => {
+                        let duration_ms =
+                            (result.completed_at - result.started_at).num_milliseconds();
+                        Ok(json!({
+                            "success": result.success,
+                            "steps_completed": result.steps_completed,
+                            "total_steps": workflow.steps.len(),
+                            "error": result.error,
+                            "duration_ms": duration_ms
+                        }))
+                    }
+                    Err(e) => Err(format!("Workflow execution failed: {e}")),
+                }
+            }) as ToolHandler,
+        ));
+    }
+
     // --- Webhooks ---
     {
         let registry = Arc::clone(&services.webhooks);
@@ -2451,6 +2750,10 @@ pub struct IntegrationServices {
     pub bitbucket: Option<Arc<hive_integrations::bitbucket::BitbucketClient>>,
     pub gitlab: Option<Arc<hive_integrations::gitlab::GitLabClient>>,
     pub webhooks: Arc<std::sync::Mutex<hive_integrations::webhooks::WebhookRegistry>>,
+    pub rag: Option<Arc<std::sync::Mutex<hive_ai::rag::RagService>>>,
+    pub automation: Option<Arc<std::sync::Mutex<crate::AutomationService>>>,
+    pub wallet_store: Option<Arc<std::sync::Mutex<hive_blockchain::WalletStore>>>,
+    pub rpc_config: Option<Arc<std::sync::Mutex<hive_blockchain::RpcConfigStore>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -3343,6 +3646,114 @@ fn token_deploy_spl_tool() -> McpTool {
                 "metadata_uri": { "type": "string", "description": "Optional metadata JSON URI" }
             },
             "required": ["name", "symbol", "decimals", "supply"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RAG / Knowledge search tool definitions
+// ---------------------------------------------------------------------------
+
+fn search_rag_tool() -> McpTool {
+    McpTool {
+        name: "search_rag".into(),
+        description: "Search the project knowledge base using semantic and keyword matching via RAG (Retrieval Augmented Generation). Returns relevant document chunks ranked by relevance.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Natural language search query" },
+                "max_results": { "type": "integer", "description": "Maximum results to return (default 10)" },
+                "min_similarity": { "type": "number", "description": "Minimum relevance score 0.0-1.0 (default 0.1)" }
+            },
+            "required": ["query"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wallet management tool definitions
+// ---------------------------------------------------------------------------
+
+fn wallet_create_tool() -> McpTool {
+    McpTool {
+        name: "wallet_create".into(),
+        description: "Create a new blockchain wallet. The private key is encrypted and stored locally.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Human-readable wallet name" },
+                "chain": { "type": "string", "enum": ["ethereum", "base", "solana"], "description": "Target blockchain" },
+                "password": { "type": "string", "description": "Encryption password for the private key" }
+            },
+            "required": ["name", "chain", "password"]
+        }),
+    }
+}
+
+fn wallet_list_tool() -> McpTool {
+    McpTool {
+        name: "wallet_list".into(),
+        description: "List all stored wallets with their addresses. Private keys are never exposed.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn wallet_balance_tool() -> McpTool {
+    McpTool {
+        name: "wallet_balance".into(),
+        description: "Check the native currency balance of a stored wallet.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "wallet_id": { "type": "string", "description": "Wallet ID from wallet_list" }
+            },
+            "required": ["wallet_id"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workflow management tool definitions
+// ---------------------------------------------------------------------------
+
+fn list_workflows_tool() -> McpTool {
+    McpTool {
+        name: "list_workflows".into(),
+        description: "List all available workflows with their status and step count.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
+        }),
+    }
+}
+
+fn describe_workflow_tool() -> McpTool {
+    McpTool {
+        name: "describe_workflow".into(),
+        description: "Get detailed information about a workflow including its steps and trigger configuration.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "workflow_id": { "type": "string", "description": "Workflow ID from list_workflows" }
+            },
+            "required": ["workflow_id"]
+        }),
+    }
+}
+
+fn run_workflow_tool() -> McpTool {
+    McpTool {
+        name: "run_workflow".into(),
+        description: "Execute a workflow by ID. Runs all steps in sequence and returns the result.".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "workflow_id": { "type": "string", "description": "Workflow ID from list_workflows" }
+            },
+            "required": ["workflow_id"]
         }),
     }
 }
@@ -4595,6 +5006,10 @@ mod tests {
             webhooks: Arc::new(std::sync::Mutex::new(
                 hive_integrations::webhooks::WebhookRegistry::new(),
             )),
+            rag: None,
+            automation: None,
+            wallet_store: None,
+            rpc_config: None,
         }
     }
 
