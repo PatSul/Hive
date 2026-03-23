@@ -1,6 +1,8 @@
 //! UI test runner - brings Hive to front, clicks sidebar panels, captures screenshots.
 //! Uses Win32 APIs for window management and enigo for mouse input.
+//! Windows-only — this example relies on Win32 FFI.
 #![allow(unsafe_op_in_unsafe_fn, dead_code)]
+#![cfg(target_os = "windows")]
 
 use enigo::{Button, Coordinate, Direction, Enigo, Mouse, Settings};
 use std::env;

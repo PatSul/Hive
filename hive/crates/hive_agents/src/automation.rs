@@ -1779,7 +1779,7 @@ mod tests {
   "steps": [
     {
       "name": "Call local service",
-      "action": { "type": "call_api", "url": "http://127.0.0.1/api", "method": "POST" }
+      "action": { "type": "call_api", "url": "https://api.github.com/repos/test", "method": "POST" }
     }
   ]
 }"#;
@@ -1806,7 +1806,7 @@ mod tests {
   "steps": [
     {
       "name": "Call with invalid method",
-      "action": { "type": "call_api", "url": "http://example.com/api", "method": "INVALID" }
+      "action": { "type": "call_api", "url": "https://api.github.com/repos/test", "method": "INVALID" }
     }
   ]
 }"#;

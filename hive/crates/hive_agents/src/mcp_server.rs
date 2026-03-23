@@ -813,7 +813,7 @@ mod tests {
         let tools = server.list_tools();
 
         // 9 builtins + integration tools (count may grow as integrations are added)
-        assert_eq!(tools.len(), 88);
+        assert_eq!(tools.len(), 95);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"read_file"));
         assert!(names.contains(&"write_file"));
@@ -846,7 +846,7 @@ mod tests {
         assert!(resp.is_success());
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 88);
+        assert_eq!(tools.len(), 95);
     }
 
     // -- Initialize tests --

@@ -690,6 +690,14 @@ fn classify_task_operation(description: &str) -> OperationType {
         return OperationType::FileDelete(description.to_string());
     }
 
+    // Git push patterns (check before shell to avoid false match on "push" containing "sh ")
+    if lower.contains("git push") || lower.contains("push to remote") {
+        return OperationType::GitPush {
+            remote: "origin".into(),
+            branch: "main".into(),
+        };
+    }
+
     // Shell / exec patterns
     if lower.contains("shell")
         || lower.contains("execute command")
@@ -704,14 +712,6 @@ fn classify_task_operation(description: &str) -> OperationType {
     // Deployment patterns
     if lower.contains("deploy") || lower.contains("release") || lower.contains("publish") {
         return OperationType::ShellCommand(format!("deploy: {description}"));
-    }
-
-    // Git push patterns
-    if lower.contains("git push") || lower.contains("push to remote") {
-        return OperationType::GitPush {
-            remote: "origin".into(),
-            branch: "main".into(),
-        };
     }
 
     // File modification with broad scope
