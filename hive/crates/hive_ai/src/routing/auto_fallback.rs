@@ -35,6 +35,8 @@ pub enum ProviderType {
     Doubao,
     Venice,
     HiveGateway,
+    /// Kilo open-source coding agent (localhost:4096).
+    Kilo,
 }
 
 impl std::fmt::Display for ProviderType {
@@ -55,6 +57,7 @@ impl std::fmt::Display for ProviderType {
             Self::Doubao => "doubao",
             Self::Venice => "venice",
             Self::HiveGateway => "hive_gateway",
+            Self::Kilo => "kilo",
         };
         f.write_str(s)
     }

@@ -5651,6 +5651,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "hive_kilo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "hive_agents",
+ "hive_ai",
+ "hive_core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid 1.20.0",
+]
+
+[[package]]
 name = "hive_learn"
 version = "0.3.32"
 dependencies = [

@@ -21,6 +21,7 @@ members = [
     "crates/hive_cli",
     "crates/hive_admin", "crates/hive_cloud",
     "crates/hive_a2a",
+    "crates/hive_kilo",
 ]
 
 [workspace.package]

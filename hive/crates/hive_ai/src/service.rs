@@ -51,6 +51,11 @@ pub struct AiServiceConfig {
     pub ollama_url: String,
     pub lmstudio_url: String,
     pub local_provider_url: Option<String>,
+    /// URL of a locally-running Kilo daemon.  Defaults to `http://localhost:4096`
+    /// when `None`; set to an empty string to disable Kilo entirely.
+    pub kilo_url: Option<String>,
+    /// Password for Kilo HTTP Basic Auth (`KILO_SERVER_PASSWORD`).
+    pub kilo_password: Option<String>,
     pub privacy_mode: bool,
     pub default_model: String,
     pub auto_routing: bool,
@@ -306,6 +311,26 @@ impl AiService {
             project_models.len()
         );
         self.router.update_fallback_chain(chain);
+    }
+
+    /// Register an externally-constructed provider.
+    ///
+    /// Use this from `hive_app` to plug in providers that live in crates which
+    /// depend on `hive_ai` (e.g. `hive_kilo`), avoiding circular dependencies.
+    ///
+    /// ```ignore
+    /// // hive_app wiring — no circular dep:
+    /// use hive_kilo::provider::KiloAiProvider;
+    /// let kilo = Arc::new(KiloAiProvider::new(config.kilo_url.as_deref(), config.kilo_password.as_deref()));
+    /// ai_service.register_external_provider(ProviderType::Kilo, kilo);
+    /// ```
+    pub fn register_external_provider(
+        &mut self,
+        provider_type: ProviderType,
+        provider: Arc<dyn AiProvider>,
+    ) {
+        info!("{:?} provider registered (external)", provider_type);
+        self.providers.insert(provider_type, provider);
     }
 
     /// List all registered providers.
@@ -645,6 +670,7 @@ fn map_router_provider(rp: crate::routing::ProviderType) -> ProviderType {
         crate::routing::ProviderType::Doubao => ProviderType::Doubao,
         crate::routing::ProviderType::Venice => ProviderType::Venice,
         crate::routing::ProviderType::HiveGateway => ProviderType::HiveGateway,
+        crate::routing::ProviderType::Kilo => ProviderType::Kilo,
     }
 }
 
@@ -665,6 +691,7 @@ fn map_to_router_provider(pt: ProviderType) -> crate::routing::ProviderType {
         ProviderType::Doubao => crate::routing::ProviderType::Doubao,
         ProviderType::Venice => crate::routing::ProviderType::Venice,
         ProviderType::HiveGateway => crate::routing::ProviderType::HiveGateway,
+        ProviderType::Kilo => crate::routing::ProviderType::Kilo,
     }
 }
 
@@ -693,6 +720,8 @@ mod tests {
             ollama_url: "http://localhost:11434".into(),
             lmstudio_url: String::new(),
             local_provider_url: None,
+            kilo_url: None,
+            kilo_password: None,
             privacy_mode: false,
             default_model: "claude-sonnet-4-5".into(),
             auto_routing: true,
