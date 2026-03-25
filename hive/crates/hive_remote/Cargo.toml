@@ -10,6 +10,7 @@ hive_ai = { path = "../hive_ai" }
 hive_agents = { path = "../hive_agents" }
 hive_assistant = { path = "../hive_assistant" }
 hive_fs = { path = "../hive_fs" }
+hive_learn = { path = "../hive_learn" }
 hive_network = { path = "../hive_network" }
 hive_terminal = { path = "../hive_terminal" }
 

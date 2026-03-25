@@ -48,6 +48,10 @@ pub enum DaemonEvent {
     CancelAgentTask {
         run_id: String,
     },
+    ResponseFeedback {
+        message_id: String,
+        positive: bool,
+    },
 
     // Daemon -> Client
     StreamChunk {

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod cortex_bridge_impl;
 mod tray;
 
 use std::borrow::Cow;
@@ -19,17 +20,17 @@ use hive_core::persistence::Database;
 use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
-    AppA2aClient, AppActivityService, AppAgentNotifications, AppAiService, AppApprovalGate,
-    AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser, AppChannels, AppCli,
-    AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppContextEngine, AppCrossChannel,
-    AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning, AppGcp, AppGitLab,
-    AppHeartbeatScheduler,
-    AppHiveMemory, AppHueClient, AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes,
-    AppLearning, AppLocalAiDetection, AppMarketplace, AppMcpServer, AppMessaging, AppNetwork,
-    AppNotifications, AppOllamaManager, AppPersonas, AppPluginManager, AppProjectManagement,
-    AppRagService, AppReminderRx, AppRpcConfig, AppScheduler, AppSecurity, AppSemanticSearch,
-    AppShield, AppSkillManager, AppSkills, AppSpecs, AppStandupService, AppTts, AppUiActionTx,
-    AppUpdater, AppVoiceAssistant, AppWallets,
+    AppA2aClient, AppActivityService, AppAirweave, AppAgentNotifications, AppAiService,
+    AppApprovalGate, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
+    AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppContextEngine,
+    AppCortexEventTx, AppCortexStatus, AppCrossChannel, AppDatabase, AppDocker, AppDocsIndexer,
+    AppFleetLearning, AppGcp, AppGitLab, AppHeartbeatScheduler, AppHiveMemory, AppHueClient,
+    AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning, AppLocalAiDetection,
+    AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager,
+    AppPersonas, AppPluginManager, AppProjectManagement, AppRagService, AppReminderRx,
+    AppRpcConfig, AppScheduler, AppSecurity, AppSemanticSearch, AppShield, AppSkillManager,
+    AppSkills, AppSpecs, AppStandupService, AppTts, AppUiActionTx, AppUpdater, AppVoiceAssistant,
+    AppWallets,
 };
 use hive_ui::workspace::{
     ClearChat, HiveWorkspace, NewConversation, SwitchPanel, SwitchToAgents, SwitchToChannels,
@@ -195,10 +196,42 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     info!("Database opened");
 
     // Learning service
+    //
+    // Create the cortex event bus up-front so every subsystem can publish
+    // events regardless of whether LearningCortex itself initializes
+    // successfully.
+    let (cortex_tx, _cortex_rx) =
+        hive_learn::cortex::event_bus::create_event_bus();
+
+    // Interaction tracker shared with LearningCortex and the remote daemon.
+    // Set inside the Ok arm; defaults to a fresh tracker if learning fails.
+    let mut cortex_interaction_tracker: Option<
+        std::sync::Arc<std::sync::atomic::AtomicI64>,
+    > = None;
+
     match learning_result {
-        Ok(learning) => {
-            let learning = std::sync::Arc::new(learning);
+        Ok(mut learning) => {
             info!("LearningService initialized at {}", learning_db_str);
+
+            // Wire cortex event sender into learning subsystems BEFORE
+            // wrapping in Arc (set_event_tx takes &mut self).
+            learning.set_event_tx(cortex_tx.clone());
+            learning.prompt_evolver.set_event_tx(cortex_tx.clone());
+            learning.self_evaluator.set_event_tx(cortex_tx.clone());
+
+            // Create LearningCortex — shares the same SQLite connection.
+            let cortex = hive_learn::cortex::LearningCortex::new(
+                std::sync::Arc::clone(learning.storage()),
+                cortex_tx.clone(),
+            );
+            if let Err(e) = cortex.startup_recovery() {
+                warn!("Cortex startup recovery failed: {e}");
+            }
+            // Stash the interaction tracker so the remote daemon can use it.
+            cortex_interaction_tracker = Some(cortex.interaction_tracker());
+            info!("LearningCortex initialized, startup recovery complete");
+
+            let learning = std::sync::Arc::new(learning);
 
             // Wire the tier adjuster into the AI router so routing decisions
             // benefit from learned outcome data.
@@ -215,6 +248,14 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             error!("LearningService init failed: {e}");
         }
     }
+
+    // Cortex globals — event bus sender and UI status.
+    cx.set_global(AppCortexEventTx(cortex_tx.clone()));
+    cx.set_global(AppCortexStatus {
+        state: "idle".into(),
+        changes_applied: 0,
+        auto_apply_enabled: config.auto_apply_enabled,
+    });
 
     // Privacy shield — load from persisted config.
     let shield = std::sync::Arc::new(hive_shield::HiveShield::new(config.shield.clone()));
@@ -350,6 +391,8 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         &collective_db_path.to_string_lossy(),
     )
     .unwrap_or_else(|_| hive_agents::collective_memory::CollectiveMemory::in_memory().unwrap());
+    // Wire cortex event bus so memory writes publish events.
+    memory.set_event_tx(cortex_tx.clone());
     cx.set_global(AppCollectiveMemory(std::sync::Arc::new(memory)));
     info!("CollectiveMemory initialized");
 
@@ -1032,6 +1075,33 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         }
     );
 
+    // Airweave context retrieval — needs URL + API key from config.
+    let airweave_client = config
+        .airweave_url
+        .as_deref()
+        .zip(config.airweave_api_key.as_deref())
+        .and_then(|(url, key)| {
+            if url.is_empty() || key.is_empty() {
+                return None;
+            }
+            match hive_integrations::airweave::AirweaveClient::new(url, key) {
+                Ok(c) => Some(std::sync::Arc::new(c)),
+                Err(e) => {
+                    warn!("AirweaveClient init failed: {e}");
+                    None
+                }
+            }
+        });
+    cx.set_global(AppAirweave(airweave_client));
+    info!(
+        "Airweave integration {}",
+        if cx.global::<AppAirweave>().0.is_some() {
+            "initialized"
+        } else {
+            "not configured"
+        }
+    );
+
     // Bitbucket client — needs username + app password from environment.
     if let (Ok(bb_user), Ok(bb_pass)) = (
         std::env::var("BITBUCKET_USERNAME"),
@@ -1106,6 +1176,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             browser: cx.global::<AppBrowser>().0.clone(),
             ollama: cx.global::<AppOllamaManager>().0.clone(),
             hue: cx.global::<AppHueClient>().0.clone(),
+            airweave: cx.global::<AppAirweave>().0.clone(),
             aws: cx.global::<AppAws>().0.clone(),
             azure: cx.global::<AppAzure>().0.clone(),
             gcp: cx.global::<AppGcp>().0.clone(),
@@ -1253,6 +1324,10 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
             None
         };
 
+        // Clone cortex handles for the daemon thread.
+        let daemon_cortex_tx = cortex_tx.clone();
+        let daemon_interaction_tracker = cortex_interaction_tracker.clone();
+
         std::thread::Builder::new()
             .name("hive-remote".into())
             .spawn(move || {
@@ -1272,7 +1347,15 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                         daemon_config,
                         network_handle,
                     ) {
-                        Ok(daemon) => {
+                        Ok(mut daemon) => {
+                            // Wire cortex event bus and interaction tracker
+                            // into the daemon so remote interactions publish
+                            // learning events.
+                            daemon.set_cortex_event_tx(daemon_cortex_tx);
+                            if let Some(tracker) = daemon_interaction_tracker {
+                                daemon.set_interaction_tracker(tracker);
+                            }
+
                             let daemon = std::sync::Arc::new(tokio::sync::RwLock::new(daemon));
                             let router = hive_remote::web_server::build_router(daemon);
                             let addr = format!("0.0.0.0:{}", remote_web_port);

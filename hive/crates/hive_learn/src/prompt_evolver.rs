@@ -1,3 +1,4 @@
+use crate::cortex::event_bus::{CortexEvent, CortexEventSender};
 use crate::storage::LearningStorage;
 use crate::types::*;
 use serde::{Deserialize, Serialize};
@@ -10,11 +11,20 @@ use std::sync::Arc;
 /// require explicit user approval.
 pub struct PromptEvolver {
     storage: Arc<LearningStorage>,
+    event_tx: Option<CortexEventSender>,
 }
 
 impl PromptEvolver {
     pub fn new(storage: Arc<LearningStorage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            event_tx: None,
+        }
+    }
+
+    /// Set the cortex event sender for publishing prompt evolution events.
+    pub fn set_event_tx(&mut self, tx: CortexEventSender) {
+        self.event_tx = Some(tx);
     }
 
     /// Return the active evolved prompt text for a persona, or None if no evolved version exists.
@@ -121,6 +131,15 @@ impl PromptEvolver {
             reversible: true,
             timestamp: chrono::Utc::now().to_rfc3339(),
         })?;
+
+        // Publish PromptVersionCreated event to cortex
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(CortexEvent::PromptVersionCreated {
+                persona: persona.to_string(),
+                version: new_version,
+                avg_quality: 0.0,
+            });
+        }
 
         Ok(new_version)
     }

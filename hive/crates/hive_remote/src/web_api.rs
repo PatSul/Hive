@@ -610,6 +610,22 @@ async fn dispatch_client_event(
                 "snapshot": snapshot,
             }))
         }
+        DaemonEvent::ResponseFeedback {
+            message_id,
+            positive,
+        } => {
+            let mut daemon = daemon.write().await;
+            daemon
+                .handle_event(DaemonEvent::ResponseFeedback {
+                    message_id: message_id.clone(),
+                    positive,
+                })
+                .await;
+            Ok(serde_json::json!({
+                "status": "ok",
+                "message_id": message_id,
+            }))
+        }
         DaemonEvent::Ping => {
             let daemon = daemon.read().await;
             daemon.broadcast_event(DaemonEvent::Pong);

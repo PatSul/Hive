@@ -161,6 +161,8 @@ pub struct HiveDaemon {
     approval_gate: Arc<ApprovalGate>,
     ai_service: Arc<Mutex<AiService>>,
     event_tx: broadcast::Sender<DaemonEvent>,
+    cortex_event_tx: Option<hive_learn::cortex::event_bus::CortexEventSender>,
+    interaction_tracker: Option<std::sync::Arc<std::sync::atomic::AtomicI64>>,
 }
 
 impl HiveDaemon {
@@ -243,6 +245,8 @@ impl HiveDaemon {
                 &current_model,
             )))),
             event_tx,
+            cortex_event_tx: None,
+            interaction_tracker: None,
         };
 
         daemon.replay_journal()?;
@@ -271,6 +275,14 @@ impl HiveDaemon {
 
     pub fn broadcast_event(&self, event: DaemonEvent) {
         let _ = self.event_tx.send(event);
+    }
+
+    pub fn set_cortex_event_tx(&mut self, tx: hive_learn::cortex::event_bus::CortexEventSender) {
+        self.cortex_event_tx = Some(tx);
+    }
+
+    pub fn set_interaction_tracker(&mut self, tracker: std::sync::Arc<std::sync::atomic::AtomicI64>) {
+        self.interaction_tracker = Some(tracker);
     }
 
     pub fn config(&self) -> &DaemonConfig {
@@ -1036,6 +1048,33 @@ impl HiveDaemon {
             _ => {}
         }
 
+        // Publish learning cortex events for agent completion/failure
+        if let Some(ref tx) = self.cortex_event_tx {
+            match status {
+                "completed" => {
+                    let _ = tx.send(
+                        hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
+                            interaction_id: run_id.to_string(),
+                            model: String::new(),
+                            quality_score: 0.8,
+                            outcome: "accepted".to_string(),
+                        },
+                    );
+                }
+                "failed" => {
+                    let _ = tx.send(
+                        hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
+                            interaction_id: run_id.to_string(),
+                            model: String::new(),
+                            quality_score: 0.3,
+                            outcome: "corrected".to_string(),
+                        },
+                    );
+                }
+                _ => {}
+            }
+        }
+
         let _ = self.event_tx.send(DaemonEvent::AgentStatus {
             run_id: run_id.to_string(),
             status: status.to_string(),
@@ -1072,6 +1111,17 @@ impl HiveDaemon {
                 cost_usd: cost,
             });
         }
+
+        // Publish learning cortex event for remote chat completions
+        if let Some(ref tx) = self.cortex_event_tx {
+            let _ = tx.send(hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
+                interaction_id: conversation_id.to_string(),
+                model: model.to_string(),
+                quality_score: 0.5, // Default unknown quality for remote
+                outcome: "unknown".to_string(),
+            });
+        }
+
         self.broadcast_state_and_panels();
         Ok(())
     }
@@ -1168,6 +1218,14 @@ impl HiveDaemon {
     }
 
     pub async fn handle_event(&mut self, event: DaemonEvent) {
+        // Mark interaction activity for the learning cortex
+        if let Some(ref tracker) = self.interaction_tracker {
+            tracker.store(
+                chrono::Utc::now().timestamp(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+
         self.append_journal(&event);
         match event {
             DaemonEvent::SwitchPanel { panel } => self.switch_panel(&panel),
@@ -1179,6 +1237,23 @@ impl HiveDaemon {
                 let _ = self.resume_conversation(&conversation_id);
             }
             DaemonEvent::CancelAgentTask { run_id } => self.cancel_agent_task(&run_id),
+            DaemonEvent::ResponseFeedback {
+                message_id,
+                positive,
+            } => {
+                if let Some(ref tx) = self.cortex_event_tx {
+                    let quality = if positive { 0.9 } else { 0.3 };
+                    let outcome = if positive { "accepted" } else { "corrected" };
+                    let _ = tx.send(
+                        hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
+                            interaction_id: message_id,
+                            model: String::new(),
+                            quality_score: quality,
+                            outcome: outcome.to_string(),
+                        },
+                    );
+                }
+            }
             DaemonEvent::Ping => {
                 let _ = self.event_tx.send(DaemonEvent::Pong);
             }

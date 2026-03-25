@@ -2,6 +2,13 @@
 //!
 //! Displays performance metrics, learning log, preferences, prompt suggestions,
 //! pattern library, routing insights, and self-evaluation reports.
+//!
+//! TODO: Add a "Cortex" tab that shows:
+//!   - Current cortex state (idle/processing/applied) from `AppCortexStatus`
+//!   - Auto-apply toggle connected to `config.auto_apply_enabled`
+//!   - List of soaking/applied/rolled-back changes from `LearningCortex`
+//!   - Real-time event feed from the cortex event bus (T038)
+//!   - Toast notifications on auto-apply events (T039)
 
 use gpui::*;
 use gpui_component::{Icon, IconName};

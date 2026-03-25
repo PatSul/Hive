@@ -1,3 +1,4 @@
+use crate::cortex::event_bus::{CortexEvent, CortexEventSender};
 use crate::storage::LearningStorage;
 use crate::types::*;
 use std::sync::Arc;
@@ -8,11 +9,20 @@ use std::sync::Arc;
 /// routing accuracy, cost efficiency, and identifies weak areas for improvement.
 pub struct SelfEvaluator {
     storage: Arc<LearningStorage>,
+    event_tx: Option<CortexEventSender>,
 }
 
 impl SelfEvaluator {
     pub fn new(storage: Arc<LearningStorage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            event_tx: None,
+        }
+    }
+
+    /// Set the cortex event sender for publishing self-evaluation events.
+    pub fn set_event_tx(&mut self, tx: CortexEventSender) {
+        self.event_tx = Some(tx);
     }
 
     /// Run a full self-evaluation and return a report.
@@ -134,6 +144,15 @@ impl SelfEvaluator {
             reversible: false,
             timestamp: chrono::Utc::now().to_rfc3339(),
         })?;
+
+        // Publish SelfEvalCompleted event to cortex
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(CortexEvent::SelfEvalCompleted {
+                overall_quality: report.overall_quality,
+                trend: serde_json::to_string(&report.trend).unwrap_or_default(),
+                weak_areas: report.weak_areas.clone(),
+            });
+        }
 
         Ok(report)
     }

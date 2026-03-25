@@ -1,4 +1,5 @@
 pub mod autoresearch;
+pub mod cortex;
 pub mod learning_bridge;
 pub mod outcome_tracker;
 pub mod pattern_library;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::info;
 
+use crate::cortex::event_bus::{CortexEvent, CortexEventSender};
 use outcome_tracker::OutcomeTracker;
 use pattern_library::PatternLibrary;
 use preference_model::PreferenceModel;
@@ -39,6 +41,7 @@ pub struct LearningService {
     pub pattern_library: PatternLibrary,
     pub self_evaluator: SelfEvaluator,
     interaction_count: AtomicU64,
+    event_tx: Option<CortexEventSender>,
 }
 
 impl LearningService {
@@ -64,7 +67,21 @@ impl LearningService {
             self_evaluator: SelfEvaluator::new(Arc::clone(&storage)),
             storage,
             interaction_count: AtomicU64::new(0),
+            event_tx: None,
         }
+    }
+
+    /// Set the cortex event sender for publishing learning events.
+    pub fn set_event_tx(&mut self, tx: CortexEventSender) {
+        self.event_tx = Some(tx);
+    }
+
+    /// Returns a shared reference to the underlying storage.
+    ///
+    /// Used by `LearningCortex` in `hive_app` so both share the same
+    /// SQLite connection (cortex tables live in the same database).
+    pub fn storage(&self) -> &Arc<LearningStorage> {
+        &self.storage
     }
 
     /// Called when an outcome is determined for an AI response.
@@ -78,6 +95,16 @@ impl LearningService {
     pub fn on_outcome(&self, record: &OutcomeRecord) -> Result<(), String> {
         // 1. Record outcome
         self.outcome_tracker.record(record)?;
+
+        // Publish OutcomeRecorded event to cortex
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(CortexEvent::OutcomeRecorded {
+                interaction_id: record.message_id.clone(),
+                model: record.model_id.clone(),
+                quality_score: record.quality_score,
+                outcome: serde_json::to_string(&record.outcome).unwrap_or_default(),
+            });
+        }
 
         // 2. Record routing history
         self.storage.record_routing(&RoutingHistoryEntry {

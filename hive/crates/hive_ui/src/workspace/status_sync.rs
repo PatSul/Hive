@@ -28,6 +28,10 @@ pub(super) fn sync_status_bar(
 
     workspace.status_bar.active_project = project_context::project_label(workspace);
 
+    // TODO: Add cortex status indicator here — read AppCortexStatus global
+    // and render a small icon/label in the status bar showing the cortex
+    // state (idle/processing/applied) and auto-apply toggle. (T037)
+
     workspace.status_bar.current_model = if model.is_empty() {
         "Select Model".to_string()
     } else {

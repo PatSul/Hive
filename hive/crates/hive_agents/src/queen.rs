@@ -67,6 +67,11 @@ pub struct Queen<E: AiExecutor> {
     notifications: Option<Arc<NotificationService>>,
     /// Optional approval gate for high-risk task gating (propagated to Coordinator).
     approval: Option<Arc<ApprovalGate>>,
+    /// Optional cortex event sender for publishing learning events.
+    event_tx: Option<hive_learn::cortex::event_bus::CortexEventSender>,
+    /// Optional tiered memory for cross-layer context retrieval.
+    #[cfg(feature = "memory-tiering")]
+    tiered: Option<Arc<tokio::sync::Mutex<crate::memory::TieredMemory>>>,
     /// Accumulated cost stored as the bit-pattern of an f64 so we can use
     /// atomic operations without a mutex.
     accumulated_cost: AtomicU64,
@@ -85,6 +90,9 @@ impl<E: AiExecutor + 'static> Queen<E> {
             budget: None,
             notifications: None,
             approval: None,
+            event_tx: None,
+            #[cfg(feature = "memory-tiering")]
+            tiered: None,
             accumulated_cost: AtomicU64::new(0f64.to_bits()),
         }
     }
@@ -128,6 +136,21 @@ impl<E: AiExecutor + 'static> Queen<E> {
     /// Attach an approval gate for high-risk task gating in Coordinator teams.
     pub fn with_approval(mut self, approval: Arc<ApprovalGate>) -> Self {
         self.approval = Some(approval);
+        self
+    }
+
+    /// Set the cortex event sender for publishing learning events.
+    pub fn set_event_tx(&mut self, tx: hive_learn::cortex::event_bus::CortexEventSender) {
+        self.event_tx = Some(tx);
+    }
+
+    /// Attach a tiered memory system for cross-layer context retrieval.
+    #[cfg(feature = "memory-tiering")]
+    pub fn with_tiered(
+        mut self,
+        tiered: Arc<tokio::sync::Mutex<crate::memory::TieredMemory>>,
+    ) -> Self {
+        self.tiered = Some(tiered);
         self
     }
 
@@ -223,6 +246,43 @@ impl<E: AiExecutor + 'static> Queen<E> {
     /// Searches per-term (not the full phrase) so that partial matches work
     /// against the SQLite LIKE operator.
     fn gather_memory_context(&self, goal: &str) -> String {
+        // Try tiered memory first (feature-gated).
+        #[cfg(feature = "memory-tiering")]
+        {
+            if let Some(ref tiered) = self.tiered {
+                if let Ok(tiered_lock) = tiered.try_lock() {
+                    let query = crate::memory::MemoryQuery {
+                        text: goal.to_string(),
+                        max_results: 10,
+                        layers: vec![
+                            crate::memory::TargetLayer::Hot,
+                            crate::memory::TargetLayer::Cold,
+                        ],
+                        recency_bias: 0.3,
+                    };
+                    // Use tokio's block_in_place since gather_memory_context is sync
+                    let rt = tokio::runtime::Handle::try_current();
+                    if let Ok(handle) = rt {
+                        if let Ok(result) = handle.block_on(tiered_lock.query(&query)) {
+                            if !result.entries.is_empty() {
+                                let mut parts = Vec::new();
+                                for entry in &result.entries {
+                                    parts.push(format!(
+                                        "- [{}] {}",
+                                        entry.source_layer, entry.content
+                                    ));
+                                }
+                                return format!(
+                                    "Relevant context:\n{}",
+                                    parts.join("\n")
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let memory = match &self.memory {
             Some(m) => m,
             None => return String::new(),
@@ -326,6 +386,17 @@ impl<E: AiExecutor + 'static> Queen<E> {
         let total_duration_ms = overall_start.elapsed().as_millis() as u64;
 
         self.emit_status(status, "Swarm execution finished");
+
+        // Publish SwarmCompleted cortex event.
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(hive_learn::cortex::event_bus::CortexEvent::SwarmCompleted {
+                goal_id: run_id.clone(),
+                success: failed == 0,
+                agent_count: plan.teams.len(),
+                duration_ms: total_duration_ms,
+                patterns_recorded: learnings_recorded as u32,
+            });
+        }
 
         // Push a summary notification for the overall swarm result.
         match status {

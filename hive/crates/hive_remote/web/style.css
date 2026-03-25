@@ -564,6 +564,27 @@ input[type="password"]:focus {
     margin-top: 10px;
 }
 
+.feedback-buttons {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 4px;
+}
+
+.feedback-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    line-height: 1;
+    transition: border-color 0.15s;
+}
+
+.feedback-btn:hover {
+    border-color: var(--accent);
+}
+
 .tone-warning,
 .severity-high {
     border-color: rgba(255, 207, 111, 0.4);

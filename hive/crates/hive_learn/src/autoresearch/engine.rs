@@ -5,6 +5,7 @@ use crate::autoresearch::executor::AutoResearchExecutor;
 use crate::autoresearch::mutator::PromptMutator;
 use crate::autoresearch::security::scan_prompt_for_injection;
 use crate::autoresearch::types::*;
+use crate::cortex::event_bus::{CortexEvent, CortexEventSender};
 use crate::prompt_evolver::PromptEvolver;
 use crate::storage::LearningStorage;
 use crate::types::LearningLogEntry;
@@ -19,6 +20,7 @@ pub struct AutoResearchEngine<E> {
     config: AutoResearchConfig,
     storage: Arc<LearningStorage>,
     executor: E,
+    event_tx: Option<CortexEventSender>,
 }
 
 impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
@@ -27,7 +29,13 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
             config,
             storage,
             executor,
+            event_tx: None,
         }
+    }
+
+    /// Set the cortex event sender for publishing autoresearch events.
+    pub fn set_event_tx(&mut self, tx: CortexEventSender) {
+        self.event_tx = Some(tx);
     }
 
     /// Run the full autoresearch loop for a skill.
@@ -117,6 +125,15 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
             baseline = baseline_pass_rate,
             "AutoResearch baseline established"
         );
+
+        // Publish baseline SkillEvalCompleted event
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(CortexEvent::SkillEvalCompleted {
+                skill_id: skill_name.to_string(),
+                pass_rate: baseline_pass_rate,
+                iteration: 0,
+            });
+        }
 
         // Perfect score early stop
         if self.config.perfect_score_early_stop && (baseline_pass_rate - 1.0).abs() < f64::EPSILON {
@@ -279,6 +296,15 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
             let is_new_best = improvement >= self.config.min_improvement_threshold
                 && candidate_pass_rate >= self.config.min_pass_rate_to_replace;
 
+            // Publish SkillEvalCompleted event for this iteration
+            if let Some(ref tx) = self.event_tx {
+                let _ = tx.send(CortexEvent::SkillEvalCompleted {
+                    skill_id: skill_name.to_string(),
+                    pass_rate: candidate_pass_rate,
+                    iteration,
+                });
+            }
+
             debug!(
                 iteration,
                 candidate = candidate_pass_rate,
@@ -289,6 +315,7 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
             );
 
             // 3d: Compare
+            let old_best_pass_rate = best_pass_rate;
             if is_new_best {
                 match evolver.apply_refinement(&persona, &mutated_prompt) {
                     Ok(version) => {
@@ -310,6 +337,16 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
                 }
             } else {
                 plateau_counter += 1;
+            }
+
+            // Publish PromptMutated event (whether promoted or not)
+            if let Some(ref tx) = self.event_tx {
+                let _ = tx.send(CortexEvent::PromptMutated {
+                    skill_id: skill_name.to_string(),
+                    old_pass_rate: old_best_pass_rate,
+                    new_pass_rate: candidate_pass_rate,
+                    promoted: is_new_best,
+                });
             }
 
             last_eval_result = candidate_result.clone();

@@ -50,6 +50,7 @@ use hive_integrations::kubernetes::KubernetesClient;
 use hive_integrations::messaging::CrossChannelService;
 use hive_integrations::messaging::MessagingHub;
 use hive_integrations::project_management::ProjectManagementHub;
+use hive_integrations::airweave::AirweaveClient;
 use hive_integrations::smart_home::PhilipsHueClient;
 use hive_learn::LearningService;
 use hive_network::HiveNodeHandle;
@@ -209,6 +210,10 @@ impl Global for AppOllamaManager {}
 pub struct AppHueClient(pub Option<Arc<PhilipsHueClient>>);
 impl Global for AppHueClient {}
 
+/// Global wrapper for Airweave context retrieval integration.
+pub struct AppAirweave(pub Option<Arc<AirweaveClient>>);
+impl Global for AppAirweave {}
+
 /// Global wrapper for Bitbucket integration.
 pub struct AppBitbucket(pub Arc<BitbucketClient>);
 impl Global for AppBitbucket {}
@@ -362,3 +367,31 @@ impl Global for AppApprovalGate {}
 /// Uses `Arc<Mutex<_>>` so the background thread can write results directly.
 pub struct AppLocalAiDetection(pub Arc<Mutex<Vec<hive_terminal::local_ai::LocalProviderInfo>>>);
 impl Global for AppLocalAiDetection {}
+
+// ---------------------------------------------------------------------------
+// Learning Cortex
+// ---------------------------------------------------------------------------
+
+/// Cortex self-improvement status for UI display.
+///
+/// Read by the status bar and learning panel to show current cortex state
+/// (idle, processing, applied) along with applied-change counts and the
+/// auto-apply toggle.
+#[derive(Debug, Clone, Default)]
+pub struct AppCortexStatus {
+    /// Current cortex state: "idle", "processing", or "applied".
+    pub state: String,
+    /// Number of self-improvement changes applied in the current session.
+    pub changes_applied: u32,
+    /// Whether the cortex auto-applies improvements without user confirmation.
+    pub auto_apply_enabled: bool,
+}
+impl Global for AppCortexStatus {}
+
+/// Global wrapper for the cortex event bus sender.
+///
+/// Stored so any subsystem that creates ad-hoc objects (e.g. `Queen` in
+/// chat_actions) can wire the cortex event sender without passing it through
+/// every call site.
+pub struct AppCortexEventTx(pub hive_learn::cortex::event_bus::CortexEventSender);
+impl Global for AppCortexEventTx {}

@@ -67,6 +67,8 @@ pub struct MemoryEntry {
     pub created_at: String,
     pub last_accessed: String,
     pub access_count: u64,
+    pub source_session_id: Option<String>,
+    pub is_consolidated: bool,
 }
 
 impl MemoryEntry {
@@ -84,6 +86,8 @@ impl MemoryEntry {
             created_at: now.clone(),
             last_accessed: now,
             access_count: 0,
+            source_session_id: None,
+            is_consolidated: false,
         }
     }
 }
@@ -120,6 +124,8 @@ pub struct MaintenanceReport {
 
 pub struct CollectiveMemory {
     conn: Mutex<Connection>,
+    /// Optional cortex event sender for publishing memory events.
+    event_tx: std::sync::RwLock<Option<hive_learn::cortex::event_bus::CortexEventSender>>,
 }
 
 impl CollectiveMemory {
@@ -129,6 +135,7 @@ impl CollectiveMemory {
         Self::init_tables(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            event_tx: std::sync::RwLock::new(None),
         })
     }
 
@@ -139,7 +146,15 @@ impl CollectiveMemory {
         Self::init_tables(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            event_tx: std::sync::RwLock::new(None),
         })
+    }
+
+    /// Set the cortex event sender for publishing memory events.
+    pub fn set_event_tx(&self, tx: hive_learn::cortex::event_bus::CortexEventSender) {
+        if let Ok(mut guard) = self.event_tx.write() {
+            *guard = Some(tx);
+        }
     }
 
     // -- private -------------------------------------------------------------
@@ -165,7 +180,48 @@ impl CollectiveMemory {
             CREATE INDEX IF NOT EXISTS idx_memories_relevance
                 ON memories(relevance_score DESC);",
         )
-        .map_err(|e| format!("Failed to initialise tables: {e}"))
+        .map_err(|e| format!("Failed to initialise tables: {e}"))?;
+
+        Self::migrate_v2(conn)
+    }
+
+    /// Add `source_session_id` and `is_consolidated` columns if they don't
+    /// already exist.  Safe to call multiple times (idempotent).
+    fn migrate_v2(conn: &Connection) -> Result<(), String> {
+        // Check which columns already exist via PRAGMA table_info.
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(memories)")
+            .map_err(|e| format!("PRAGMA error: {e}"))?;
+
+        let columns: Vec<String> = stmt
+            .query_map([], |row| {
+                let name: String = row.get(1)?;
+                Ok(name)
+            })
+            .map_err(|e| format!("PRAGMA query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !columns.iter().any(|c| c == "source_session_id") {
+            conn.execute_batch(
+                "ALTER TABLE memories ADD COLUMN source_session_id TEXT;",
+            )
+            .map_err(|e| format!("Migration error (source_session_id): {e}"))?;
+        }
+
+        if !columns.iter().any(|c| c == "is_consolidated") {
+            conn.execute_batch(
+                "ALTER TABLE memories ADD COLUMN is_consolidated INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(|e| format!("Migration error (is_consolidated): {e}"))?;
+        }
+
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(source_session_id);",
+        )
+        .map_err(|e| format!("Migration error (session index): {e}"))?;
+
+        Ok(())
     }
 
     /// Parse a row from the memories table into a `MemoryEntry`.
@@ -186,6 +242,9 @@ impl CollectiveMemory {
             Vec::new()
         });
 
+        let source_session_id: Option<String> = row.get(10).unwrap_or(None);
+        let is_consolidated: bool = row.get::<_, i32>(11).map(|v| v != 0).unwrap_or(false);
+
         Ok(MemoryEntry {
             id,
             category: MemoryCategory::parse_str(&cat_str),
@@ -197,6 +256,8 @@ impl CollectiveMemory {
             created_at,
             last_accessed,
             access_count: access_count as u64,
+            source_session_id,
+            is_consolidated,
         })
     }
 
@@ -211,8 +272,9 @@ impl CollectiveMemory {
 
         conn.execute(
             "INSERT INTO memories (category, content, tags, source_run_id, source_team_id,
-                                   relevance_score, created_at, last_accessed, access_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                   relevance_score, created_at, last_accessed, access_count,
+                                   source_session_id, is_consolidated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 entry.category.as_str(),
                 entry.content,
@@ -223,11 +285,35 @@ impl CollectiveMemory {
                 now,
                 now,
                 entry.access_count as i64,
+                entry.source_session_id,
+                entry.is_consolidated as i32,
             ],
         )
         .map_err(|e| format!("Insert error: {e}"))?;
 
-        Ok(conn.last_insert_rowid())
+        let row_id = conn.last_insert_rowid();
+
+        // Publish CollectiveMemoryEntry cortex event.
+        if let Ok(guard) = self.event_tx.read() {
+            if let Some(ref tx) = *guard {
+                let cortex_category = match entry.category {
+                    MemoryCategory::SuccessPattern => hive_learn::cortex::types::CortexMemoryCategory::SuccessPattern,
+                    MemoryCategory::FailurePattern => hive_learn::cortex::types::CortexMemoryCategory::FailurePattern,
+                    MemoryCategory::ModelInsight => hive_learn::cortex::types::CortexMemoryCategory::ModelInsight,
+                    MemoryCategory::ConflictResolution => hive_learn::cortex::types::CortexMemoryCategory::ConflictResolution,
+                    MemoryCategory::CodePattern => hive_learn::cortex::types::CortexMemoryCategory::CodePattern,
+                    MemoryCategory::UserPreference => hive_learn::cortex::types::CortexMemoryCategory::UserPreference,
+                    MemoryCategory::General => hive_learn::cortex::types::CortexMemoryCategory::General,
+                };
+                let _ = tx.send(hive_learn::cortex::event_bus::CortexEvent::CollectiveMemoryEntry {
+                    category: cortex_category,
+                    content: entry.content.clone(),
+                    relevance_score: entry.relevance_score,
+                });
+            }
+        }
+
+        Ok(row_id)
     }
 
     /// Query memories.
@@ -247,7 +333,8 @@ impl CollectiveMemory {
 
         let mut sql = String::from(
             "SELECT id, category, content, tags, source_run_id, source_team_id,
-                    relevance_score, created_at, last_accessed, access_count
+                    relevance_score, created_at, last_accessed, access_count,
+                    source_session_id, is_consolidated
              FROM memories
              WHERE content LIKE ?1",
         );
@@ -426,7 +513,8 @@ impl CollectiveMemory {
         let mut stmt = conn
             .prepare(
                 "SELECT id, category, content, tags, source_run_id, source_team_id,
-                        relevance_score, created_at, last_accessed, access_count
+                        relevance_score, created_at, last_accessed, access_count,
+                        source_session_id, is_consolidated
                  FROM memories ORDER BY category, relevance_score DESC",
             )
             .map_err(|e| format!("Prepare error: {e}"))?;
@@ -513,6 +601,70 @@ impl CollectiveMemory {
             pruned,
             deduplicated,
         })
+    }
+
+    /// Get all memories from a specific session, ordered by creation time.
+    pub fn get_session_memories(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {e}"))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, category, content, tags, source_run_id, source_team_id,
+                        relevance_score, created_at, last_accessed, access_count,
+                        source_session_id, is_consolidated
+                 FROM memories
+                 WHERE source_session_id = ?1
+                 ORDER BY created_at ASC
+                 LIMIT ?2",
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+
+        let rows = stmt
+            .query_map(params![session_id, limit as i64], Self::row_to_entry)
+            .map_err(|e| format!("Query error: {e}"))?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| format!("Row error: {e}"))?);
+        }
+
+        Ok(results)
+    }
+
+    /// Mark a batch of memory entries as consolidated.
+    pub fn consolidate_batch(&self, entry_ids: &[i64]) -> Result<usize, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {e}"))?;
+
+        let mut updated = 0usize;
+        for id in entry_ids {
+            let changed = conn
+                .execute(
+                    "UPDATE memories SET is_consolidated = 1 WHERE id = ?1",
+                    params![id],
+                )
+                .map_err(|e| format!("Consolidate error: {e}"))?;
+            updated += changed;
+        }
+
+        Ok(updated)
+    }
+
+    /// Count memories that haven't been consolidated yet.
+    pub fn unconsolidated_count(&self) -> Result<usize, String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {e}"))?;
+        let count: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memories WHERE is_consolidated = 0",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Count error: {e}"))?;
+
+        Ok(count)
     }
 }
 
@@ -787,5 +939,97 @@ mod tests {
         assert_eq!(report.pruned, 0);
         // Nothing deduplicated (different content)
         assert_eq!(report.deduplicated, 0);
+    }
+
+    #[test]
+    fn test_session_memories_roundtrip() {
+        let mem = CollectiveMemory::in_memory().unwrap();
+
+        let mut e1 = make_entry(MemoryCategory::General, "session-a first");
+        e1.source_session_id = Some("session-a".to_string());
+        mem.remember(&e1).unwrap();
+
+        let mut e2 = make_entry(MemoryCategory::General, "session-b only");
+        e2.source_session_id = Some("session-b".to_string());
+        mem.remember(&e2).unwrap();
+
+        let mut e3 = make_entry(MemoryCategory::General, "session-a second");
+        e3.source_session_id = Some("session-a".to_string());
+        mem.remember(&e3).unwrap();
+
+        // No session (None)
+        mem.remember(&make_entry(MemoryCategory::General, "no session"))
+            .unwrap();
+
+        let a_entries = mem.get_session_memories("session-a", 100).unwrap();
+        assert_eq!(a_entries.len(), 2);
+        assert_eq!(a_entries[0].content, "session-a first");
+        assert_eq!(a_entries[1].content, "session-a second");
+        for e in &a_entries {
+            assert_eq!(e.source_session_id.as_deref(), Some("session-a"));
+        }
+
+        let b_entries = mem.get_session_memories("session-b", 100).unwrap();
+        assert_eq!(b_entries.len(), 1);
+        assert_eq!(b_entries[0].content, "session-b only");
+
+        let none_entries = mem.get_session_memories("nonexistent", 100).unwrap();
+        assert!(none_entries.is_empty());
+    }
+
+    #[test]
+    fn test_consolidate_batch() {
+        let mem = CollectiveMemory::in_memory().unwrap();
+
+        let id1 = mem
+            .remember(&make_entry(MemoryCategory::General, "entry 1"))
+            .unwrap();
+        let id2 = mem
+            .remember(&make_entry(MemoryCategory::General, "entry 2"))
+            .unwrap();
+        let id3 = mem
+            .remember(&make_entry(MemoryCategory::General, "entry 3"))
+            .unwrap();
+
+        // Consolidate first two
+        let updated = mem.consolidate_batch(&[id1, id2]).unwrap();
+        assert_eq!(updated, 2);
+
+        // Verify flags via recall
+        let all = mem.recall("entry", None, None, 10).unwrap();
+        for e in &all {
+            if e.id == id1 || e.id == id2 {
+                assert!(e.is_consolidated, "entry {} should be consolidated", e.id);
+            } else if e.id == id3 {
+                assert!(!e.is_consolidated, "entry 3 should NOT be consolidated");
+            }
+        }
+    }
+
+    #[test]
+    fn test_unconsolidated_count() {
+        let mem = CollectiveMemory::in_memory().unwrap();
+
+        let id1 = mem
+            .remember(&make_entry(MemoryCategory::General, "a"))
+            .unwrap();
+        mem.remember(&make_entry(MemoryCategory::General, "b"))
+            .unwrap();
+        mem.remember(&make_entry(MemoryCategory::General, "c"))
+            .unwrap();
+
+        assert_eq!(mem.unconsolidated_count().unwrap(), 3);
+
+        mem.consolidate_batch(&[id1]).unwrap();
+        assert_eq!(mem.unconsolidated_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_migration_is_idempotent() {
+        let conn =
+            Connection::open_in_memory().expect("Failed to open in-memory db");
+        CollectiveMemory::init_tables(&conn).unwrap();
+        // Second call must not error.
+        CollectiveMemory::migrate_v2(&conn).unwrap();
     }
 }

@@ -195,6 +195,7 @@ const KEY_XAI: &str = "api_key_xai";
 const KEY_MISTRAL: &str = "api_key_mistral";
 const KEY_VENICE: &str = "api_key_venice";
 const KEY_HUE: &str = "api_key_hue";
+const KEY_AIRWEAVE: &str = "api_key_airweave";
 const KEY_CLOUD_JWT: &str = "cloud_jwt";
 
 // Messaging provider token storage keys
@@ -307,6 +308,8 @@ pub struct HiveConfig {
     pub telnyx_api_key: Option<String>,
     #[serde(skip)]
     pub hue_api_key: Option<String>,
+    #[serde(skip)]
+    pub airweave_api_key: Option<String>,
 
     // Voice & TTS
     pub tts_provider: String,
@@ -329,6 +332,8 @@ pub struct HiveConfig {
     pub litellm_url: Option<String>,
     pub local_provider_url: Option<String>,
     pub hue_bridge_ip: Option<String>,
+    #[serde(default)]
+    pub airweave_url: Option<String>,
     pub privacy_mode: bool,
 
     // Model routing
@@ -431,6 +436,13 @@ pub struct HiveConfig {
     #[serde(default)]
     pub remote_auto_start: bool,
 
+    // Learning Cortex
+    /// Whether the cortex auto-applies self-improvement changes without user
+    /// confirmation.  Defaults to `true` for a zero-config experience; users
+    /// can disable it in Settings > Learning.
+    #[serde(default = "default_auto_apply")]
+    pub auto_apply_enabled: bool,
+
     // Prompt encoding
     /// Context encoding format: "markdown" (default) or "toon" (token-efficient).
     #[serde(default)]
@@ -443,6 +455,10 @@ fn default_remote_local_port() -> u16 {
 
 fn default_remote_web_port() -> u16 {
     9481
+}
+
+fn default_auto_apply() -> bool {
+    true
 }
 
 impl Default for HiveConfig {
@@ -458,6 +474,7 @@ impl Default for HiveConfig {
             elevenlabs_api_key: None,
             telnyx_api_key: None,
             hue_api_key: None,
+            airweave_api_key: None,
             tts_provider: "qwen3".into(),
             tts_voice_id: None,
             tts_speed: 1.0,
@@ -470,6 +487,7 @@ impl Default for HiveConfig {
             litellm_url: None,
             local_provider_url: None,
             hue_bridge_ip: None,
+            airweave_url: None,
             privacy_mode: false,
             default_model: "gpt-4o-mini".into(),
             auto_routing: true,
@@ -520,6 +538,7 @@ impl Default for HiveConfig {
             remote_auto_start: false,
             obsidian_vault_path: None,
             notion_api_key: None,
+            auto_apply_enabled: default_auto_apply(),
             context_format: String::new(),
         }
     }
@@ -836,6 +855,7 @@ impl ConfigManager {
             config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
+            config.airweave_api_key = get_secure_key(ss, &key_map, KEY_AIRWEAVE);
             config.cloud_jwt = get_secure_key(ss, &key_map, KEY_CLOUD_JWT);
 
             // Messaging provider tokens
@@ -887,6 +907,7 @@ impl ConfigManager {
             "mistral" => config.mistral_api_key.clone(),
             "venice" => config.venice_api_key.clone(),
             "hue" => config.hue_api_key.clone(),
+            "airweave" => config.airweave_api_key.clone(),
             // Messaging provider tokens
             "slack_bot" => config.slack_bot_token.clone(),
             "discord_bot" => config.discord_bot_token.clone(),
@@ -921,6 +942,7 @@ impl ConfigManager {
                 "mistral" => config.mistral_api_key = key.clone(),
                 "venice" => config.venice_api_key = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
+                "airweave" => config.airweave_api_key = key.clone(),
                 // Messaging provider tokens
                 "slack_bot" => config.slack_bot_token = key.clone(),
                 "discord_bot" => config.discord_bot_token = key.clone(),
@@ -965,6 +987,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_AIRWEAVE, &config.airweave_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_CLOUD_JWT, &config.cloud_jwt)?;
 
         // Messaging provider tokens
@@ -1073,6 +1096,7 @@ impl ConfigManager {
         ("mistral", KEY_MISTRAL),
         ("venice", KEY_VENICE),
         ("hue", KEY_HUE),
+        ("airweave", KEY_AIRWEAVE),
     ];
 
     /// Export all configuration (including secrets) as a password-encrypted blob.

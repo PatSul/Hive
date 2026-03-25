@@ -2285,7 +2285,15 @@ function renderHelpPanel(data) {
     `;
 }
 
-function renderMessageCard(message) {
+function renderMessageCard(message, index) {
+    const msgId = `${esc(message.timestamp)}-${index}`;
+    const feedbackButtons =
+        message.role === "assistant"
+            ? `<span class="feedback-buttons">
+                   <button class="feedback-btn" data-action="response-feedback" data-msg-id="${msgId}" data-positive="true" title="Good response">&#x1F44D;</button>
+                   <button class="feedback-btn" data-action="response-feedback" data-msg-id="${msgId}" data-positive="false" title="Poor response">&#x1F44E;</button>
+               </span>`
+            : "";
     return `
         <article class="message-card ${esc(message.role)}">
             <div class="message-body">${renderMarkdown(message.content)}</div>
@@ -2294,6 +2302,7 @@ function renderMessageCard(message) {
                 <span>${shortTime(message.timestamp)}</span>
                 ${message.model ? `<span>${esc(message.model)}</span>` : ""}
                 ${message.cost ? `<span>${money(message.cost)}</span>` : ""}
+                ${feedbackButtons}
             </div>
         </article>
     `;
@@ -2921,6 +2930,23 @@ document.addEventListener("click", async (event) => {
                     }),
                     ["chat", "observe", "home"],
                 );
+                break;
+            }
+            case "response-feedback": {
+                const msgId = target.dataset.msgId;
+                const positive = target.dataset.positive === "true";
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(
+                        JSON.stringify({
+                            type: "response_feedback",
+                            message_id: msgId,
+                            positive: positive,
+                        }),
+                    );
+                    target.closest(".feedback-buttons").innerHTML = positive
+                        ? "<span>Thanks!</span>"
+                        : "<span>Noted</span>";
+                }
                 break;
             }
             case "open-desktop":
