@@ -5448,6 +5448,7 @@ dependencies = [
  "hive_core",
  "hive_fs",
  "hive_integrations",
+ "hive_kilo",
  "hive_learn",
  "hive_network",
  "hive_remote",
