@@ -7,6 +7,17 @@ use std::time::{Duration, Instant};
 use crate::message_queue::{AgentMessage, SharedMessageQueue};
 
 // ---------------------------------------------------------------------------
+// Compaction Hooks
+// ---------------------------------------------------------------------------
+
+/// Hook invoked before context compaction. Receives messages about to be trimmed.
+/// Returns extracted memory strings to preserve.
+pub type PreCompactionHook = Box<dyn Fn(&[String]) -> Vec<String> + Send>;
+
+/// Hook invoked after compaction completes. Receives the compaction summary.
+pub type PostCompactionHook = Box<dyn Fn(&str) + Send>;
+
+// ---------------------------------------------------------------------------
 // Loop State
 // ---------------------------------------------------------------------------
 
@@ -68,6 +79,8 @@ pub struct HiveLoop {
     pub last_output: String,
     started_at: Option<Instant>,
     message_queue: Option<SharedMessageQueue>,
+    pre_compaction: Option<PreCompactionHook>,
+    post_compaction: Option<PostCompactionHook>,
 }
 
 impl HiveLoop {
@@ -80,6 +93,8 @@ impl HiveLoop {
             last_output: String::new(),
             started_at: None,
             message_queue: None,
+            pre_compaction: None,
+            post_compaction: None,
         }
     }
 
@@ -92,6 +107,34 @@ impl HiveLoop {
     /// Set the message queue after construction.
     pub fn set_message_queue(&mut self, queue: SharedMessageQueue) {
         self.message_queue = Some(queue);
+    }
+
+    /// Set a hook to be called before context compaction.
+    pub fn with_pre_compaction(mut self, hook: PreCompactionHook) -> Self {
+        self.pre_compaction = Some(hook);
+        self
+    }
+
+    /// Set a hook to be called after context compaction.
+    pub fn with_post_compaction(mut self, hook: PostCompactionHook) -> Self {
+        self.post_compaction = Some(hook);
+        self
+    }
+
+    /// Fire the pre-compaction hook with the given messages.
+    /// Returns extracted memories, or empty vec if no hook is set.
+    pub fn fire_pre_compaction(&self, messages: &[String]) -> Vec<String> {
+        match &self.pre_compaction {
+            Some(hook) => hook(messages),
+            None => Vec::new(),
+        }
+    }
+
+    /// Fire the post-compaction hook with the given summary.
+    pub fn fire_post_compaction(&self, summary: &str) {
+        if let Some(hook) = &self.post_compaction {
+            hook(summary);
+        }
     }
 
     /// Start the loop timer.

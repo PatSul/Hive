@@ -1,3 +1,4 @@
+pub mod airweave;
 pub mod bitbucket;
 pub mod browser;
 pub mod cloud;
@@ -18,6 +19,7 @@ pub mod project_management;
 pub mod smart_home;
 pub mod webhooks;
 
+pub use airweave::AirweaveClient;
 pub use bitbucket::BitbucketClient;
 pub use browser::BrowserAutomation;
 pub use cloud::{AwsClient, AzureClient, GcpClient};

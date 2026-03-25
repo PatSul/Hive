@@ -4,8 +4,9 @@ use gpui::*;
 use tracing::{error, info, warn};
 
 use super::{
-    AppA2aClient, AppAiService, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
-    AppConfig, AppContextEngine, AppDocker, AppDocsIndexer, AppGcp, AppGitLab, AppHueClient,
+    AppA2aClient, AppAiService, AppAirweave, AppAutomation, AppAws, AppAzure, AppBitbucket,
+    AppBrowser, AppConfig, AppContextEngine, AppDocker, AppDocsIndexer, AppGcp, AppGitLab,
+    AppHueClient,
     AppIntegrationDb, AppKnowledge, AppKubernetes, AppMcpServer, AppMessaging,
     AppOllamaManager, AppProjectManagement, AppRagService, AppRpcConfig, AppTheme, AppTts,
     AppWallets, project_context, ContextFormatChanged, ExportConfig, HiveConfig, HiveWorkspace,
@@ -602,6 +603,20 @@ fn refresh_runtime_integrations_from_config(
         });
     cx.set_global(AppHueClient(hue_client));
 
+    let airweave_client = config
+        .airweave_url
+        .as_deref()
+        .zip(config.airweave_api_key.as_deref())
+        .and_then(|(url, key)| {
+            if url.is_empty() || key.is_empty() {
+                return None;
+            }
+            hive_integrations::airweave::AirweaveClient::new(url, key)
+                .ok()
+                .map(std::sync::Arc::new)
+        });
+    cx.set_global(AppAirweave(airweave_client));
+
     rewire_mcp_integrations(workspace, cx);
 }
 
@@ -634,6 +649,7 @@ fn rewire_mcp_integrations(workspace: &mut HiveWorkspace, cx: &mut Context<HiveW
         browser: cx.global::<AppBrowser>().0.clone(),
         ollama: cx.global::<AppOllamaManager>().0.clone(),
         hue: cx.global::<AppHueClient>().0.clone(),
+        airweave: cx.global::<AppAirweave>().0.clone(),
         aws: cx.global::<AppAws>().0.clone(),
         azure: cx.global::<AppAzure>().0.clone(),
         gcp: cx.global::<AppGcp>().0.clone(),

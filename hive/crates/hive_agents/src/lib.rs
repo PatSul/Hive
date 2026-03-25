@@ -1,4 +1,6 @@
 pub mod activity;
+#[cfg(feature = "memory-tiering")]
+pub mod memory;
 pub mod auto_commit;
 pub mod automation;
 pub mod collective_memory;
@@ -104,3 +106,10 @@ pub use swarm::{
 pub use tool_use::builtin_registry_with_sandbox;
 pub use voice::{VoiceAssistant, VoiceCommand, VoiceIntent, VoiceState, WakeWordConfig};
 pub use worktree::{MergeBranchResult, TeamWorktree, WorktreeManager};
+
+#[cfg(feature = "memory-tiering")]
+pub use memory::{
+    ArchiveEntry, ArchiveService, BootstrapContext, BootstrapGenerator, Decision, EntityInfo,
+    MemoryQuery, MemoryQueryResult, MockVectorBridge, PendingWrite, SessionState, TargetLayer,
+    TieredEntry, TieredMemory, VectorMemoryBridge, VectorResult, VectorSource,
+};

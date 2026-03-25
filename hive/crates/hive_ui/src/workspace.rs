@@ -42,6 +42,7 @@ use hive_ui_core::{
     AppGcp,
     AppGitLab,
     AppHiveMemory,
+    AppAirweave,
     AppHueClient,
     AppIntegrationDb,
     AppKnowledge,

@@ -245,6 +245,23 @@ pub fn integration_tools() -> Vec<(McpTool, ToolHandler)> {
             hue_activate_scene_tool(),
             stub("Configure a Hue bridge and API key in Settings to activate scenes"),
         ),
+        // --- Airweave ---
+        (
+            airweave_search_tool(),
+            stub("Configure Airweave URL and API key in Settings to search connected data sources"),
+        ),
+        (
+            airweave_list_collections_tool(),
+            stub("Configure Airweave URL and API key in Settings to list collections"),
+        ),
+        (
+            airweave_list_connections_tool(),
+            stub("Configure Airweave URL and API key in Settings to list connections"),
+        ),
+        (
+            airweave_status_tool(),
+            stub("Configure Airweave URL and API key in Settings to check status"),
+        ),
         // --- Docker (extended) ---
         (
             docker_start_tool(),
@@ -1946,6 +1963,153 @@ pub fn wire_integration_handlers(services: IntegrationServices) -> Vec<(McpTool,
         ));
     }
 
+    // --- Airweave ---
+    {
+        let svc = services.airweave.clone();
+        tools.push((
+            airweave_search_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let collection = args["collection"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let query = args["query"].as_str().unwrap_or("").to_string();
+                let limit = args["limit"].as_u64().unwrap_or(10) as u32;
+                let search_type = args["search_type"]
+                    .as_str()
+                    .unwrap_or("instant")
+                    .to_string();
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client = svc
+                        .ok_or_else(|| "Airweave is not configured in Settings".to_string())?;
+                    let response = client
+                        .search(&collection, &query, limit, &search_type)
+                        .await
+                        .map_err(|e| format!("Airweave search failed: {e}"))?;
+                    let results: Vec<serde_json::Value> = response
+                        .results
+                        .iter()
+                        .map(|r| {
+                            json!({
+                                "entity_id": r.entity_id,
+                                "name": r.name,
+                                "score": r.relevance_score,
+                                "content": r.textual_representation,
+                                "web_url": r.web_url,
+                                "breadcrumbs": r.breadcrumbs.iter().map(|b| json!({
+                                    "name": b.name,
+                                    "entity_type": b.entity_type,
+                                })).collect::<Vec<_>>(),
+                                "metadata": r.airweave_system_metadata,
+                            })
+                        })
+                        .collect();
+                    Ok(json!({
+                        "collection": collection,
+                        "query": query,
+                        "search_type": search_type,
+                        "count": results.len(),
+                        "results": results,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = services.airweave.clone();
+        tools.push((
+            airweave_list_collections_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let limit = args["limit"].as_u64().unwrap_or(50) as u32;
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client = svc
+                        .ok_or_else(|| "Airweave is not configured in Settings".to_string())?;
+                    let collections = client
+                        .list_collections(limit)
+                        .await
+                        .map_err(|e| format!("Airweave list collections failed: {e}"))?;
+                    let items: Vec<serde_json::Value> = collections
+                        .iter()
+                        .map(|c| {
+                            json!({
+                                "id": c.id,
+                                "name": c.name,
+                                "readable_id": c.readable_id,
+                                "status": c.status,
+                            })
+                        })
+                        .collect();
+                    Ok(json!({
+                        "count": items.len(),
+                        "collections": items,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = services.airweave.clone();
+        tools.push((
+            airweave_list_connections_tool(),
+            Box::new(move |args: serde_json::Value| {
+                let collection = args["collection"].as_str().map(|s| s.to_string());
+                let limit = args["limit"].as_u64().unwrap_or(50) as u32;
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client = svc
+                        .ok_or_else(|| "Airweave is not configured in Settings".to_string())?;
+                    let connections = client
+                        .list_source_connections(collection.as_deref(), limit)
+                        .await
+                        .map_err(|e| format!("Airweave list connections failed: {e}"))?;
+                    let items: Vec<serde_json::Value> = connections
+                        .iter()
+                        .map(|c| {
+                            json!({
+                                "id": c.id,
+                                "name": c.name,
+                                "source": c.source_short_name,
+                                "status": c.status,
+                                "collection_id": c.collection_id,
+                            })
+                        })
+                        .collect();
+                    Ok(json!({
+                        "count": items.len(),
+                        "connections": items,
+                    }))
+                })
+            }) as ToolHandler,
+        ));
+    }
+
+    {
+        let svc = services.airweave.clone();
+        tools.push((
+            airweave_status_tool(),
+            Box::new(move |_args: serde_json::Value| {
+                let svc = svc.clone();
+                block_on_async(async move {
+                    let client = svc
+                        .ok_or_else(|| "Airweave is not configured in Settings".to_string())?;
+                    let healthy = client
+                        .health_check()
+                        .await
+                        .map_err(|e| format!("Airweave health check failed: {e}"))?;
+                    Ok(json!({
+                        "configured": true,
+                        "reachable": healthy,
+                        "base_url": client.base_url(),
+                    }))
+                })
+            }) as ToolHandler,
+        ));
+    }
+
     // --- Docs Search ---
     {
         let svc = Arc::clone(&services.docs_indexer);
@@ -2738,6 +2902,7 @@ pub struct IntegrationServices {
     pub browser: Arc<hive_integrations::browser::BrowserAutomation>,
     pub ollama: Arc<hive_terminal::local_ai::OllamaManager>,
     pub hue: Option<Arc<hive_integrations::smart_home::PhilipsHueClient>>,
+    pub airweave: Option<Arc<hive_integrations::airweave::AirweaveClient>>,
     pub aws: Arc<hive_integrations::cloud::AwsClient>,
     pub azure: Arc<hive_integrations::cloud::AzureClient>,
     pub gcp: Arc<hive_integrations::cloud::GcpClient>,
@@ -3369,6 +3534,65 @@ fn hue_activate_scene_tool() -> McpTool {
                 "scene_id": { "type": "string", "description": "Hue scene id" }
             },
             "required": ["scene_id"]
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Airweave tool definitions
+// ---------------------------------------------------------------------------
+
+fn airweave_search_tool() -> McpTool {
+    McpTool {
+        name: "airweave_search".into(),
+        description: "Search across all connected data sources (Google Drive, Notion, Slack, Jira, GitHub, etc.) via Airweave's unified semantic search".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "collection": { "type": "string", "description": "Collection readable_id to search" },
+                "query": { "type": "string", "description": "Natural language search query" },
+                "limit": { "type": "integer", "description": "Max results (default 10)", "default": 10 },
+                "search_type": { "type": "string", "enum": ["instant", "classic", "agentic"], "description": "Search tier (default: instant)", "default": "instant" }
+            },
+            "required": ["collection", "query"]
+        }),
+    }
+}
+
+fn airweave_list_collections_tool() -> McpTool {
+    McpTool {
+        name: "airweave_list_collections".into(),
+        description: "List available Airweave collections (data source groups)".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "limit": { "type": "integer", "description": "Max results (default 50)", "default": 50 }
+            }
+        }),
+    }
+}
+
+fn airweave_list_connections_tool() -> McpTool {
+    McpTool {
+        name: "airweave_list_connections".into(),
+        description: "List active data source connections in Airweave".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "collection": { "type": "string", "description": "Optional: filter by collection readable_id" },
+                "limit": { "type": "integer", "description": "Max results (default 50)", "default": 50 }
+            }
+        }),
+    }
+}
+
+fn airweave_status_tool() -> McpTool {
+    McpTool {
+        name: "airweave_status".into(),
+        description: "Check Airweave service connectivity and status".into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {}
         }),
     }
 }
@@ -4992,6 +5216,7 @@ mod tests {
             browser: Arc::new(hive_integrations::browser::BrowserAutomation::new()),
             ollama: Arc::new(hive_terminal::local_ai::OllamaManager::new(ollama_url)),
             hue,
+            airweave: None,
             aws: Arc::new(hive_integrations::cloud::AwsClient::new(None, None)),
             azure: Arc::new(hive_integrations::cloud::AzureClient::new(None)),
             gcp: Arc::new(hive_integrations::cloud::GcpClient::new(None)),
