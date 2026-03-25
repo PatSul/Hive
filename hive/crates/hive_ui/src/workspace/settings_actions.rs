@@ -406,6 +406,7 @@ pub(super) fn handle_settings_save_from_view(
         if let Err(e) = config_manager.update(|cfg| {
             cfg.ollama_url = snapshot.ollama_url.clone();
             cfg.lmstudio_url = snapshot.lmstudio_url.clone();
+            cfg.kilo_url = snapshot.kilo_url.clone();
             cfg.litellm_url = snapshot.litellm_url.clone();
             cfg.local_provider_url = snapshot.custom_url.clone();
             cfg.hue_bridge_ip = snapshot.hue_bridge_ip.clone();

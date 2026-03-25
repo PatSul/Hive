@@ -2562,6 +2562,8 @@ fn ai_service_config(
             ollama_url: cfg.ollama_url.clone(),
             lmstudio_url: cfg.lmstudio_url.clone(),
             local_provider_url: cfg.local_provider_url.clone(),
+            kilo_url: Some(cfg.kilo_url.clone()),
+            kilo_password: cfg.kilo_password.clone(),
             privacy_mode: cfg.privacy_mode,
             default_model: cfg.default_model.clone(),
             auto_routing: cfg.auto_routing,

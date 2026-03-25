@@ -1121,6 +1121,7 @@ impl CapabilityRouter {
             crate::types::ProviderType::Doubao => ProviderType::Doubao,
             crate::types::ProviderType::Venice => ProviderType::Venice,
             crate::types::ProviderType::HiveGateway => ProviderType::HiveGateway,
+            crate::types::ProviderType::Kilo => ProviderType::Kilo,
         }
     }
 }

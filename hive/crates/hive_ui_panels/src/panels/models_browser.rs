@@ -382,7 +382,10 @@ impl ModelsBrowserView {
     fn is_local_provider(ptype: ProviderType) -> bool {
         matches!(
             ptype,
-            ProviderType::Ollama | ProviderType::LMStudio | ProviderType::GenericLocal
+            ProviderType::Ollama
+                | ProviderType::LMStudio
+                | ProviderType::GenericLocal
+                | ProviderType::Kilo
         )
     }
 

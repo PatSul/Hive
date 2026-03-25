@@ -288,6 +288,7 @@ pub struct SettingsView {
     ollama_url_input: Entity<InputState>,
     ollama_pull_model_input: Entity<InputState>,
     lmstudio_url_input: Entity<InputState>,
+    kilo_url_input: Entity<InputState>,
     custom_url_input: Entity<InputState>,
     hue_bridge_ip_input: Entity<InputState>,
     hue_api_key_input: Entity<InputState>,
@@ -480,6 +481,12 @@ impl SettingsView {
             state.set_value(cfg.lmstudio_url.clone(), window, cx);
             state
         });
+        let kilo_url_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("http://localhost:4096", window, cx);
+            state.set_value(cfg.kilo_url.clone(), window, cx);
+            state
+        });
         let custom_url_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_placeholder("Custom provider URL (optional)", window, cx);
@@ -593,6 +600,7 @@ impl SettingsView {
             &hue_bridge_ip_input,
             &hue_api_key_input,
             &lmstudio_url_input,
+            &kilo_url_input,
             &custom_url_input,
             &daily_budget_input,
             &monthly_budget_input,
@@ -657,6 +665,7 @@ impl SettingsView {
             ollama_url_input,
             ollama_pull_model_input,
             lmstudio_url_input,
+            kilo_url_input,
             custom_url_input,
             hue_bridge_ip_input,
             hue_api_key_input,
@@ -1246,6 +1255,7 @@ impl SettingsView {
 
             ollama_url: self.ollama_url_input.read(cx).value().to_string(),
             lmstudio_url: self.lmstudio_url_input.read(cx).value().to_string(),
+            kilo_url: self.kilo_url_input.read(cx).value().to_string(),
             hue_bridge_ip: {
                 let v = self.hue_bridge_ip_input.read(cx).value().to_string();
                 non_empty_trimmed(&v)
@@ -1463,6 +1473,7 @@ pub struct SettingsSnapshot {
     pub hue_api_key: Option<String>,
     pub ollama_url: String,
     pub lmstudio_url: String,
+    pub kilo_url: String,
     pub litellm_url: Option<String>,
     pub custom_url: Option<String>,
     pub hue_bridge_ip: Option<String>,
@@ -1725,6 +1736,7 @@ impl SettingsView {
             .child(separator(theme))
             .child(input_row("Ollama URL", &self.ollama_url_input, theme))
             .child(input_row("LM Studio URL", &self.lmstudio_url_input, theme))
+            .child(input_row("Kilo Agent URL", &self.kilo_url_input, theme))
             .child(input_row("Custom Local URL", &self.custom_url_input, theme))
             .child(separator(theme))
             .child(input_row("LiteLLM Proxy URL", &self.litellm_url_input, theme))

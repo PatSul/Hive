@@ -1,0 +1,34 @@
+[package]
+name = "hive_kilo"
+version = "0.1.0"
+edition = "2021"
+description = "Kilo.ai coding-agent integration for Hive"
+
+[dependencies]
+# Internal crates
+hive_ai    = { path = "../hive_ai" }
+hive_agents = { path = "../hive_agents" }
+hive_core  = { path = "../hive_core" }
+
+# HTTP + SSE streaming
+reqwest  = { workspace = true }
+
+# Serialization
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Async runtime
+tokio        = { workspace = true }
+futures      = { workspace = true }
+async-trait  = { workspace = true }
+
+# Utilities
+uuid      = { workspace = true }
+chrono    = { workspace = true }
+anyhow    = { workspace = true }
+thiserror = { workspace = true }
+tracing   = { workspace = true }
+base64    = "0.22"
+
+[dev-dependencies]
+tokio     = { workspace = true, features = ["test-util"] }

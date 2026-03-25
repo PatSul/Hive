@@ -141,11 +141,25 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         ollama_url: config.ollama_url.clone(),
         lmstudio_url: config.lmstudio_url.clone(),
         local_provider_url: config.local_provider_url.clone(),
+        kilo_url: Some(config.kilo_url.clone()),
+        kilo_password: config.kilo_password.clone(),
         privacy_mode: config.privacy_mode,
         default_model: config.default_model.clone(),
         auto_routing: config.auto_routing,
     };
     cx.set_global(AppAiService(hive_ai::AiService::new(ai_config)));
+
+    // Register Kilo coding agent provider (local, always attempted).
+    if !config.kilo_url.is_empty() {
+        let kilo_provider = Arc::new(hive_kilo::KiloAiProvider::new(
+            Some(&config.kilo_url),
+            config.kilo_password.as_deref(),
+        ));
+        cx.global_mut::<AppAiService>()
+            .0
+            .register_external_provider(hive_ai::types::ProviderType::Kilo, kilo_provider);
+    }
+
     cx.global_mut::<AppAiService>().0.start_discovery();
     info!("AiService initialized");
 

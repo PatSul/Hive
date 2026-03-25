@@ -196,6 +196,7 @@ const KEY_MISTRAL: &str = "api_key_mistral";
 const KEY_VENICE: &str = "api_key_venice";
 const KEY_HUE: &str = "api_key_hue";
 const KEY_AIRWEAVE: &str = "api_key_airweave";
+const KEY_KILO_PASSWORD: &str = "kilo_password";
 const KEY_CLOUD_JWT: &str = "cloud_jwt";
 
 // Messaging provider token storage keys
@@ -331,6 +332,12 @@ pub struct HiveConfig {
     pub lmstudio_url: String,
     pub litellm_url: Option<String>,
     pub local_provider_url: Option<String>,
+    /// URL for a locally-running Kilo coding agent (default: `http://localhost:4096`).
+    #[serde(default = "default_kilo_url")]
+    pub kilo_url: String,
+    /// Kilo HTTP Basic Auth password — stored in SecureStorage.
+    #[serde(skip)]
+    pub kilo_password: Option<String>,
     pub hue_bridge_ip: Option<String>,
     #[serde(default)]
     pub airweave_url: Option<String>,
@@ -449,6 +456,10 @@ pub struct HiveConfig {
     pub context_format: String,
 }
 
+fn default_kilo_url() -> String {
+    "http://localhost:4096".into()
+}
+
 fn default_remote_local_port() -> u16 {
     9480
 }
@@ -486,6 +497,8 @@ impl Default for HiveConfig {
             lmstudio_url: "http://localhost:1234".into(),
             litellm_url: None,
             local_provider_url: None,
+            kilo_url: default_kilo_url(),
+            kilo_password: None,
             hue_bridge_ip: None,
             airweave_url: None,
             privacy_mode: false,
@@ -856,6 +869,7 @@ impl ConfigManager {
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
             config.airweave_api_key = get_secure_key(ss, &key_map, KEY_AIRWEAVE);
+            config.kilo_password = get_secure_key(ss, &key_map, KEY_KILO_PASSWORD);
             config.cloud_jwt = get_secure_key(ss, &key_map, KEY_CLOUD_JWT);
 
             // Messaging provider tokens
@@ -908,6 +922,7 @@ impl ConfigManager {
             "venice" => config.venice_api_key.clone(),
             "hue" => config.hue_api_key.clone(),
             "airweave" => config.airweave_api_key.clone(),
+            "kilo_password" => config.kilo_password.clone(),
             // Messaging provider tokens
             "slack_bot" => config.slack_bot_token.clone(),
             "discord_bot" => config.discord_bot_token.clone(),
@@ -943,6 +958,7 @@ impl ConfigManager {
                 "venice" => config.venice_api_key = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
                 "airweave" => config.airweave_api_key = key.clone(),
+                "kilo_password" => config.kilo_password = key.clone(),
                 // Messaging provider tokens
                 "slack_bot" => config.slack_bot_token = key.clone(),
                 "discord_bot" => config.discord_bot_token = key.clone(),
@@ -988,6 +1004,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_AIRWEAVE, &config.airweave_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_KILO_PASSWORD, &config.kilo_password)?;
         set_secure_key(ss, &mut key_map, KEY_CLOUD_JWT, &config.cloud_jwt)?;
 
         // Messaging provider tokens
@@ -1430,7 +1447,7 @@ mod tests {
         assert!(!key_map.contains_key(KEY_GOOGLE)); // null = removed
 
         // Non-secret fields should be preserved
-        assert_eq!(config.theme, "HiveCode Dark");
+        assert_eq!(config.theme, "dark");
         assert_eq!(config.privacy_mode, false);
     }
 
