@@ -10,6 +10,9 @@ use hive_ui_panels::components::notification_tray::{NotificationTray, Notificati
 pub struct StatusBar {
     pub connectivity: ConnectivityDisplay,
     pub current_model: String,
+    pub cortex_state: String,
+    pub cortex_changes_applied: u32,
+    pub cortex_auto_apply_enabled: bool,
     pub privacy_mode: bool,
     pub active_project: String,
     pub total_cost: f64,
@@ -50,6 +53,9 @@ impl Default for StatusBar {
         Self {
             connectivity: ConnectivityDisplay::Offline,
             current_model: "Select Model".into(),
+            cortex_state: "idle".into(),
+            cortex_changes_applied: 0,
+            cortex_auto_apply_enabled: true,
             privacy_mode: false,
             active_project: "No project".into(),
             total_cost: 0.0,
@@ -75,6 +81,26 @@ impl StatusBar {
             "Select Model".to_string()
         } else {
             self.current_model.clone()
+        };
+        let cortex_state = self.cortex_state.trim();
+        let cortex_label = if !self.cortex_auto_apply_enabled {
+            "Cortex: paused".to_string()
+        } else if cortex_state.is_empty() {
+            "Cortex: idle".to_string()
+        } else if self.cortex_changes_applied > 0 {
+            format!("Cortex: {cortex_state} ({})", self.cortex_changes_applied)
+        } else {
+            format!("Cortex: {cortex_state}")
+        };
+        let cortex_color = if !self.cortex_auto_apply_enabled {
+            theme.accent_yellow
+        } else {
+            match cortex_state {
+                "processing" => theme.accent_yellow,
+                "applied" => theme.accent_green,
+                "paused" => theme.accent_yellow,
+                _ => theme.text_secondary,
+            }
         };
         let cost_str = format!("${:.2}", self.total_cost);
         let privacy = if self.privacy_mode {
@@ -158,6 +184,17 @@ impl StatusBar {
                             .overflow_hidden()
                             .max_w(px(230.0))
                             .child(format!("Project: {project}")),
+                    )
+                    .child(
+                        div()
+                            .px(theme.space_2)
+                            .py(px(2.0))
+                            .rounded(theme.radius_sm)
+                            .bg(theme.bg_surface)
+                            .text_size(theme.font_size_xs)
+                            .text_color(cortex_color)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(cortex_label),
                     ),
             )
             .child(
@@ -288,5 +325,13 @@ mod tests {
     fn statusbar_default_model_is_select_model() {
         let bar = StatusBar::new();
         assert_eq!(bar.current_model, "Select Model");
+    }
+
+    #[test]
+    fn statusbar_default_cortex_state_is_idle() {
+        let bar = StatusBar::new();
+        assert_eq!(bar.cortex_state, "idle");
+        assert_eq!(bar.cortex_changes_applied, 0);
+        assert!(bar.cortex_auto_apply_enabled);
     }
 }

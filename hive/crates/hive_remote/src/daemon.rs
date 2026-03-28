@@ -6,15 +6,15 @@ use crate::session::SessionJournal;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use hive_agents::{
+    ActivityEntry, ActivityEvent, ActivityFilter, ActivityLog, ApprovalDecision, ApprovalGate,
+    ApprovalRequest, ApprovalRule, OperationType, RuleTrigger,
     automation::{AutomationService, TriggerType, Workflow, WorkflowRunResult},
     skill_format::SkillLoader,
     skills::{SkillSource, SkillsRegistry},
     specs::{Spec, SpecSection},
-    ActivityEntry, ActivityEvent, ActivityFilter, ActivityLog, ApprovalDecision, ApprovalGate,
-    ApprovalRequest, ApprovalRule, OperationType, RuleTrigger,
 };
-use hive_assistant::AssistantService;
 use hive_ai::service::{AiService, AiServiceConfig};
+use hive_assistant::AssistantService;
 use hive_core::channels::{ChannelMessage, ChannelStore, MessageAuthor};
 use hive_core::config::{AccountPlatform, ConfigManager, HiveConfig};
 use hive_core::conversations::{Conversation, ConversationStore, StoredMessage, generate_title};
@@ -203,7 +203,9 @@ impl HiveDaemon {
             .map(|cfg| cfg.connected_accounts.len())
             .unwrap_or(0);
         let assistant_service =
-            build_assistant_service(config_manager.as_ref(), connected_account_count).ok().flatten();
+            build_assistant_service(config_manager.as_ref(), connected_account_count)
+                .ok()
+                .flatten();
 
         let mut daemon = Self {
             config,
@@ -281,7 +283,10 @@ impl HiveDaemon {
         self.cortex_event_tx = Some(tx);
     }
 
-    pub fn set_interaction_tracker(&mut self, tracker: std::sync::Arc<std::sync::atomic::AtomicI64>) {
+    pub fn set_interaction_tracker(
+        &mut self,
+        tracker: std::sync::Arc<std::sync::atomic::AtomicI64>,
+    ) {
         self.interaction_tracker = Some(tracker);
     }
 
@@ -355,9 +360,16 @@ impl HiveDaemon {
         template_id: String,
         detail: String,
     ) -> Result<SendDisposition> {
-        self.last_launch_status = Some(format!("Started '{}' from Home.", home_template_title(&template_id)));
+        self.last_launch_status = Some(format!(
+            "Started '{}' from Home.",
+            home_template_title(&template_id)
+        ));
         let prompt = build_home_prompt(&self.current_workspace, &template_id, &detail);
-        self.begin_send_message(uuid::Uuid::new_v4().to_string(), prompt, self.current_model.clone())
+        self.begin_send_message(
+            uuid::Uuid::new_v4().to_string(),
+            prompt,
+            self.current_model.clone(),
+        )
     }
 
     pub fn resume_conversation(&mut self, conversation_id: &str) -> Result<()> {
@@ -570,7 +582,11 @@ impl HiveDaemon {
         run_id: &str,
         result: Result<WorkflowRunResult, String>,
     ) -> Result<()> {
-        if let Some(run) = self.workflow_runs.iter_mut().find(|run| run.run_id == run_id) {
+        if let Some(run) = self
+            .workflow_runs
+            .iter_mut()
+            .find(|run| run.run_id == run_id)
+        {
             run.completed_at = Some(Utc::now());
             match result {
                 Ok(result) => {
@@ -1056,6 +1072,7 @@ impl HiveDaemon {
                         hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
                             interaction_id: run_id.to_string(),
                             model: String::new(),
+                            persona: None,
                             quality_score: 0.8,
                             outcome: "accepted".to_string(),
                         },
@@ -1066,6 +1083,7 @@ impl HiveDaemon {
                         hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
                             interaction_id: run_id.to_string(),
                             model: String::new(),
+                            persona: None,
                             quality_score: 0.3,
                             outcome: "corrected".to_string(),
                         },
@@ -1114,12 +1132,15 @@ impl HiveDaemon {
 
         // Publish learning cortex event for remote chat completions
         if let Some(ref tx) = self.cortex_event_tx {
-            let _ = tx.send(hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
-                interaction_id: conversation_id.to_string(),
-                model: model.to_string(),
-                quality_score: 0.5, // Default unknown quality for remote
-                outcome: "unknown".to_string(),
-            });
+            let _ = tx.send(
+                hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
+                    interaction_id: conversation_id.to_string(),
+                    model: model.to_string(),
+                    persona: None,
+                    quality_score: 0.5, // Default unknown quality for remote
+                    outcome: "unknown".to_string(),
+                },
+            );
         }
 
         self.broadcast_state_and_panels();
@@ -1184,14 +1205,20 @@ impl HiveDaemon {
         {
             let denial = match reason {
                 Some(ref value) if !value.trim().is_empty() => {
-                    format!("Remote approval denied: {}. Request: {}", value.trim(), content)
+                    format!(
+                        "Remote approval denied: {}. Request: {}",
+                        value.trim(),
+                        content
+                    )
                 }
                 _ => format!("Remote approval denied for request: {}", content),
             };
             self.append_error_message(conversation_id, &denial)?;
         }
 
-        if let Some(PendingAction::Agent { run_id, .. }) = pending.as_ref() && !approved {
+        if let Some(PendingAction::Agent { run_id, .. }) = pending.as_ref()
+            && !approved
+        {
             if let Some(run) = self.agent_runs.iter_mut().find(|run| run.run_id == *run_id) {
                 run.status = "denied".into();
                 run.detail = reason
@@ -1232,7 +1259,9 @@ impl HiveDaemon {
             DaemonEvent::SwitchDestination { destination } => self.switch_destination(destination),
             DaemonEvent::SetModel { model } => self.set_model(model),
             DaemonEvent::SetObserveView { view } => self.set_observe_view(view),
-            DaemonEvent::SwitchWorkspace { workspace_path } => self.switch_workspace(workspace_path),
+            DaemonEvent::SwitchWorkspace { workspace_path } => {
+                self.switch_workspace(workspace_path)
+            }
             DaemonEvent::ResumeConversation { conversation_id } => {
                 let _ = self.resume_conversation(&conversation_id);
             }
@@ -1248,6 +1277,7 @@ impl HiveDaemon {
                         hive_learn::cortex::event_bus::CortexEvent::OutcomeRecorded {
                             interaction_id: message_id,
                             model: String::new(),
+                            persona: None,
                             quality_score: quality,
                             outcome: outcome.to_string(),
                         },
@@ -1376,8 +1406,15 @@ impl HiveDaemon {
     }
 
     pub fn broadcast_state_and_panels(&self) {
-        let _ = self.event_tx.send(DaemonEvent::StateSnapshot(self.get_snapshot()));
-        for panel in [PANEL_HOME, PANEL_CHAT, PANEL_OBSERVE, self.active_panel.as_str()] {
+        let _ = self
+            .event_tx
+            .send(DaemonEvent::StateSnapshot(self.get_snapshot()));
+        for panel in [
+            PANEL_HOME,
+            PANEL_CHAT,
+            PANEL_OBSERVE,
+            self.active_panel.as_str(),
+        ] {
             if let Ok(response) = self.panel_response(panel) {
                 let _ = self.event_tx.send(DaemonEvent::PanelData {
                     panel: response.panel,
@@ -1503,23 +1540,23 @@ impl HiveDaemon {
     }
 
     fn chat_panel_data(&self) -> Result<crate::protocol::ChatPanelData> {
-        let (messages, total_cost) = if let Some(conversation_id) = self.active_conversation.as_deref()
-        {
-            if let Ok(conversation) = self.conversation_store.load(conversation_id) {
-                (
-                    conversation
-                        .messages
-                        .into_iter()
-                        .map(remote_message_from_stored)
-                        .collect(),
-                    conversation.total_cost,
-                )
+        let (messages, total_cost) =
+            if let Some(conversation_id) = self.active_conversation.as_deref() {
+                if let Ok(conversation) = self.conversation_store.load(conversation_id) {
+                    (
+                        conversation
+                            .messages
+                            .into_iter()
+                            .map(remote_message_from_stored)
+                            .collect(),
+                        conversation.total_cost,
+                    )
+                } else {
+                    (Vec::new(), 0.0)
+                }
             } else {
                 (Vec::new(), 0.0)
-            }
-        } else {
-            (Vec::new(), 0.0)
-        };
+            };
 
         Ok(crate::protocol::ChatPanelData {
             conversation_id: self.active_conversation.clone(),
@@ -1624,7 +1661,10 @@ impl HiveDaemon {
         Ok(crate::protocol::SpecsPanelData {
             workspace_root: root.display().to_string(),
             selected_spec_id: selected_spec.as_ref().map(|spec| spec.id.clone()),
-            specs: summaries.into_iter().map(|(summary, _, _)| summary).collect(),
+            specs: summaries
+                .into_iter()
+                .map(|(summary, _, _)| summary)
+                .collect(),
             selected_spec,
         })
     }
@@ -1633,7 +1673,12 @@ impl HiveDaemon {
         let active_runs = self
             .agent_runs
             .iter()
-            .filter(|run| matches!(run.status.as_str(), "planning" | "running" | "pending_approval"))
+            .filter(|run| {
+                matches!(
+                    run.status.as_str(),
+                    "planning" | "running" | "pending_approval"
+                )
+            })
             .map(agent_run_card)
             .collect();
         let recent_runs = self
@@ -1798,11 +1843,7 @@ impl HiveDaemon {
                 description: channel.description.clone(),
                 assigned_agents: channel.assigned_agents.clone(),
                 pinned_files: channel.pinned_files.clone(),
-                messages: channel
-                    .messages
-                    .iter()
-                    .map(channel_message_data)
-                    .collect(),
+                messages: channel.messages.iter().map(channel_message_data).collect(),
             });
 
         crate::protocol::ChannelsPanelData {
@@ -1826,7 +1867,10 @@ impl HiveDaemon {
                     last_seen: relative_time(peer.last_seen),
                 })
                 .collect();
-            let connected_count = peers.iter().filter(|peer| peer.status == "Connected").count();
+            let connected_count = peers
+                .iter()
+                .filter(|peer| peer.status == "Connected")
+                .count();
 
             crate::protocol::NetworkPanelData {
                 available: true,
@@ -1844,8 +1888,7 @@ impl HiveDaemon {
                 total_count: 0,
                 peers: Vec::new(),
                 note: Some(
-                    "Network runtime was not attached to the remote daemon in this process."
-                        .into(),
+                    "Network runtime was not attached to the remote daemon in this process.".into(),
                 ),
             }
         }
@@ -1866,7 +1909,10 @@ impl HiveDaemon {
 
         let project_root = self.workspace_root();
         let briefing = assistant.daily_briefing_for_project(Some(&project_root));
-        let approvals = assistant.approval_service.list_pending().unwrap_or_default();
+        let approvals = assistant
+            .approval_service
+            .list_pending()
+            .unwrap_or_default();
 
         crate::protocol::AssistantPanelData {
             connected_account_count: self.connected_account_count,
@@ -1874,7 +1920,10 @@ impl HiveDaemon {
                 greeting: "Good morning!".into(),
                 date: briefing.date.clone(),
                 event_count: briefing.events.len(),
-                unread_emails: briefing.email_summary.as_ref().map_or(0, |summary| summary.email_count),
+                unread_emails: briefing
+                    .email_summary
+                    .as_ref()
+                    .map_or(0, |summary| summary.email_count),
                 active_reminders: briefing.active_reminders.len(),
                 top_priority: briefing.action_items.first().cloned(),
             }),
@@ -1908,7 +1957,9 @@ impl HiveDaemon {
                 .map(|reminder| crate::protocol::AssistantReminderData {
                     title: reminder.title.clone(),
                     due: match &reminder.trigger {
-                        hive_assistant::ReminderTrigger::At(at) => at.format("%Y-%m-%d %H:%M").to_string(),
+                        hive_assistant::ReminderTrigger::At(at) => {
+                            at.format("%Y-%m-%d %H:%M").to_string()
+                        }
                         hive_assistant::ReminderTrigger::Recurring(expr) => {
                             format!("Recurring: {expr}")
                         }
@@ -1972,7 +2023,11 @@ impl HiveDaemon {
         let available_provider_types = self.available_provider_types();
         let configured_provider_types = configured_provider_types(&config);
         let mut available_models = Vec::new();
-        append_model_options(&mut available_models, &available_provider_types, &self.current_model);
+        append_model_options(
+            &mut available_models,
+            &available_provider_types,
+            &self.current_model,
+        );
 
         crate::protocol::ModelsPanelData {
             current_model: self.current_model.clone(),
@@ -1991,8 +2046,7 @@ impl HiveDaemon {
         let available_providers = provider_labels(&self.available_provider_types());
         let strategy_summary = if config.auto_routing {
             if config.project_models.is_empty() {
-                "Automatic routing is enabled and Hive will use the default fallback chain."
-                    .into()
+                "Automatic routing is enabled and Hive will use the default fallback chain.".into()
             } else {
                 format!(
                     "Automatic routing is enabled and {} project models are pinned into the fallback chain.",
@@ -2179,8 +2233,9 @@ impl HiveDaemon {
                 crate::protocol::HomePriorityCardData {
                     eyebrow: "Observe".into(),
                     title: "No approvals are blocking work".into(),
-                    detail: "Use Observe to inspect recent runs, failures, spend, and safety posture."
-                        .into(),
+                    detail:
+                        "Use Observe to inspect recent runs, failures, spend, and safety posture."
+                            .into(),
                     action_label: "Open Observe".into(),
                     action_panel: PANEL_OBSERVE.into(),
                     tone: "ready".into(),
@@ -2296,7 +2351,12 @@ impl HiveDaemon {
         let active_runs = self
             .agent_runs
             .iter()
-            .filter(|run| matches!(run.status.as_str(), "planning" | "running" | "pending_approval"))
+            .filter(|run| {
+                matches!(
+                    run.status.as_str(),
+                    "planning" | "running" | "pending_approval"
+                )
+            })
             .count();
 
         Ok(crate::protocol::ObservePanelData {
@@ -2318,7 +2378,12 @@ impl HiveDaemon {
                 agents: self
                     .agent_runs
                     .iter()
-                    .filter(|run| matches!(run.status.as_str(), "planning" | "running" | "pending_approval"))
+                    .filter(|run| {
+                        matches!(
+                            run.status.as_str(),
+                            "planning" | "running" | "pending_approval"
+                        )
+                    })
                     .map(|run| crate::protocol::ObserveAgentRow {
                         role: "remote".into(),
                         status: run.status.clone(),
@@ -2376,7 +2441,12 @@ impl HiveDaemon {
                     .count(),
                 threats_caught: recent_entries
                     .iter()
-                    .filter(|entry| matches!(entry.event_type.as_str(), "approval_denied" | "agent_failed" | "budget_exhausted"))
+                    .filter(|entry| {
+                        matches!(
+                            entry.event_type.as_str(),
+                            "approval_denied" | "agent_failed" | "budget_exhausted"
+                        )
+                    })
                     .count(),
                 recent_events: recent_entries
                     .iter()
@@ -2414,7 +2484,10 @@ impl HiveDaemon {
             .unwrap_or_default()
     }
 
-    fn approval_cards(&self, source_filter: Option<&str>) -> Vec<crate::protocol::ApprovalCardData> {
+    fn approval_cards(
+        &self,
+        source_filter: Option<&str>,
+    ) -> Vec<crate::protocol::ApprovalCardData> {
         let mut requests = self.approval_gate.pending_requests();
         requests.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
 
@@ -2426,7 +2499,9 @@ impl HiveDaemon {
                     PendingAction::Chat { .. } => "chat",
                     PendingAction::Agent { .. } => "observe",
                 };
-                if let Some(expected) = source_filter && source != expected {
+                if let Some(expected) = source_filter
+                    && source != expected
+                {
                     return None;
                 }
                 Some(approval_card(&request, source, action))
@@ -2489,7 +2564,9 @@ impl HiveDaemon {
 
     fn resolve_workspace_path(&self, raw_path: &str, fallback: Option<&Path>) -> Result<PathBuf> {
         let workspace_root = self.workspace_root();
-        let root = workspace_root.canonicalize().unwrap_or(workspace_root.clone());
+        let root = workspace_root
+            .canonicalize()
+            .unwrap_or(workspace_root.clone());
         let requested = if raw_path.trim().is_empty() {
             fallback
                 .map(Path::to_path_buf)
@@ -2634,22 +2711,11 @@ fn canonical_panel_id(panel: &str) -> String {
 fn panel_destination(panel: &str) -> Option<ShellDestination> {
     match canonical_panel_id(panel).as_str() {
         PANEL_HOME => Some(ShellDestination::Home),
-        PANEL_CHAT
-        | PANEL_HISTORY
-        | PANEL_FILES
-        | PANEL_CODE_MAP
-        | PANEL_PROMPTS
-        | PANEL_SPECS
-        | PANEL_AGENTS
-        | PANEL_GIT_OPS
-        | PANEL_TERMINAL => Some(ShellDestination::Build),
+        PANEL_CHAT | PANEL_HISTORY | PANEL_FILES | PANEL_CODE_MAP | PANEL_PROMPTS | PANEL_SPECS
+        | PANEL_AGENTS | PANEL_GIT_OPS | PANEL_TERMINAL => Some(ShellDestination::Build),
         PANEL_WORKFLOWS | PANEL_CHANNELS | PANEL_NETWORK => Some(ShellDestination::Automate),
         PANEL_ASSISTANT => Some(ShellDestination::Assist),
-        PANEL_OBSERVE
-        | PANEL_MONITOR
-        | PANEL_LOGS
-        | PANEL_COSTS
-        | PANEL_LEARNING
+        PANEL_OBSERVE | PANEL_MONITOR | PANEL_LOGS | PANEL_COSTS | PANEL_LEARNING
         | PANEL_SHIELD => Some(ShellDestination::Observe),
         _ => None,
     }
@@ -2680,21 +2746,56 @@ fn panel_registry() -> crate::protocol::PanelRegistry {
             crate::protocol::DestinationPanels {
                 destination: ShellDestination::Build,
                 panels: vec![
-                    panel_meta(PANEL_CHAT, "Chat", "Remote chat, approvals, and conversation resume.", true),
+                    panel_meta(
+                        PANEL_CHAT,
+                        "Chat",
+                        "Remote chat, approvals, and conversation resume.",
+                        true,
+                    ),
                     panel_meta(PANEL_FILES, "Files", "Browse workspace files.", true),
-                    panel_meta(PANEL_HISTORY, "History", "Review prior conversations.", true),
+                    panel_meta(
+                        PANEL_HISTORY,
+                        "History",
+                        "Review prior conversations.",
+                        true,
+                    ),
                     panel_meta(PANEL_SPECS, "Specs", "Track implementation specs.", true),
                     panel_meta(PANEL_AGENTS, "Agents", "Monitor distributed runs.", true),
-                    panel_meta(PANEL_GIT_OPS, "Git Ops", "Review branches, diffs, and shipping state.", true),
-                    panel_meta(PANEL_TERMINAL, "Terminal", "Run terminal actions remotely.", true),
+                    panel_meta(
+                        PANEL_GIT_OPS,
+                        "Git Ops",
+                        "Review branches, diffs, and shipping state.",
+                        true,
+                    ),
+                    panel_meta(
+                        PANEL_TERMINAL,
+                        "Terminal",
+                        "Run terminal actions remotely.",
+                        true,
+                    ),
                 ],
             },
             crate::protocol::DestinationPanels {
                 destination: ShellDestination::Automate,
                 panels: vec![
-                    panel_meta(PANEL_WORKFLOWS, "Workflows", "Run and inspect workflow automations.", true),
-                    panel_meta(PANEL_CHANNELS, "Channels", "Watch connected channels.", true),
-                    panel_meta(PANEL_NETWORK, "Network", "Inspect networked execution paths.", true),
+                    panel_meta(
+                        PANEL_WORKFLOWS,
+                        "Workflows",
+                        "Run and inspect workflow automations.",
+                        true,
+                    ),
+                    panel_meta(
+                        PANEL_CHANNELS,
+                        "Channels",
+                        "Watch connected channels.",
+                        true,
+                    ),
+                    panel_meta(
+                        PANEL_NETWORK,
+                        "Network",
+                        "Inspect networked execution paths.",
+                        true,
+                    ),
                 ],
             },
             crate::protocol::DestinationPanels {
@@ -2709,27 +2810,69 @@ fn panel_registry() -> crate::protocol::PanelRegistry {
             crate::protocol::DestinationPanels {
                 destination: ShellDestination::Observe,
                 panels: vec![
-                    panel_meta(PANEL_OBSERVE, "Observe", "Approval inbox, runtime, spend, and safety.", true),
-                    panel_meta(PANEL_MONITOR, "Monitor", "Runtime health and telemetry.", false),
+                    panel_meta(
+                        PANEL_OBSERVE,
+                        "Observe",
+                        "Approval inbox, runtime, spend, and safety.",
+                        true,
+                    ),
+                    panel_meta(
+                        PANEL_MONITOR,
+                        "Monitor",
+                        "Runtime health and telemetry.",
+                        false,
+                    ),
                     panel_meta(PANEL_LOGS, "Logs", "Inspect runtime and agent logs.", false),
-                    panel_meta(PANEL_COSTS, "Costs", "Review cost breakdowns and history.", false),
-                    panel_meta(PANEL_LEARNING, "Learning", "Inspect learned preferences and outcomes.", false),
-                    panel_meta(PANEL_SHIELD, "Shield", "Review safety posture and privacy controls.", false),
+                    panel_meta(
+                        PANEL_COSTS,
+                        "Costs",
+                        "Review cost breakdowns and history.",
+                        false,
+                    ),
+                    panel_meta(
+                        PANEL_LEARNING,
+                        "Learning",
+                        "Inspect learned preferences and outcomes.",
+                        false,
+                    ),
+                    panel_meta(
+                        PANEL_SHIELD,
+                        "Shield",
+                        "Review safety posture and privacy controls.",
+                        false,
+                    ),
                 ],
             },
         ],
         utility_panels: vec![
-            utility_panel(PANEL_SETTINGS, "Settings", "Configure Hive providers and runtime defaults."),
-            utility_panel(PANEL_MODELS, "Models", "Inspect and select available models."),
+            utility_panel(
+                PANEL_SETTINGS,
+                "Settings",
+                "Configure Hive providers and runtime defaults.",
+            ),
+            utility_panel(
+                PANEL_MODELS,
+                "Models",
+                "Inspect and select available models.",
+            ),
             utility_panel(PANEL_ROUTING, "Routing", "Review automatic model routing."),
             utility_panel(PANEL_SKILLS, "Skills", "Inspect installed skills."),
-            utility_panel(PANEL_LAUNCH, "Launch", "Token and deployment launch utilities."),
+            utility_panel(
+                PANEL_LAUNCH,
+                "Launch",
+                "Token and deployment launch utilities.",
+            ),
             utility_panel(PANEL_HELP, "Help", "Read docs and troubleshooting help."),
         ],
     }
 }
 
-fn panel_meta(id: &str, label: &str, description: &str, supported: bool) -> crate::protocol::PanelMeta {
+fn panel_meta(
+    id: &str,
+    label: &str,
+    description: &str,
+    supported: bool,
+) -> crate::protocol::PanelMeta {
     crate::protocol::PanelMeta {
         id: id.into(),
         label: label.into(),
@@ -3010,22 +3153,46 @@ fn configured_provider_types(config: &HiveConfig) -> Vec<hive_ai::types::Provide
 
     let mut providers = Vec::new();
 
-    if config.anthropic_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .anthropic_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::Anthropic);
     }
-    if config.openai_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .openai_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::OpenAI);
     }
-    if config.openrouter_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .openrouter_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::OpenRouter);
     }
-    if config.google_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .google_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::Google);
     }
-    if config.groq_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .groq_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::Groq);
     }
-    if config.litellm_url.as_ref().is_some_and(|url| !url.is_empty()) {
+    if config
+        .litellm_url
+        .as_ref()
+        .is_some_and(|url| !url.is_empty())
+    {
         providers.push(ProviderType::LiteLLM);
     }
     if config
@@ -3048,7 +3215,11 @@ fn configured_provider_types(config: &HiveConfig) -> Vec<hive_ai::types::Provide
     {
         providers.push(ProviderType::GenericLocal);
     }
-    if config.xai_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .xai_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::XAI);
     }
     if config
@@ -3058,10 +3229,18 @@ fn configured_provider_types(config: &HiveConfig) -> Vec<hive_ai::types::Provide
     {
         providers.push(ProviderType::Mistral);
     }
-    if config.venice_api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+    if config
+        .venice_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
         providers.push(ProviderType::Venice);
     }
-    if config.cloud_api_url.as_ref().is_some_and(|url| !url.is_empty()) {
+    if config
+        .cloud_api_url
+        .as_ref()
+        .is_some_and(|url| !url.is_empty())
+    {
         providers.push(ProviderType::HiveGateway);
     }
 
@@ -3081,26 +3260,37 @@ fn provider_credentials(config: &HiveConfig) -> Vec<crate::protocol::ProviderCre
     [
         ("anthropic", "Anthropic", config.anthropic_api_key.is_some()),
         ("openai", "OpenAI", config.openai_api_key.is_some()),
-        ("openrouter", "OpenRouter", config.openrouter_api_key.is_some()),
+        (
+            "openrouter",
+            "OpenRouter",
+            config.openrouter_api_key.is_some(),
+        ),
         ("google", "Google", config.google_api_key.is_some()),
         ("groq", "Groq", config.groq_api_key.is_some()),
-        ("huggingface", "Hugging Face", config.huggingface_api_key.is_some()),
+        (
+            "huggingface",
+            "Hugging Face",
+            config.huggingface_api_key.is_some(),
+        ),
         ("litellm", "LiteLLM", config.litellm_api_key.is_some()),
         ("xai", "xAI", config.xai_api_key.is_some()),
         ("mistral", "Mistral", config.mistral_api_key.is_some()),
         ("venice", "Venice", config.venice_api_key.is_some()),
     ]
     .into_iter()
-    .map(|(id, label, has_key)| crate::protocol::ProviderCredentialData {
-        id: id.into(),
-        label: label.into(),
-        has_key,
-    })
+    .map(
+        |(id, label, has_key)| crate::protocol::ProviderCredentialData {
+            id: id.into(),
+            label: label.into(),
+            has_key,
+        },
+    )
     .collect()
 }
 
 fn titleize_words(value: &str) -> String {
-    value.replace('_', " ")
+    value
+        .replace('_', " ")
         .split_whitespace()
         .map(|segment| {
             let mut chars = segment.chars();
@@ -3124,7 +3314,10 @@ fn approval_card(
             content,
             ..
         } => (
-            format!("Approve remote chat action for {}", request.operation_string()),
+            format!(
+                "Approve remote chat action for {}",
+                request.operation_string()
+            ),
             content.clone(),
             Some(conversation_id.clone()),
         ),
@@ -3169,10 +3362,7 @@ fn quality_score(runs: &[AgentRunSummary]) -> f64 {
     if finished == 0 {
         return 0.82;
     }
-    let completed = runs
-        .iter()
-        .filter(|run| run.status == "completed")
-        .count();
+    let completed = runs.iter().filter(|run| run.status == "completed").count();
     completed as f64 / finished as f64
 }
 
@@ -3356,9 +3546,7 @@ fn append_model_options(
     }
 }
 
-fn dedupe_models(
-    models: Vec<crate::protocol::ModelOption>,
-) -> Vec<crate::protocol::ModelOption> {
+fn dedupe_models(models: Vec<crate::protocol::ModelOption>) -> Vec<crate::protocol::ModelOption> {
     let mut seen = std::collections::HashSet::new();
     let mut deduped = Vec::new();
     for model in models {

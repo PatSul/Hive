@@ -76,6 +76,11 @@ impl LearningService {
         self.event_tx = Some(tx);
     }
 
+    /// Returns a clone of the cortex event sender when learning events are wired.
+    pub fn event_tx(&self) -> Option<CortexEventSender> {
+        self.event_tx.clone()
+    }
+
     /// Returns a shared reference to the underlying storage.
     ///
     /// Used by `LearningCortex` in `hive_app` so both share the same
@@ -101,6 +106,7 @@ impl LearningService {
             let _ = tx.send(CortexEvent::OutcomeRecorded {
                 interaction_id: record.message_id.clone(),
                 model: record.model_id.clone(),
+                persona: record.persona.clone(),
                 quality_score: record.quality_score,
                 outcome: serde_json::to_string(&record.outcome).unwrap_or_default(),
             });

@@ -23,6 +23,7 @@ actions!(
     hive_settings,
     [
         SettingsTogglePrivacy,
+        SettingsToggleAutoApply,
         SettingsToggleAutoRouting,
         SettingsToggleAutoUpdate,
         SettingsToggleNotifications,
@@ -65,6 +66,7 @@ pub struct SettingsData {
     pub privacy_mode: bool,
     pub default_model: String,
     pub auto_routing: bool,
+    pub auto_apply_enabled: bool,
     pub speculative_decoding: bool,
     pub speculative_show_metrics: bool,
     pub daily_budget_usd: f64,
@@ -122,6 +124,7 @@ impl Default for SettingsData {
             privacy_mode: false,
             default_model: String::new(),
             auto_routing: true,
+            auto_apply_enabled: true,
             speculative_decoding: false,
             speculative_show_metrics: true,
             daily_budget_usd: 10.0,
@@ -189,6 +192,7 @@ impl SettingsData {
             privacy_mode: cfg.privacy_mode,
             default_model: cfg.default_model.clone(),
             auto_routing: cfg.auto_routing,
+            auto_apply_enabled: cfg.auto_apply_enabled,
             speculative_decoding: cfg.speculative_decoding,
             speculative_show_metrics: cfg.speculative_show_metrics,
             daily_budget_usd: cfg.daily_budget_usd,
@@ -304,6 +308,7 @@ pub struct SettingsView {
     // Toggle states
     privacy_mode: bool,
     auto_routing: bool,
+    auto_apply_enabled: bool,
     speculative_decoding: bool,
     speculative_show_metrics: bool,
     auto_update: bool,
@@ -675,6 +680,7 @@ impl SettingsView {
             config_backup_password_input,
             privacy_mode: cfg.privacy_mode,
             auto_routing: cfg.auto_routing,
+            auto_apply_enabled: cfg.auto_apply_enabled,
             speculative_decoding: cfg.speculative_decoding,
             speculative_show_metrics: cfg.speculative_show_metrics,
             auto_update: cfg.auto_update,
@@ -1286,6 +1292,7 @@ impl SettingsView {
 
             privacy_mode: self.privacy_mode,
             auto_routing: self.auto_routing,
+            auto_apply_enabled: self.auto_apply_enabled,
             speculative_decoding: self.speculative_decoding,
             speculative_show_metrics: self.speculative_show_metrics,
             auto_update: self.auto_update,
@@ -1482,6 +1489,7 @@ pub struct SettingsSnapshot {
     pub monthly_budget: f64,
     pub privacy_mode: bool,
     pub auto_routing: bool,
+    pub auto_apply_enabled: bool,
     pub speculative_decoding: bool,
     pub speculative_show_metrics: bool,
     pub auto_update: bool,
@@ -1573,6 +1581,13 @@ impl Render for SettingsView {
             .on_action(
                 cx.listener(|this: &mut Self, _: &SettingsTogglePrivacy, _, cx| {
                     this.privacy_mode = !this.privacy_mode;
+                    cx.emit(SettingsSaved);
+                    cx.notify();
+                }),
+            )
+            .on_action(
+                cx.listener(|this: &mut Self, _: &SettingsToggleAutoApply, _, cx| {
+                    this.auto_apply_enabled = !this.auto_apply_enabled;
                     cx.emit(SettingsSaved);
                     cx.notify();
                 }),
@@ -2682,6 +2697,13 @@ impl SettingsView {
                     }),
             )
             .child(separator(theme))
+            .child(switch_row(
+                "Cortex Auto-Apply",
+                "cortex-auto-apply-switch",
+                self.auto_apply_enabled,
+                SettingsToggleAutoApply,
+                theme,
+            ))
             .child(switch_row(
                 "Auto Update",
                 "auto-update-switch",

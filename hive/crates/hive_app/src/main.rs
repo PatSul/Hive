@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod cortex_bridge_impl;
+mod cortex_runtime;
 mod tray;
 
 use std::borrow::Cow;
@@ -20,12 +21,13 @@ use hive_core::persistence::Database;
 use hive_core::security::SecurityGateway;
 use hive_core::updater::UpdateService;
 use hive_ui::globals::{
-    AppA2aClient, AppActivityService, AppAirweave, AppAgentNotifications, AppAiService,
+    AppA2aClient, AppActivityService, AppAgentNotifications, AppAiService, AppAirweave,
     AppApprovalGate, AppAssistant, AppAutomation, AppAws, AppAzure, AppBitbucket, AppBrowser,
     AppChannels, AppCli, AppCollectiveMemory, AppCompetenceDetector, AppConfig, AppContextEngine,
-    AppCortexEventTx, AppCortexStatus, AppCrossChannel, AppDatabase, AppDocker, AppDocsIndexer,
-    AppFleetLearning, AppGcp, AppGitLab, AppHeartbeatScheduler, AppHiveMemory, AppHueClient,
-    AppIde, AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning, AppLocalAiDetection,
+    AppCortexAutoApply, AppCortexEventTx, AppCortexInteractionTracker, AppCortexStatus,
+    AppCortexStatusRx, AppCrossChannel, AppDatabase, AppDocker, AppDocsIndexer, AppFleetLearning,
+    AppGcp, AppGitLab, AppHeartbeatScheduler, AppHiveMemory, AppHueClient, AppIde,
+    AppIntegrationDb, AppKnowledge, AppKubernetes, AppLearning, AppLocalAiDetection,
     AppMarketplace, AppMcpServer, AppMessaging, AppNetwork, AppNotifications, AppOllamaManager,
     AppPersonas, AppPluginManager, AppProjectManagement, AppRagService, AppReminderRx,
     AppRpcConfig, AppScheduler, AppSecurity, AppSemanticSearch, AppShield, AppSkillManager,
@@ -214,14 +216,16 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     // Create the cortex event bus up-front so every subsystem can publish
     // events regardless of whether LearningCortex itself initializes
     // successfully.
-    let (cortex_tx, _cortex_rx) =
-        hive_learn::cortex::event_bus::create_event_bus();
+    let (cortex_tx, cortex_rx) = hive_learn::cortex::event_bus::create_event_bus();
+    let mut cortex_rx = Some(cortex_rx);
+    let cortex_ui_rx = cortex_tx.subscribe();
+    let (cortex_status_tx, cortex_status_rx) = std::sync::mpsc::channel();
 
     // Interaction tracker shared with LearningCortex and the remote daemon.
     // Set inside the Ok arm; defaults to a fresh tracker if learning fails.
-    let mut cortex_interaction_tracker: Option<
-        std::sync::Arc<std::sync::atomic::AtomicI64>,
-    > = None;
+    let mut cortex_interaction_tracker: Option<std::sync::Arc<std::sync::atomic::AtomicI64>> = None;
+    let mut cortex_runtime_state: Option<hive_learn::cortex::LearningCortex> = None;
+    let mut learning_service_arc: Option<std::sync::Arc<hive_learn::LearningService>> = None;
 
     match learning_result {
         Ok(mut learning) => {
@@ -238,14 +242,19 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
                 std::sync::Arc::clone(learning.storage()),
                 cortex_tx.clone(),
             );
+            cortex.set_auto_apply_enabled(config.auto_apply_enabled);
             if let Err(e) = cortex.startup_recovery() {
                 warn!("Cortex startup recovery failed: {e}");
             }
             // Stash the interaction tracker so the remote daemon can use it.
             cortex_interaction_tracker = Some(cortex.interaction_tracker());
+            cx.set_global(AppCortexInteractionTracker(cortex.interaction_tracker()));
+            cx.set_global(AppCortexAutoApply(cortex.auto_apply_handle()));
             info!("LearningCortex initialized, startup recovery complete");
 
             let learning = std::sync::Arc::new(learning);
+            learning_service_arc = Some(std::sync::Arc::clone(&learning));
+            cortex_runtime_state = Some(cortex);
 
             // Wire the tier adjuster into the AI router so routing decisions
             // benefit from learned outcome data.
@@ -270,6 +279,9 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         changes_applied: 0,
         auto_apply_enabled: config.auto_apply_enabled,
     });
+    cx.set_global(AppCortexStatusRx(std::sync::Arc::new(std::sync::Mutex::new(
+        cortex_status_rx,
+    ))));
 
     // Privacy shield — load from persisted config.
     let shield = std::sync::Arc::new(hive_shield::HiveShield::new(config.shield.clone()));
@@ -409,6 +421,17 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     memory.set_event_tx(cortex_tx.clone());
     cx.set_global(AppCollectiveMemory(std::sync::Arc::new(memory)));
     info!("CollectiveMemory initialized");
+
+    if let (Some(cortex), Some(learning), Some(rx)) = (
+        cortex_runtime_state.take(),
+        learning_service_arc.take(),
+        cortex_rx.take(),
+    ) {
+        let collective = std::sync::Arc::clone(&cx.global::<AppCollectiveMemory>().0);
+        let executor = cortex_runtime::build_autoresearch_executor(&cx.global::<AppAiService>().0);
+        cortex_runtime::spawn_cortex_ui_bridge(cortex_ui_rx, cortex_status_tx.clone());
+        cortex_runtime::spawn_cortex_worker(cortex, learning, collective, rx, executor, cortex_status_tx);
+    }
 
     // Standup Service
     let standup = hive_agents::standup::StandupService::new();
@@ -1696,14 +1719,13 @@ fn start_ui_action_bridge(cx: &mut App) {
                     Ok(req) => {
                         let result = app
                             .update(|cx| {
-                                let action =
-                                    match hive_ui::core_types::action_bridge::make_action(
-                                        &req.action_name,
-                                        req.params,
-                                    ) {
-                                        Ok(a) => a,
-                                        Err(e) => return Err(e),
-                                    };
+                                let action = match hive_ui::core_types::action_bridge::make_action(
+                                    &req.action_name,
+                                    req.params,
+                                ) {
+                                    Ok(a) => a,
+                                    Err(e) => return Err(e),
+                                };
 
                                 let windows = cx.windows();
                                 if let Some(handle) = windows.first() {
@@ -1858,9 +1880,7 @@ fn main() {
                                                 error!("Failed to open window from tray: {e:#}");
                                                 notify_error(
                                                     cx,
-                                                    format!(
-                                                        "Failed to open window from tray: {e}"
-                                                    ),
+                                                    format!("Failed to open window from tray: {e}"),
                                                 );
                                             } else {
                                                 cx.activate(true);

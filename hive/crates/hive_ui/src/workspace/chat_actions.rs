@@ -5,14 +5,14 @@ use tracing::{error, info, warn};
 
 use hive_ai::speculative::{self, SpeculativeConfig};
 use hive_ai::types::{ChatRequest, ToolDefinition as AiToolDefinition};
-use hive_ui_core::AppCollectiveMemory;
+use hive_ui_core::{AppCollectiveMemory, AppCortexInteractionTracker};
 
 use super::{
-    data_refresh, AiProvider, AppActivityService, AppAgentNotifications, AppAiService,
-    AppConfig, AppContextEngine, AppContextSelection, AppHiveMemory, AppKnowledge,
-    AppKnowledgeFiles, AppLearning, AppMcpServer, AppQuickIndex, AppRagService, AppSecurity,
-    AppSemanticSearch, AppShield, AppSkillManager, AppTts, ApplyAllEdits, ApplyCodeBlock,
-    ChatReadAloud, ClearChat, HiveWorkspace, MessageRole, NewConversation, Panel,
+    AiProvider, AppActivityService, AppAgentNotifications, AppAiService, AppConfig,
+    AppContextEngine, AppContextSelection, AppHiveMemory, AppKnowledge, AppKnowledgeFiles,
+    AppLearning, AppMcpServer, AppQuickIndex, AppRagService, AppSecurity, AppSemanticSearch,
+    AppShield, AppSkillManager, AppTts, ApplyAllEdits, ApplyCodeBlock, ChatReadAloud, ClearChat,
+    HiveWorkspace, MessageRole, NewConversation, Panel, data_refresh,
 };
 
 pub(super) fn handle_new_conversation(
@@ -200,6 +200,13 @@ pub(super) fn handle_send_text(
 ) {
     if text.trim().is_empty() {
         return;
+    }
+
+    if cx.has_global::<AppCortexInteractionTracker>() {
+        cx.global::<AppCortexInteractionTracker>().0.store(
+            chrono::Utc::now().timestamp(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     let model = workspace.chat_service.read(cx).current_model().to_string();
@@ -420,8 +427,7 @@ pub(super) fn handle_send_text(
         {
             let fresh_sources =
                 hive_ai::KnowledgeFileScanner::scan(&workspace.current_project_root);
-            let knowledge_text =
-                hive_ai::KnowledgeFileScanner::format_for_context(&fresh_sources);
+            let knowledge_text = hive_ai::KnowledgeFileScanner::format_for_context(&fresh_sources);
 
             // Update the global so other systems see the latest state.
             cx.set_global(AppKnowledgeFiles(fresh_sources));
@@ -446,7 +452,9 @@ pub(super) fn handle_send_text(
 
         // Determine context format for AI prompt encoding.
         let ctx_format = if cx.has_global::<AppConfig>() {
-            hive_ai::ContextFormat::from_config_str(&cx.global::<AppConfig>().0.get().context_format)
+            hive_ai::ContextFormat::from_config_str(
+                &cx.global::<AppConfig>().0.get().context_format,
+            )
         } else {
             hive_ai::ContextFormat::Markdown
         };
@@ -598,7 +606,8 @@ pub(super) fn handle_send_text(
 
             // Check built-in skills registry
             if cx.has_global::<hive_ui_core::AppSkills>() {
-                if let Ok(instructions) = cx.global::<hive_ui_core::AppSkills>().0.dispatch(cmd_name)
+                if let Ok(instructions) =
+                    cx.global::<hive_ui_core::AppSkills>().0.dispatch(cmd_name)
                 {
                     skill_instructions = Some(instructions.to_string());
                 }
@@ -716,17 +725,17 @@ pub(super) fn handle_send_text(
             )
             .is_some();
 
-    let stream_setup: Option<(Arc<dyn AiProvider>, ChatRequest)> = if cx.has_global::<AppAiService>()
-    {
-        cx.global::<AppAiService>().0.prepare_stream(
-            ai_messages.clone(),
-            &model,
-            system_prompt.clone(),
-            Some(tool_defs.clone()),
-        )
-    } else {
-        None
-    };
+    let stream_setup: Option<(Arc<dyn AiProvider>, ChatRequest)> =
+        if cx.has_global::<AppAiService>() {
+            cx.global::<AppAiService>().0.prepare_stream(
+                ai_messages.clone(),
+                &model,
+                system_prompt.clone(),
+                Some(tool_defs.clone()),
+            )
+        } else {
+            None
+        };
 
     let Some((provider, request)) = stream_setup else {
         workspace.chat_service.update(cx, |svc, cx| {
@@ -745,23 +754,25 @@ pub(super) fn handle_send_text(
     let request_for_loop = request.clone();
 
     // Clone async-capable globals for capture by the spawn blocks.
-    let hive_mem_for_async: Option<std::sync::Arc<tokio::sync::Mutex<hive_ai::memory::HiveMemory>>> =
-        if cx.has_global::<AppHiveMemory>() {
-            Some(cx.global::<AppHiveMemory>().0.clone())
+    let hive_mem_for_async: Option<
+        std::sync::Arc<tokio::sync::Mutex<hive_ai::memory::HiveMemory>>,
+    > = if cx.has_global::<AppHiveMemory>() {
+        Some(cx.global::<AppHiveMemory>().0.clone())
+    } else {
+        None
+    };
+    let knowledge_hub_for_async: Option<
+        std::sync::Arc<hive_integrations::knowledge::KnowledgeHub>,
+    > = if cx.has_global::<AppKnowledge>() {
+        let kb = cx.global::<AppKnowledge>().0.clone();
+        if kb.provider_count() > 0 {
+            Some(kb)
         } else {
             None
-        };
-    let knowledge_hub_for_async: Option<std::sync::Arc<hive_integrations::knowledge::KnowledgeHub>> =
-        if cx.has_global::<AppKnowledge>() {
-            let kb = cx.global::<AppKnowledge>().0.clone();
-            if kb.provider_count() > 0 {
-                Some(kb)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        }
+    } else {
+        None
+    };
     let query_for_memory = user_query_text.clone();
 
     let task = if use_speculative {
@@ -1095,9 +1106,7 @@ pub(super) fn try_handle_swarm_send(
                             hive_agents::swarm::TeamStatus::Failed => {
                                 TaskDisplayStatus::Failed(tr.error.clone().unwrap_or_default())
                             }
-                            hive_agents::swarm::TeamStatus::Running => {
-                                TaskDisplayStatus::Running
-                            }
+                            hive_agents::swarm::TeamStatus::Running => TaskDisplayStatus::Running,
                             _ => TaskDisplayStatus::Pending,
                         };
                         TaskDisplay {
@@ -1111,8 +1120,7 @@ pub(super) fn try_handle_swarm_send(
                                 let s = match i {
                                     hive_agents::swarm::InnerResult::Native { content, .. }
                                     | hive_agents::swarm::InnerResult::SingleShot {
-                                        content,
-                                        ..
+                                        content, ..
                                     } => content.clone(),
                                     _ => String::new(),
                                 };

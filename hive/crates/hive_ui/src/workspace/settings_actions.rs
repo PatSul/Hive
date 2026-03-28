@@ -5,13 +5,13 @@ use tracing::{error, info, warn};
 
 use super::{
     AppA2aClient, AppAiService, AppAirweave, AppAutomation, AppAws, AppAzure, AppBitbucket,
-    AppBrowser, AppConfig, AppContextEngine, AppDocker, AppDocsIndexer, AppGcp, AppGitLab,
-    AppHueClient,
-    AppIntegrationDb, AppKnowledge, AppKubernetes, AppMcpServer, AppMessaging,
-    AppOllamaManager, AppProjectManagement, AppRagService, AppRpcConfig, AppTheme, AppTts,
-    AppWallets, project_context, ContextFormatChanged, ExportConfig, HiveConfig, HiveWorkspace,
-    ImportConfig, NotificationType, SettingsSave, SettingsView, ThemeChanged,
+    AppBrowser, AppConfig, AppContextEngine, AppCortexStatus, AppDocker, AppDocsIndexer, AppGcp,
+    AppGitLab, AppHueClient, AppIntegrationDb, AppKnowledge, AppKubernetes, AppMcpServer,
+    AppMessaging, AppOllamaManager, AppProjectManagement, AppRagService, AppRpcConfig, AppTheme,
+    AppTts, AppWallets, ContextFormatChanged, ExportConfig, HiveConfig, HiveWorkspace,
+    ImportConfig, NotificationType, SettingsSave, SettingsView, ThemeChanged, project_context,
 };
+use hive_ui_core::AppCortexAutoApply;
 
 pub(super) fn handle_settings_save(
     _workspace: &mut HiveWorkspace,
@@ -157,8 +157,7 @@ pub(super) fn handle_export_config(
             cx,
             NotificationType::Warning,
             "Config Export",
-            "Enter a backup password in Settings -> Import & Export before exporting."
-                .to_string(),
+            "Enter a backup password in Settings -> Import & Export before exporting.".to_string(),
         );
         return;
     }
@@ -192,7 +191,10 @@ pub(super) fn handle_export_config(
     match result {
         Ok(()) => {
             let len = blob.len();
-            info!("ExportConfig: wrote {len} bytes to {}", export_path.display());
+            info!(
+                "ExportConfig: wrote {len} bytes to {}",
+                export_path.display()
+            );
             workspace.push_notification(
                 cx,
                 NotificationType::Success,
@@ -282,7 +284,10 @@ pub(super) fn handle_import_config(
     let data = match std::fs::read(&import_path) {
         Ok(data) => data,
         Err(e) => {
-            error!("ImportConfig: failed to read {}: {e}", import_path.display());
+            error!(
+                "ImportConfig: failed to read {}: {e}",
+                import_path.display()
+            );
             workspace.push_notification(
                 cx,
                 NotificationType::Error,
@@ -415,6 +420,7 @@ pub(super) fn handle_settings_save_from_view(
             cfg.monthly_budget_usd = snapshot.monthly_budget;
             cfg.privacy_mode = snapshot.privacy_mode;
             cfg.auto_routing = snapshot.auto_routing;
+            cfg.auto_apply_enabled = snapshot.auto_apply_enabled;
             cfg.speculative_decoding = snapshot.speculative_decoding;
             cfg.speculative_show_metrics = snapshot.speculative_show_metrics;
             cfg.auto_update = snapshot.auto_update;
@@ -512,6 +518,16 @@ pub(super) fn handle_settings_save_from_view(
             snapshot.default_model
         };
         workspace.status_bar.privacy_mode = snapshot.privacy_mode;
+
+        if cx.has_global::<AppCortexAutoApply>() {
+            cx.global::<AppCortexAutoApply>().0.store(
+                snapshot.auto_apply_enabled,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        if cx.has_global::<AppCortexStatus>() {
+            cx.global_mut::<AppCortexStatus>().auto_apply_enabled = snapshot.auto_apply_enabled;
+        }
     }
 
     if cx.has_global::<AppTts>() {
@@ -692,11 +708,11 @@ fn rewire_mcp_integrations(workspace: &mut HiveWorkspace, cx: &mut Context<HiveW
             None
         },
     };
-    cx.global_mut::<AppMcpServer>().0.wire_integrations(services);
+    cx.global_mut::<AppMcpServer>()
+        .0
+        .wire_integrations(services);
 
-    if cx.has_global::<hive_ui_core::AppCollectiveMemory>()
-        && cx.has_global::<AppContextEngine>()
-    {
+    if cx.has_global::<hive_ui_core::AppCollectiveMemory>() && cx.has_global::<AppContextEngine>() {
         let collective_memory = Arc::clone(&cx.global::<hive_ui_core::AppCollectiveMemory>().0);
         let context_engine = Arc::clone(&cx.global::<AppContextEngine>().0);
         cx.global_mut::<AppMcpServer>()

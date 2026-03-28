@@ -35,6 +35,7 @@ use hive_ui_core::{
     AppConfig,
     AppContextEngine,
     AppContextSelection,
+    AppCortexStatus,
     AppDatabase,
     AppDocker,
     AppDocsIndexer,
@@ -608,6 +609,12 @@ impl HiveWorkspace {
             } else {
                 ConnectivityDisplay::Online
             };
+        }
+        if cx.has_global::<AppCortexStatus>() {
+            let cortex = cx.global::<AppCortexStatus>();
+            status_bar.cortex_state = cortex.state.clone();
+            status_bar.cortex_changes_applied = cortex.changes_applied;
+            status_bar.cortex_auto_apply_enabled = cortex.auto_apply_enabled;
         }
 
         // -- Session recovery: restore last conversation + panel ----------------

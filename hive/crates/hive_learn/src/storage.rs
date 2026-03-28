@@ -14,12 +14,8 @@ pub struct LearningStorage {
 impl LearningStorage {
     /// Acquire the database connection lock. Used by the cortex module
     /// for direct SQL access to cortex-specific tables.
-    pub fn conn_lock(
-        &self,
-    ) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
-        self.conn
-            .lock()
-            .map_err(|e| format!("Lock poisoned: {e}"))
+    pub fn conn_lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+        self.conn.lock().map_err(|e| format!("Lock poisoned: {e}"))
     }
 
     /// Open (or create) a learning database at the given file path.

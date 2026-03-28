@@ -7,6 +7,9 @@ fn learning_panel_data_empty() {
     assert!(data.preferences.is_empty());
     assert!(data.prompt_suggestions.is_empty());
     assert!(data.routing_insights.is_empty());
+    assert!(data.cortex_changes.is_empty());
+    assert!(data.cortex_strategies.is_empty());
+    assert!(data.cortex_events.is_empty());
     assert!(data.weak_areas.is_empty());
     assert!(data.best_model.is_none());
     assert!(data.worst_model.is_none());
@@ -18,6 +21,9 @@ fn learning_panel_data_sample() {
     assert!(!data.log_entries.is_empty());
     assert!(!data.preferences.is_empty());
     assert!(!data.routing_insights.is_empty());
+    assert!(!data.cortex_changes.is_empty());
+    assert!(!data.cortex_strategies.is_empty());
+    assert!(!data.cortex_events.is_empty());
     assert!(data.best_model.is_some());
     assert!(data.worst_model.is_some());
 }

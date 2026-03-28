@@ -38,7 +38,10 @@ fn test_can_auto_apply_false_when_disabled() {
 
     let engine = GuardrailsEngine::new();
     let result = engine.can_auto_apply(Tier::Green, &cortex).unwrap();
-    assert!(!result, "auto-apply should be blocked when globally disabled");
+    assert!(
+        !result,
+        "auto-apply should be blocked when globally disabled"
+    );
 }
 
 #[test]
@@ -79,7 +82,10 @@ fn test_can_auto_apply_true_when_all_conditions_met() {
 
     let engine = GuardrailsEngine::new();
     let result = engine.can_auto_apply(Tier::Green, &cortex).unwrap();
-    assert!(result, "auto-apply should be allowed when all conditions pass");
+    assert!(
+        result,
+        "auto-apply should be allowed when all conditions pass"
+    );
 }
 
 // ── T018: should_rollback tests ─────────────────────────────────────────
@@ -203,7 +209,10 @@ fn test_check_soaking_skips_still_soaking_healthy() {
     cortex.insert_change(&change).unwrap();
 
     let updates = engine.check_soaking_changes(&cortex);
-    assert!(updates.is_empty(), "should skip changes that are still soaking and healthy");
+    assert!(
+        updates.is_empty(),
+        "should skip changes that are still soaking and healthy"
+    );
 }
 
 // ── T020-T021: quality degradation detection tests ──────────────────────
@@ -273,7 +282,10 @@ fn test_should_trigger_autoresearch_returns_degraded_persona() {
     }
 
     let result = cortex.should_trigger_autoresearch();
-    assert!(result.is_some(), "should find a persona needing improvement");
+    assert!(
+        result.is_some(),
+        "should find a persona needing improvement"
+    );
     // The degraded persona should be the one returned
     assert_eq!(result.unwrap(), "struggling");
 }

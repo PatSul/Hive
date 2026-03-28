@@ -23,11 +23,11 @@ pub fn create_event_bus() -> (CortexEventSender, CortexEventReceiver) {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CortexEvent {
     // ── From hive_learn ──────────────────────────────────────────────
-
     /// An AI interaction outcome was recorded.
     OutcomeRecorded {
         interaction_id: String,
         model: String,
+        persona: Option<String>,
         quality_score: f64,
         /// Serialized from hive_learn::Outcome.
         outcome: String,
@@ -65,7 +65,6 @@ pub enum CortexEvent {
     },
 
     // ── From hive_agents ─────────────────────────────────────────────
-
     /// A multi-agent swarm run completed.
     SwarmCompleted {
         goal_id: String,
@@ -90,7 +89,6 @@ pub enum CortexEvent {
     },
 
     // ── From AutoResearch ────────────────────────────────────────────
-
     /// A skill evaluation completed.
     SkillEvalCompleted {
         skill_id: String,
@@ -107,7 +105,6 @@ pub enum CortexEvent {
     },
 
     // ── From Cortex itself (meta-events) ─────────────────────────────
-
     /// An improvement was applied.
     ImprovementApplied {
         domain: Domain,
@@ -168,6 +165,7 @@ mod tests {
         let event = CortexEvent::OutcomeRecorded {
             interaction_id: "test-001".to_string(),
             model: "claude-3".to_string(),
+            persona: Some("coder".to_string()),
             quality_score: 0.85,
             outcome: "accepted".to_string(),
         };
@@ -202,6 +200,7 @@ mod tests {
             CortexEvent::OutcomeRecorded {
                 interaction_id: String::new(),
                 model: String::new(),
+                persona: None,
                 quality_score: 0.0,
                 outcome: String::new(),
             },
@@ -216,7 +215,11 @@ mod tests {
                 new_weight: 0.6,
             },
         ];
-        let expected = ["outcome_recorded", "improvement_applied", "strategy_weight_adjusted"];
+        let expected = [
+            "outcome_recorded",
+            "improvement_applied",
+            "strategy_weight_adjusted",
+        ];
         for (event, exp) in events.iter().zip(expected.iter()) {
             assert_eq!(event.event_type(), *exp);
         }
@@ -230,6 +233,7 @@ mod tests {
             let _ = tx.send(CortexEvent::OutcomeRecorded {
                 interaction_id: format!("test-{}", i),
                 model: "test".to_string(),
+                persona: None,
                 quality_score: 0.5,
                 outcome: "unknown".to_string(),
             });

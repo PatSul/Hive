@@ -84,10 +84,7 @@ impl GuardrailsEngine {
     /// - Soak expired AND quality held (or improved) -> `Confirmed`
     /// - Quality regressed beyond threshold -> `RolledBack`
     /// - Still soaking -> skipped (not included in output)
-    pub fn check_soaking_changes(
-        &self,
-        cortex: &LearningCortex,
-    ) -> Vec<(String, ChangeStatus)> {
+    pub fn check_soaking_changes(&self, cortex: &LearningCortex) -> Vec<(String, ChangeStatus)> {
         let soaking = match cortex.load_soaking_changes() {
             Ok(changes) => changes,
             Err(_) => return Vec::new(),
@@ -96,9 +93,9 @@ impl GuardrailsEngine {
         let mut updates = Vec::new();
 
         for change in &soaking {
-            let current_quality = change.quality_after.unwrap_or_else(|| {
-                change.quality_before.unwrap_or(0.0)
-            });
+            let current_quality = change
+                .quality_after
+                .unwrap_or_else(|| change.quality_before.unwrap_or(0.0));
 
             if self.should_rollback(change, current_quality) {
                 updates.push((change.change_id.clone(), ChangeStatus::RolledBack));

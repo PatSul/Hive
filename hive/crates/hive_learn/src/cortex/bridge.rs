@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use anyhow::Result;
 
@@ -125,12 +126,12 @@ pub enum BridgeAction {
 /// cortex.  Holds a `CortexBridge` for I/O and a `BridgeDeduplicator` to avoid
 /// processing the same content twice.
 pub struct BridgeProcessor {
-    bridge: Box<dyn CortexBridge>,
+    bridge: Arc<dyn CortexBridge>,
     dedup: BridgeDeduplicator,
 }
 
 impl BridgeProcessor {
-    pub fn new(bridge: Box<dyn CortexBridge>) -> Self {
+    pub fn new(bridge: Arc<dyn CortexBridge>) -> Self {
         Self {
             bridge,
             dedup: BridgeDeduplicator::new(),
@@ -142,10 +143,7 @@ impl BridgeProcessor {
     /// - `success_pattern` entries become prompt-refinement suggestions.
     /// - `model_insight` entries become routing-adjustment suggestions.
     /// - Duplicates (same category+content already processed) are skipped.
-    pub fn process_collective_to_individual(
-        &mut self,
-        entry: &BridgedMemoryEntry,
-    ) -> BridgeAction {
+    pub fn process_collective_to_individual(&mut self, entry: &BridgedMemoryEntry) -> BridgeAction {
         // Dedup check
         if self.dedup.is_duplicate(&entry.category, &entry.content) {
             return BridgeAction::Noop;
@@ -174,10 +172,7 @@ impl BridgeProcessor {
     /// - `PromptVersionCreated` with improving quality writes the version info.
     /// - `PatternExtracted` with quality > 0.8 writes the pattern.
     /// - Duplicates are skipped.
-    pub fn process_individual_to_collective(
-        &mut self,
-        event: &CortexEvent,
-    ) -> BridgeAction {
+    pub fn process_individual_to_collective(&mut self, event: &CortexEvent) -> BridgeAction {
         match event {
             CortexEvent::PromptVersionCreated {
                 persona,
@@ -212,9 +207,8 @@ impl BridgeProcessor {
                 }
 
                 let cat = "code_pattern".to_string();
-                let content = format!(
-                    "Pattern '{pattern_id}' ({language}/{category}) quality {quality:.2}"
-                );
+                let content =
+                    format!("Pattern '{pattern_id}' ({language}/{category}) quality {quality:.2}");
 
                 if self.dedup.is_duplicate(&cat, &content) {
                     return BridgeAction::Noop;
@@ -244,6 +238,11 @@ impl BridgeProcessor {
     pub fn bridge(&self) -> &dyn CortexBridge {
         self.bridge.as_ref()
     }
+
+    /// Clone the underlying bridge handle.
+    pub fn bridge_arc(&self) -> Arc<dyn CortexBridge> {
+        Arc::clone(&self.bridge)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +261,9 @@ fn extract_persona(content: &str) -> String {
     }
     if let Some(start) = content.find("persona: ") {
         let rest = &content[start + 9..];
-        let end = rest.find(|c: char| c == ',' || c == ')' || c == '\n').unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| c == ',' || c == ')' || c == '\n')
+            .unwrap_or(rest.len());
         return rest[..end].trim().to_string();
     }
     "default".to_string()
@@ -274,7 +275,9 @@ fn extract_task_type(content: &str) -> String {
     // Look for patterns like "task_type: foo" or "for task 'foo'"
     if let Some(start) = content.find("task_type: ") {
         let rest = &content[start + 11..];
-        let end = rest.find(|c: char| c == ',' || c == ')' || c == '\n').unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| c == ',' || c == ')' || c == '\n')
+            .unwrap_or(rest.len());
         return rest[..end].trim().to_string();
     }
     if let Some(start) = content.find("for task '") {
@@ -347,8 +350,14 @@ mod tests {
 
     #[test]
     fn test_extract_task_type() {
-        assert_eq!(extract_task_type("task_type: code_review, done"), "code_review");
-        assert_eq!(extract_task_type("for task 'debugging' quality 0.9"), "debugging");
+        assert_eq!(
+            extract_task_type("task_type: code_review, done"),
+            "code_review"
+        );
+        assert_eq!(
+            extract_task_type("for task 'debugging' quality 0.9"),
+            "debugging"
+        );
         assert_eq!(extract_task_type("nothing special"), "general");
     }
 }

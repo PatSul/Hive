@@ -3,12 +3,11 @@
 //! Displays performance metrics, learning log, preferences, prompt suggestions,
 //! pattern library, routing insights, and self-evaluation reports.
 //!
-//! TODO: Add a "Cortex" tab that shows:
+//! Cortex summary surfaces are included here:
 //!   - Current cortex state (idle/processing/applied) from `AppCortexStatus`
-//!   - Auto-apply toggle connected to `config.auto_apply_enabled`
-//!   - List of soaking/applied/rolled-back changes from `LearningCortex`
-//!   - Real-time event feed from the cortex event bus (T038)
-//!   - Toast notifications on auto-apply events (T039)
+//!   - Auto-apply toggle and applied-change count
+//!   - Recent soaking/applied/rolled-back changes
+//!   - Strategy weights and recent cortex event feed
 
 use gpui::*;
 use gpui_component::{Icon, IconName};
@@ -52,6 +51,49 @@ pub struct RoutingInsightDisplay {
     pub confidence: f64,
 }
 
+/// Display data for the current Cortex status.
+#[derive(Debug, Clone)]
+pub struct CortexStatusDisplay {
+    pub state: String,
+    pub changes_applied: u32,
+    pub auto_apply_enabled: bool,
+}
+
+/// Display data for an applied or soaking Cortex change.
+#[derive(Debug, Clone)]
+pub struct CortexChangeDisplay {
+    pub change_id: String,
+    pub domain: String,
+    pub tier: String,
+    pub status: String,
+    pub action: String,
+    pub applied_at: String,
+    pub soak_until: String,
+    pub quality_before: Option<f64>,
+    pub quality_after: Option<f64>,
+}
+
+/// Display data for a learned improvement strategy.
+#[derive(Debug, Clone)]
+pub struct CortexStrategyDisplay {
+    pub strategy_id: String,
+    pub domain: String,
+    pub weight: f64,
+    pub attempts: u32,
+    pub successes: u32,
+    pub failures: u32,
+    pub avg_impact: f64,
+    pub last_adjusted: String,
+}
+
+/// Display data for the Cortex event feed.
+#[derive(Debug, Clone)]
+pub struct CortexEventDisplay {
+    pub event_type: String,
+    pub summary: String,
+    pub timestamp: String,
+}
+
 /// Display data for quality metrics.
 #[derive(Debug, Clone)]
 pub struct QualityMetrics {
@@ -84,6 +126,10 @@ pub struct LearningPanelData {
     pub preferences: Vec<PreferenceDisplay>,
     pub prompt_suggestions: Vec<PromptSuggestionDisplay>,
     pub routing_insights: Vec<RoutingInsightDisplay>,
+    pub cortex_status: CortexStatusDisplay,
+    pub cortex_changes: Vec<CortexChangeDisplay>,
+    pub cortex_strategies: Vec<CortexStrategyDisplay>,
+    pub cortex_events: Vec<CortexEventDisplay>,
     pub weak_areas: Vec<String>,
     pub best_model: Option<String>,
     pub worst_model: Option<String>,
@@ -97,6 +143,14 @@ impl LearningPanelData {
             preferences: Vec::new(),
             prompt_suggestions: Vec::new(),
             routing_insights: Vec::new(),
+            cortex_status: CortexStatusDisplay {
+                state: "idle".into(),
+                changes_applied: 0,
+                auto_apply_enabled: true,
+            },
+            cortex_changes: Vec::new(),
+            cortex_strategies: Vec::new(),
+            cortex_events: Vec::new(),
             weak_areas: Vec::new(),
             best_model: None,
             worst_model: None,
@@ -152,6 +206,37 @@ impl LearningPanelData {
                 to_tier: "Mid".into(),
                 confidence: 0.78,
             }],
+            cortex_status: CortexStatusDisplay {
+                state: "applied".into(),
+                changes_applied: 3,
+                auto_apply_enabled: true,
+            },
+            cortex_changes: vec![CortexChangeDisplay {
+                change_id: "chg_001".into(),
+                domain: "prompts".into(),
+                tier: "yellow".into(),
+                status: "soaking".into(),
+                action: "Promote prompt v12".into(),
+                applied_at: "2m ago".into(),
+                soak_until: "58m remaining".into(),
+                quality_before: Some(0.58),
+                quality_after: None,
+            }],
+            cortex_strategies: vec![CortexStrategyDisplay {
+                strategy_id: "prompt_mutation".into(),
+                domain: "prompts".into(),
+                weight: 0.72,
+                attempts: 12,
+                successes: 9,
+                failures: 3,
+                avg_impact: 0.11,
+                last_adjusted: "5m ago".into(),
+            }],
+            cortex_events: vec![CortexEventDisplay {
+                event_type: "prompt_version_created".into(),
+                summary: "coder v12 at 84% average quality".into(),
+                timestamp: "1m ago".into(),
+            }],
             weak_areas: vec!["regex_generation".into()],
             best_model: Some("claude-sonnet-4.5".into()),
             worst_model: Some("llama-3.1-8b".into()),
@@ -176,6 +261,13 @@ impl LearningPanel {
             .p(theme.space_4)
             .gap(theme.space_4)
             .child(render_header(theme))
+            .child(render_cortex_section(
+                &data.cortex_status,
+                &data.cortex_changes,
+                &data.cortex_strategies,
+                &data.cortex_events,
+                theme,
+            ))
             .child(render_metrics_section(&data.metrics, theme))
             .child(render_model_performance(
                 &data.best_model,
@@ -230,6 +322,364 @@ fn render_header(theme: &HiveTheme) -> AnyElement {
                         .text_color(theme.text_muted)
                         .child("Self-improvement through outcome tracking and adaptation"),
                 ),
+        )
+        .into_any_element()
+}
+
+// ---------------------------------------------------------------------------
+// Cortex overview
+// ---------------------------------------------------------------------------
+
+fn render_cortex_section(
+    status: &CortexStatusDisplay,
+    changes: &[CortexChangeDisplay],
+    strategies: &[CortexStrategyDisplay],
+    events: &[CortexEventDisplay],
+    theme: &HiveTheme,
+) -> AnyElement {
+    let state_color = cortex_state_color(status, theme);
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_3)
+        .p(theme.space_4)
+        .rounded(theme.radius_md)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(section_title("Cortex", theme))
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(theme.space_2)
+                .child(cortex_chip(
+                    "State",
+                    if status.auto_apply_enabled {
+                        status.state.as_str()
+                    } else {
+                        "paused"
+                    },
+                    state_color,
+                    theme,
+                ))
+                .child(cortex_chip(
+                    "Changes",
+                    &status.changes_applied.to_string(),
+                    theme.accent_cyan,
+                    theme,
+                ))
+                .child(cortex_chip(
+                    "Auto-apply",
+                    if status.auto_apply_enabled {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    if status.auto_apply_enabled {
+                        theme.accent_green
+                    } else {
+                        theme.accent_yellow
+                    },
+                    theme,
+                )),
+        )
+        .child(cortex_subsection("Recent Changes", changes, theme))
+        .child(cortex_strategy_section(strategies, theme))
+        .child(cortex_event_section(events, theme))
+        .into_any_element()
+}
+
+fn cortex_chip(label: &str, value: &str, color: Hsla, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_2)
+        .py(px(2.0))
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_tertiary)
+        .text_size(theme.font_size_xs)
+        .child(
+            div()
+                .text_color(theme.text_muted)
+                .child(format!("{label}:")),
+        )
+        .child(
+            div()
+                .text_color(color)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(value.to_string()),
+        )
+        .into_any_element()
+}
+
+fn cortex_state_color(status: &CortexStatusDisplay, theme: &HiveTheme) -> Hsla {
+    if !status.auto_apply_enabled {
+        theme.accent_yellow
+    } else {
+        match status.state.as_str() {
+            "processing" => theme.accent_yellow,
+            "applied" => theme.accent_green,
+            "paused" => theme.accent_yellow,
+            _ => theme.text_secondary,
+        }
+    }
+}
+
+fn cortex_subsection(
+    title: &str,
+    changes: &[CortexChangeDisplay],
+    theme: &HiveTheme,
+) -> AnyElement {
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .child(section_title(title, theme));
+
+    if changes.is_empty() {
+        section = section.child(empty_state("No cortex changes recorded yet", theme));
+    } else {
+        for change in changes {
+            section = section.child(cortex_change_row(change, theme));
+        }
+    }
+
+    section.into_any_element()
+}
+
+fn cortex_change_row(change: &CortexChangeDisplay, theme: &HiveTheme) -> AnyElement {
+    let status_color = match change.status.as_str() {
+        "confirmed" => theme.accent_green,
+        "rolled_back" => theme.accent_red,
+        "soaking" => theme.accent_yellow,
+        _ => theme.text_secondary,
+    };
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .p(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(change.action.clone()),
+                )
+                .child(div().flex_1())
+                .child(cortex_chip("Status", &change.status, status_color, theme)),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(theme.space_2)
+                .child(cortex_inline_pair("Domain", &change.domain, theme))
+                .child(cortex_inline_pair("Tier", &change.tier, theme))
+                .child(cortex_inline_pair("Applied", &change.applied_at, theme))
+                .child(cortex_inline_pair("Soak until", &change.soak_until, theme)),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(match (change.quality_before, change.quality_after) {
+                    (Some(before), Some(after)) => format!(
+                        "Quality {:.0}% -> {:.0}% (id: {})",
+                        before * 100.0,
+                        after * 100.0,
+                        change.change_id
+                    ),
+                    (Some(before), None) => format!(
+                        "Baseline {:.0}% quality (id: {})",
+                        before * 100.0,
+                        change.change_id
+                    ),
+                    _ => format!("Change ID {}", change.change_id),
+                }),
+        )
+        .into_any_element()
+}
+
+fn cortex_strategy_section(strategies: &[CortexStrategyDisplay], theme: &HiveTheme) -> AnyElement {
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .child(section_title("Strategy Weights", theme));
+
+    if strategies.is_empty() {
+        section = section.child(empty_state(
+            "No Cortex strategies have been persisted yet",
+            theme,
+        ));
+    } else {
+        for strategy in strategies {
+            section = section.child(cortex_strategy_row(strategy, theme));
+        }
+    }
+
+    section.into_any_element()
+}
+
+fn cortex_strategy_row(strategy: &CortexStrategyDisplay, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .p(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.space_2)
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(strategy.strategy_id.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(format!("{} / {}", strategy.domain, strategy.last_adjusted)),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .text_size(theme.font_size_sm)
+                        .text_color(theme.accent_cyan)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("{:.0}%", strategy.weight * 100.0)),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(theme.space_2)
+                .child(cortex_inline_pair(
+                    "Attempts",
+                    &strategy.attempts.to_string(),
+                    theme,
+                ))
+                .child(cortex_inline_pair(
+                    "Successes",
+                    &strategy.successes.to_string(),
+                    theme,
+                ))
+                .child(cortex_inline_pair(
+                    "Failures",
+                    &strategy.failures.to_string(),
+                    theme,
+                ))
+                .child(cortex_inline_pair(
+                    "Avg impact",
+                    &format!("{:.0}%", strategy.avg_impact * 100.0),
+                    theme,
+                )),
+        )
+        .into_any_element()
+}
+
+fn cortex_event_section(events: &[CortexEventDisplay], theme: &HiveTheme) -> AnyElement {
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap(theme.space_2)
+        .child(section_title("Event Feed", theme));
+
+    if events.is_empty() {
+        section = section.child(empty_state(
+            "No Cortex events have been recorded yet",
+            theme,
+        ));
+    } else {
+        for event in events {
+            section = section.child(cortex_event_row(event, theme));
+        }
+    }
+
+    section.into_any_element()
+}
+
+fn cortex_event_row(event: &CortexEventDisplay, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_2)
+        .p(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(theme.bg_surface)
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .px(theme.space_1)
+                .py(px(1.0))
+                .rounded(theme.radius_sm)
+                .bg(theme.bg_tertiary)
+                .text_size(theme.font_size_xs)
+                .text_color(theme.accent_cyan)
+                .min_w(px(132.0))
+                .child(event.event_type.clone()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_primary)
+                .child(event.summary.clone()),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(event.timestamp.clone()),
+        )
+        .into_any_element()
+}
+
+fn cortex_inline_pair(label: &str, value: &str, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(4.0))
+        .text_size(theme.font_size_xs)
+        .child(
+            div()
+                .text_color(theme.text_muted)
+                .child(format!("{label}:")),
+        )
+        .child(
+            div()
+                .text_color(theme.text_secondary)
+                .child(value.to_string()),
         )
         .into_any_element()
 }

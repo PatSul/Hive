@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use gpui::*;
+use hive_ui_core::{AppCortexStatus, AppCortexStatusRx, CortexUiUpdate};
 use tracing::info;
 
 use super::{
-    network_actions, project_context, AppAgentNotifications, AppAiService, AppNotification,
-    AppNotifications, AppReminderRx, AppUpdater, ConnectivityDisplay, HiveWorkspace,
-    NotificationType, Panel, SystemResources,
+    AppAgentNotifications, AppAiService, AppNotification, AppNotifications, AppReminderRx,
+    AppUpdater, ConnectivityDisplay, HiveWorkspace, NotificationType, Panel, SystemResources,
+    network_actions, project_context,
 };
 
 /// Sync status bar with current chat service state.
@@ -28,9 +29,40 @@ pub(super) fn sync_status_bar(
 
     workspace.status_bar.active_project = project_context::project_label(workspace);
 
-    // TODO: Add cortex status indicator here — read AppCortexStatus global
-    // and render a small icon/label in the status bar showing the cortex
-    // state (idle/processing/applied) and auto-apply toggle. (T037)
+    if cx.has_global::<AppCortexStatusRx>() {
+        let rx_arc = Arc::clone(&cx.global::<AppCortexStatusRx>().0);
+        if let Ok(rx) = rx_arc.lock() {
+            while let Ok(update) = rx.try_recv() {
+                match update {
+                    CortexUiUpdate::SetState(state) => {
+                        if cx.has_global::<AppCortexStatus>() {
+                            cx.global_mut::<AppCortexStatus>().state = state;
+                        }
+                    }
+                    CortexUiUpdate::IncrementAppliedChanges => {
+                        if cx.has_global::<AppCortexStatus>() {
+                            cx.global_mut::<AppCortexStatus>().changes_applied += 1;
+                        }
+                    }
+                    CortexUiUpdate::SetAutoApplyEnabled(enabled) => {
+                        if cx.has_global::<AppCortexStatus>() {
+                            cx.global_mut::<AppCortexStatus>().auto_apply_enabled = enabled;
+                        }
+                    }
+                    CortexUiUpdate::NotifyRollback { title, message } => {
+                        workspace.push_notification(cx, NotificationType::Warning, &title, message);
+                    }
+                }
+            }
+        }
+    }
+
+    if cx.has_global::<AppCortexStatus>() {
+        let cortex = cx.global::<AppCortexStatus>();
+        workspace.status_bar.cortex_state = cortex.state.clone();
+        workspace.status_bar.cortex_changes_applied = cortex.changes_applied;
+        workspace.status_bar.cortex_auto_apply_enabled = cortex.auto_apply_enabled;
+    }
 
     workspace.status_bar.current_model = if model.is_empty() {
         "Select Model".to_string()

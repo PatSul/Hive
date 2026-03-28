@@ -40,6 +40,7 @@ impl MetaLearner {
     /// (capped at 1.0), and updates `avg_impact` as a running average.
     pub fn record_success(&mut self, id: StrategyId, quality_delta: f64) {
         if let Some(strategy) = self.strategies.get_mut(&id) {
+            strategy.attempts += 1;
             strategy.successes += 1;
             strategy.weight = (strategy.weight * WEIGHT_SUCCESS_MULTIPLIER).min(WEIGHT_MAX);
             strategy.last_adjusted = chrono::Utc::now().timestamp();
@@ -56,6 +57,7 @@ impl MetaLearner {
     /// (floored at 0.1).
     pub fn record_failure(&mut self, id: StrategyId) {
         if let Some(strategy) = self.strategies.get_mut(&id) {
+            strategy.attempts += 1;
             strategy.failures += 1;
             strategy.weight = (strategy.weight * WEIGHT_FAILURE_MULTIPLIER).max(WEIGHT_MIN);
             strategy.last_adjusted = chrono::Utc::now().timestamp();
@@ -64,10 +66,7 @@ impl MetaLearner {
 
     /// Return the current weight for a strategy.
     pub fn get_weight(&self, id: StrategyId) -> f64 {
-        self.strategies
-            .get(&id)
-            .map(|s| s.weight)
-            .unwrap_or(0.5)
+        self.strategies.get(&id).map(|s| s.weight).unwrap_or(0.5)
     }
 
     /// Return a reference to a strategy by id.
@@ -123,5 +122,13 @@ impl MetaLearner {
     /// Return references to all strategies for persistence.
     pub fn to_save(&self) -> Vec<&Strategy> {
         self.strategies.values().collect()
+    }
+
+    /// Set an explicit weight, typically from a `StrategyWeightAdjusted` event.
+    pub fn set_weight(&mut self, id: StrategyId, weight: f64) {
+        if let Some(strategy) = self.strategies.get_mut(&id) {
+            strategy.weight = weight.clamp(WEIGHT_MIN, WEIGHT_MAX);
+            strategy.last_adjusted = chrono::Utc::now().timestamp();
+        }
     }
 }

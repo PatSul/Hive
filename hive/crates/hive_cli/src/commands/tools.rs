@@ -3,8 +3,8 @@
 use anyhow::{Context, Result};
 use hive_agents::integration_tools::IntegrationServices;
 use hive_agents::mcp_server::McpServer;
-use hive_core::config::ConfigManager;
 use hive_core::HiveConfig;
+use hive_core::config::ConfigManager;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -109,6 +109,18 @@ async fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
                 bridge_ip, api_key,
             ))
         });
+    let airweave = config
+        .airweave_url
+        .as_deref()
+        .zip(config.airweave_api_key.as_deref())
+        .and_then(|(url, key)| {
+            if url.is_empty() || key.is_empty() {
+                return None;
+            }
+            hive_integrations::airweave::AirweaveClient::new(url, key)
+                .ok()
+                .map(Arc::new)
+        });
 
     let services = IntegrationServices {
         messaging: Arc::new(hive_integrations::messaging::MessagingHub::new()),
@@ -125,6 +137,7 @@ async fn build_server(workspace_root: PathBuf) -> Result<McpServer> {
             config.ollama_url.clone(),
         ))),
         hue,
+        airweave,
         aws: Arc::new(hive_integrations::cloud::AwsClient::new(None, None)),
         azure: Arc::new(hive_integrations::cloud::AzureClient::new(None)),
         gcp: Arc::new(hive_integrations::cloud::GcpClient::new(None)),

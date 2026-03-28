@@ -1,16 +1,17 @@
 use std::path::PathBuf;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use gpui::*;
 use tracing::warn;
 
 use hive_core::config::HiveConfig;
+use hive_ui_core::AppCortexStatus;
 
 use super::{
-    format_network_relative_time, parse_etime, status_sync, AppAiService, AppApprovalGate,
-    AppConfig, AppDatabase, AppLearning, AppShield, AppSpecs, CostData, HiveWorkspace,
-    HistoryData, ObserveAgentRow, ObserveRunRow, ObserveRuntimeData, ObserveSafetyData,
-    ObserveSafetyEvent, ObserveSpendData, RoutingData,
+    AppAiService, AppApprovalGate, AppConfig, AppDatabase, AppLearning, AppShield, AppSpecs,
+    CostData, HistoryData, HiveWorkspace, ObserveAgentRow, ObserveRunRow, ObserveRuntimeData,
+    ObserveSafetyData, ObserveSafetyEvent, ObserveSpendData, RoutingData,
+    format_network_relative_time, parse_etime, status_sync,
 };
 
 pub(super) fn refresh_history(workspace: &mut HiveWorkspace) {
@@ -34,6 +35,7 @@ pub(super) fn refresh_learning_data(workspace: &mut HiveWorkspace, cx: &App) {
         return;
     }
     let learning = &cx.global::<AppLearning>().0;
+    let storage = learning.storage();
 
     let log_entries = learning
         .learning_log(20)
@@ -70,6 +72,20 @@ pub(super) fn refresh_learning_data(workspace: &mut HiveWorkspace, cx: &App) {
         .collect();
 
     let eval = learning.self_evaluator.evaluate().ok();
+    let cortex_status = if cx.has_global::<AppCortexStatus>() {
+        let status = cx.global::<AppCortexStatus>();
+        CortexStatusDisplay {
+            state: status.state.clone(),
+            changes_applied: status.changes_applied,
+            auto_apply_enabled: status.auto_apply_enabled,
+        }
+    } else {
+        CortexStatusDisplay {
+            state: "idle".into(),
+            changes_applied: 0,
+            auto_apply_enabled: true,
+        }
+    };
 
     workspace.learning_data = LearningPanelData {
         metrics: QualityMetrics {
@@ -86,10 +102,257 @@ pub(super) fn refresh_learning_data(workspace: &mut HiveWorkspace, cx: &App) {
         preferences,
         prompt_suggestions: Vec::new(),
         routing_insights,
+        cortex_status,
+        cortex_changes: load_cortex_changes(&storage),
+        cortex_strategies: load_cortex_strategies(&storage),
+        cortex_events: load_cortex_events(&storage),
         weak_areas: eval.as_ref().map_or(Vec::new(), |e| e.weak_areas.clone()),
         best_model: eval.as_ref().and_then(|e| e.best_model.clone()),
         worst_model: eval.as_ref().and_then(|e| e.worst_model.clone()),
     };
+}
+
+fn load_cortex_changes(
+    storage: &std::sync::Arc<hive_learn::storage::LearningStorage>,
+) -> Vec<hive_ui_panels::panels::learning::CortexChangeDisplay> {
+    let conn = match storage.conn_lock() {
+        Ok(conn) => conn,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT change_id, domain, tier, status, action, applied_at, soak_until, quality_before, quality_after
+         FROM cortex_changes
+         ORDER BY applied_at DESC
+         LIMIT 12",
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return Vec::new(),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok(hive_ui_panels::panels::learning::CortexChangeDisplay {
+            change_id: row.get(0)?,
+            domain: row.get(1)?,
+            tier: row.get(2)?,
+            status: row.get(3)?,
+            action: row.get(4)?,
+            applied_at: format_epoch_secs(row.get::<_, i64>(5)?),
+            soak_until: format_epoch_secs(row.get::<_, i64>(6)?),
+            quality_before: row.get(7)?,
+            quality_after: row.get(8)?,
+        })
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return Vec::new(),
+    };
+
+    rows.filter_map(Result::ok).collect()
+}
+
+fn load_cortex_strategies(
+    storage: &std::sync::Arc<hive_learn::storage::LearningStorage>,
+) -> Vec<hive_ui_panels::panels::learning::CortexStrategyDisplay> {
+    let conn = match storage.conn_lock() {
+        Ok(conn) => conn,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT strategy_id, domain, weight, attempts, successes, failures, avg_impact, last_adjusted
+         FROM cortex_strategies
+         ORDER BY weight DESC, attempts DESC",
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return Vec::new(),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok(hive_ui_panels::panels::learning::CortexStrategyDisplay {
+            strategy_id: row.get(0)?,
+            domain: row.get(1)?,
+            weight: row.get(2)?,
+            attempts: row.get(3)?,
+            successes: row.get(4)?,
+            failures: row.get(5)?,
+            avg_impact: row.get(6)?,
+            last_adjusted: format_epoch_secs(row.get::<_, i64>(7)?),
+        })
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return Vec::new(),
+    };
+
+    rows.filter_map(Result::ok).collect()
+}
+
+fn load_cortex_events(
+    storage: &std::sync::Arc<hive_learn::storage::LearningStorage>,
+) -> Vec<hive_ui_panels::panels::learning::CortexEventDisplay> {
+    let conn = match storage.conn_lock() {
+        Ok(conn) => conn,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut stmt = match conn.prepare(
+        "SELECT event_type, payload, timestamp
+         FROM cortex_events
+         ORDER BY timestamp DESC
+         LIMIT 16",
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return Vec::new(),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        let event_type: String = row.get(0)?;
+        let payload: String = row.get(1)?;
+        let timestamp: i64 = row.get(2)?;
+        Ok(hive_ui_panels::panels::learning::CortexEventDisplay {
+            event_type: event_type.clone(),
+            summary: summarize_cortex_event(&event_type, &payload),
+            timestamp: format_epoch_secs(timestamp),
+        })
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return Vec::new(),
+    };
+
+    rows.filter_map(Result::ok).collect()
+}
+
+fn format_epoch_secs(epoch: i64) -> String {
+    DateTime::<Utc>::from_timestamp(epoch, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| epoch.to_string())
+}
+
+fn summarize_cortex_event(event_type: &str, payload: &str) -> String {
+    let value = serde_json::from_str::<serde_json::Value>(payload).ok();
+
+    let get_str = |key: &str| {
+        value
+            .as_ref()
+            .and_then(|v| v.get(key))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+    };
+    let get_num = |key: &str| {
+        value
+            .as_ref()
+            .and_then(|v| v.get(key))
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+    };
+    let get_bool = |key: &str| {
+        value
+            .as_ref()
+            .and_then(|v| v.get(key))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+
+    match event_type {
+        "outcome_recorded" => format!(
+            "{} outcome on {} ({:.0}% quality)",
+            get_str("outcome"),
+            get_str("model"),
+            get_num("quality_score") * 100.0
+        ),
+        "routing_decision" => format!(
+            "{} -> {} (tier {}, {:.0}% confidence)",
+            get_str("task_type"),
+            get_str("model_chosen"),
+            value
+                .as_ref()
+                .and_then(|v| v.get("tier"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            get_num("quality_result") * 100.0
+        ),
+        "prompt_version_created" => format!(
+            "{} v{} at {:.0}% average quality",
+            get_str("persona"),
+            value
+                .as_ref()
+                .and_then(|v| v.get("version"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            get_num("avg_quality") * 100.0
+        ),
+        "self_eval_completed" => format!(
+            "Overall {:.0}% with {} weak areas",
+            get_num("overall_quality") * 100.0,
+            value
+                .as_ref()
+                .and_then(|v| v.get("weak_areas"))
+                .and_then(|v| v.as_array())
+                .map_or(0, |items| items.len())
+        ),
+        "swarm_completed" => format!(
+            "{} swarm run {} ({} agents)",
+            if get_bool("success") {
+                "Successful"
+            } else {
+                "Failed"
+            },
+            get_str("goal_id"),
+            value
+                .as_ref()
+                .and_then(|v| v.get("agent_count"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+        ),
+        "collective_memory_entry" => {
+            format!("{} memory: {}", get_str("category"), get_str("content"))
+        }
+        "skill_eval_completed" => format!(
+            "Skill {} pass rate {:.0}% (iteration {})",
+            get_str("skill_id"),
+            get_num("pass_rate") * 100.0,
+            value
+                .as_ref()
+                .and_then(|v| v.get("iteration"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+        ),
+        "prompt_mutated" => format!(
+            "Skill {} {:.0}% -> {:.0}%{}",
+            get_str("skill_id"),
+            get_num("old_pass_rate") * 100.0,
+            get_num("new_pass_rate") * 100.0,
+            if get_bool("promoted") {
+                " (promoted)"
+            } else {
+                ""
+            }
+        ),
+        "improvement_applied" => format!(
+            "{} applied to {} ({:.0}% expected impact)",
+            get_str("action"),
+            get_str("domain"),
+            get_num("expected_impact") * 100.0
+        ),
+        "improvement_rolled_back" => format!(
+            "{} rolled back for {}",
+            get_str("action"),
+            get_str("domain")
+        ),
+        "strategy_weight_adjusted" => format!(
+            "{} weight {:.2} -> {:.2}",
+            get_str("strategy"),
+            get_num("old_weight"),
+            get_num("new_weight")
+        ),
+        other => {
+            let snippet = payload.chars().take(96).collect::<String>();
+            if snippet.is_empty() {
+                other.to_string()
+            } else {
+                format!("{other}: {snippet}")
+            }
+        }
+    }
 }
 
 pub(super) fn refresh_activity_data(workspace: &mut HiveWorkspace, cx: &App) {
@@ -213,10 +476,7 @@ pub(super) fn refresh_specs_data(workspace: &mut HiveWorkspace, cx: &App) {
     }
 }
 
-pub(super) fn refresh_shield_data(
-    workspace: &mut HiveWorkspace,
-    cx: &mut Context<HiveWorkspace>,
-) {
+pub(super) fn refresh_shield_data(workspace: &mut HiveWorkspace, cx: &mut Context<HiveWorkspace>) {
     if cx.has_global::<AppShield>() {
         let shield = &cx.global::<AppShield>().0;
         workspace.shield_data.enabled = true;
@@ -257,28 +517,40 @@ pub(super) fn refresh_monitor_data(workspace: &mut HiveWorkspace, cx: &App) {
         let config = cx.global::<AppConfig>().0.get();
         let mut providers: Vec<ProviderStatus> = Vec::new();
 
-        let has_anthropic = config.anthropic_api_key.as_ref().is_some_and(|k| !k.is_empty());
+        let has_anthropic = config
+            .anthropic_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty());
         providers.push(ProviderStatus::new(
             "Anthropic",
             has_anthropic,
             if has_anthropic { Some(0) } else { None },
         ));
 
-        let has_openai = config.openai_api_key.as_ref().is_some_and(|k| !k.is_empty());
+        let has_openai = config
+            .openai_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty());
         providers.push(ProviderStatus::new(
             "OpenAI",
             has_openai,
             if has_openai { Some(0) } else { None },
         ));
 
-        let has_google = config.google_api_key.as_ref().is_some_and(|k| !k.is_empty());
+        let has_google = config
+            .google_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty());
         providers.push(ProviderStatus::new(
             "Google Gemini",
             has_google,
             if has_google { Some(0) } else { None },
         ));
 
-        let has_openrouter = config.openrouter_api_key.as_ref().is_some_and(|k| !k.is_empty());
+        let has_openrouter = config
+            .openrouter_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty());
         providers.push(ProviderStatus::new(
             "OpenRouter",
             has_openrouter,
@@ -362,7 +634,9 @@ pub(super) fn refresh_logs_data(workspace: &mut HiveWorkspace, cx: &App) {
             use hive_ui_panels::panels::logs::LogLevel;
             for row in rows.into_iter().rev() {
                 let level = LogLevel::from_str_lossy(&row.level);
-                workspace.logs_data.add_entry(level, row.source, row.message);
+                workspace
+                    .logs_data
+                    .add_entry(level, row.source, row.message);
             }
         }
         Err(e) => {

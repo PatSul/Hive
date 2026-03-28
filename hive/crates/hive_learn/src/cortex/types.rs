@@ -91,6 +91,15 @@ pub struct BridgedMemoryEntry {
     pub timestamp_epoch: i64,
 }
 
+/// Persisted event log row for Cortex observability queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CortexEventRecord {
+    pub id: i64,
+    pub event_type: String,
+    pub payload: String,
+    pub timestamp: i64,
+}
+
 /// Auto-apply safety tier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -106,17 +115,17 @@ pub enum Tier {
 impl Tier {
     pub fn soak_duration_secs(&self) -> i64 {
         match self {
-            Self::Green => 0,    // Immediate, but monitored
+            Self::Green => 0,     // Immediate, but monitored
             Self::Yellow => 3600, // 1 hour
-            Self::Red => 86400,  // 24 hours
+            Self::Red => 86400,   // 24 hours
         }
     }
 
     pub fn rollback_threshold(&self) -> f64 {
         match self {
-            Self::Green => 0.0,  // Any degradation in next 10 interactions
+            Self::Green => 0.0,   // Any degradation in next 10 interactions
             Self::Yellow => 0.15, // Quality drops > 15%
-            Self::Red => 0.10,   // Quality drops > 10%
+            Self::Red => 0.10,    // Quality drops > 10%
         }
     }
 
@@ -230,7 +239,12 @@ mod tests {
 
     #[test]
     fn test_domain_serde_roundtrip() {
-        for domain in [Domain::Routing, Domain::Prompts, Domain::Patterns, Domain::SwarmConfig] {
+        for domain in [
+            Domain::Routing,
+            Domain::Prompts,
+            Domain::Patterns,
+            Domain::SwarmConfig,
+        ] {
             let json = serde_json::to_string(&domain).unwrap();
             let parsed: Domain = serde_json::from_str(&json).unwrap();
             assert_eq!(domain, parsed);
@@ -255,7 +269,10 @@ mod tests {
     fn test_change_status_from_str() {
         assert_eq!(ChangeStatus::from_str("soaking"), ChangeStatus::Soaking);
         assert_eq!(ChangeStatus::from_str("confirmed"), ChangeStatus::Confirmed);
-        assert_eq!(ChangeStatus::from_str("rolled_back"), ChangeStatus::RolledBack);
+        assert_eq!(
+            ChangeStatus::from_str("rolled_back"),
+            ChangeStatus::RolledBack
+        );
         assert_eq!(ChangeStatus::from_str("unknown"), ChangeStatus::Soaking);
     }
 }

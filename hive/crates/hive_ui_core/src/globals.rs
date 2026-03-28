@@ -388,6 +388,29 @@ pub struct AppCortexStatus {
 }
 impl Global for AppCortexStatus {}
 
+/// UI-facing cortex updates sent from background runtime threads.
+#[derive(Debug, Clone)]
+pub enum CortexUiUpdate {
+    SetState(String),
+    IncrementAppliedChanges,
+    SetAutoApplyEnabled(bool),
+    NotifyRollback { title: String, message: String },
+}
+
+/// Receiver for background cortex status updates that the UI drains on tick.
+pub struct AppCortexStatusRx(
+    pub Arc<Mutex<std::sync::mpsc::Receiver<CortexUiUpdate>>>,
+);
+impl Global for AppCortexStatusRx {}
+
+/// Shared last-activity tracker used by local UI and remote sessions for cortex idle checks.
+pub struct AppCortexInteractionTracker(pub Arc<std::sync::atomic::AtomicI64>);
+impl Global for AppCortexInteractionTracker {}
+
+/// Shared auto-apply flag so settings changes take effect without restarting the app.
+pub struct AppCortexAutoApply(pub Arc<std::sync::atomic::AtomicBool>);
+impl Global for AppCortexAutoApply {}
+
 /// Global wrapper for the cortex event bus sender.
 ///
 /// Stored so any subsystem that creates ad-hoc objects (e.g. `Queen` in

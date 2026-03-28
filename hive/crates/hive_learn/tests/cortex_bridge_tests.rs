@@ -10,7 +10,7 @@
 use anyhow::Result;
 
 use hive_learn::cortex::bridge::{
-    BridgeAction, BridgeDeduplicator, BridgeProcessor, CortexBridge, BRIDGE_RELEVANCE_CAP,
+    BRIDGE_RELEVANCE_CAP, BridgeAction, BridgeDeduplicator, BridgeProcessor, CortexBridge,
     compute_content_hash,
 };
 use hive_learn::cortex::event_bus::CortexEvent;
@@ -21,7 +21,7 @@ use hive_learn::cortex::types::BridgedMemoryEntry;
 // ---------------------------------------------------------------------------
 
 use std::collections::HashSet;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 struct MockBridge {
     written: Mutex<Vec<(String, String, f64)>>,
@@ -71,7 +71,10 @@ impl CortexBridge for MockBridge {
     ) -> Result<()> {
         // Enforce the cap just like a real implementation would
         let capped = relevance_score.min(BRIDGE_RELEVANCE_CAP);
-        self.written.lock().unwrap().push((category, content, capped));
+        self.written
+            .lock()
+            .unwrap()
+            .push((category, content, capped));
         Ok(())
     }
 
@@ -171,7 +174,7 @@ fn test_dedup_len_tracks_unique() {
 
 #[test]
 fn test_processor_success_pattern_suggests_prompt_refinement() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let entry = BridgedMemoryEntry {
@@ -192,7 +195,7 @@ fn test_processor_success_pattern_suggests_prompt_refinement() {
 
 #[test]
 fn test_processor_model_insight_suggests_routing() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let entry = BridgedMemoryEntry {
@@ -213,7 +216,7 @@ fn test_processor_model_insight_suggests_routing() {
 
 #[test]
 fn test_processor_unknown_category_returns_noop() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let entry = BridgedMemoryEntry {
@@ -231,7 +234,7 @@ fn test_processor_unknown_category_returns_noop() {
 
 #[test]
 fn test_processor_dedup_blocks_repeated_entry() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let entry = BridgedMemoryEntry {
@@ -243,7 +246,10 @@ fn test_processor_dedup_blocks_repeated_entry() {
 
     // First call produces an action
     let first = processor.process_collective_to_individual(&entry);
-    assert!(matches!(first, BridgeAction::SuggestPromptRefinement { .. }));
+    assert!(matches!(
+        first,
+        BridgeAction::SuggestPromptRefinement { .. }
+    ));
 
     // Second call with identical content is blocked
     let second = processor.process_collective_to_individual(&entry);
@@ -256,7 +262,7 @@ fn test_processor_dedup_blocks_repeated_entry() {
 
 #[test]
 fn test_processor_prompt_version_v1_ignored() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let event = CortexEvent::PromptVersionCreated {
@@ -274,7 +280,7 @@ fn test_processor_prompt_version_v1_ignored() {
 
 #[test]
 fn test_processor_prompt_version_v2_bridges() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let event = CortexEvent::PromptVersionCreated {
@@ -295,7 +301,7 @@ fn test_processor_prompt_version_v2_bridges() {
 
 #[test]
 fn test_processor_pattern_below_threshold_ignored() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let event = CortexEvent::PatternExtracted {
@@ -314,7 +320,7 @@ fn test_processor_pattern_below_threshold_ignored() {
 
 #[test]
 fn test_processor_pattern_above_threshold_bridges() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let event = CortexEvent::PatternExtracted {
@@ -336,7 +342,7 @@ fn test_processor_pattern_above_threshold_bridges() {
 
 #[test]
 fn test_processor_dedup_blocks_repeated_event() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let event = CortexEvent::PromptVersionCreated {
@@ -349,17 +355,22 @@ fn test_processor_dedup_blocks_repeated_event() {
     assert!(matches!(first, BridgeAction::WriteToCollective { .. }));
 
     let second = processor.process_individual_to_collective(&event);
-    assert_eq!(second, BridgeAction::Noop, "Duplicate event should be blocked");
+    assert_eq!(
+        second,
+        BridgeAction::Noop,
+        "Duplicate event should be blocked"
+    );
 }
 
 #[test]
 fn test_processor_unrelated_event_is_noop() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let mut processor = BridgeProcessor::new(bridge);
 
     let event = CortexEvent::OutcomeRecorded {
         interaction_id: "i1".to_string(),
         model: "gpt-4".to_string(),
+        persona: Some("coder".to_string()),
         quality_score: 0.9,
         outcome: "accepted".to_string(),
     };
@@ -377,7 +388,7 @@ fn test_processor_unrelated_event_is_noop() {
 #[test]
 fn test_execute_write_caps_relevance() {
     let mock = MockBridge::new();
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     // We need to check that execute_write passes BRIDGE_RELEVANCE_CAP.
     // Use a processor with our mock.
     let mock_for_check = std::sync::Arc::new(MockBridge::new());
@@ -387,7 +398,8 @@ fn test_execute_write_caps_relevance() {
 
     let m = MockBridge::new();
     // Write with score > cap
-    m.write_to_collective("cat".to_string(), "content".to_string(), 1.0).unwrap();
+    m.write_to_collective("cat".to_string(), "content".to_string(), 1.0)
+        .unwrap();
     let written = m.written_entries();
     assert_eq!(written.len(), 1);
     assert!(
@@ -402,7 +414,8 @@ fn test_execute_write_caps_relevance() {
 #[test]
 fn test_execute_write_preserves_score_below_cap() {
     let m = MockBridge::new();
-    m.write_to_collective("cat".to_string(), "content".to_string(), 0.3).unwrap();
+    m.write_to_collective("cat".to_string(), "content".to_string(), 0.3)
+        .unwrap();
     let written = m.written_entries();
     assert_eq!(written.len(), 1);
     assert!(
@@ -426,10 +439,12 @@ fn test_bridge_relevance_cap_constant() {
 
 #[test]
 fn test_processor_execute_write_uses_cap() {
-    let bridge = Box::new(MockBridge::new());
+    let bridge = Arc::new(MockBridge::new());
     let processor = BridgeProcessor::new(bridge);
 
-    processor.execute_write("success_pattern", "some insight").unwrap();
+    processor
+        .execute_write("success_pattern", "some insight")
+        .unwrap();
 
     // We can read through the bridge reference
     // The mock's write_to_collective already caps at BRIDGE_RELEVANCE_CAP
@@ -444,7 +459,7 @@ fn test_processor_bridge_accessor() {
         relevance_score: 0.5,
         timestamp_epoch: 100,
     }];
-    let bridge = Box::new(MockBridge::with_entries(entries));
+    let bridge = Arc::new(MockBridge::with_entries(entries));
     let processor = BridgeProcessor::new(bridge);
 
     let read = processor.bridge().read_collective_entries(0, 10);

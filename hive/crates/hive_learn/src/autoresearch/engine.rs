@@ -52,8 +52,38 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
         initial_prompt: &str,
         test_input: &str,
     ) -> AutoResearchReport {
+        self.run_with_prompt_key(
+            skill_name,
+            &format!("skill:{skill_name}"),
+            suite,
+            initial_prompt,
+            test_input,
+        )
+        .await
+    }
+
+    /// Run the full autoresearch loop for a persona prompt directly.
+    pub async fn run_for_persona(
+        &self,
+        persona: &str,
+        suite: EvalSuite,
+        initial_prompt: &str,
+        test_input: &str,
+    ) -> AutoResearchReport {
+        self.run_with_prompt_key(persona, persona, suite, initial_prompt, test_input)
+            .await
+    }
+
+    async fn run_with_prompt_key(
+        &self,
+        skill_name: &str,
+        prompt_key: &str,
+        suite: EvalSuite,
+        initial_prompt: &str,
+        test_input: &str,
+    ) -> AutoResearchReport {
         let start = std::time::Instant::now();
-        let persona = format!("skill:{skill_name}");
+        let prompt_key = prompt_key.to_string();
         let evolver = PromptEvolver::new(Arc::clone(&self.storage));
         let eval_runner = EvalRunner::new(&self.config);
         let mutator = PromptMutator::new(&self.config);
@@ -75,12 +105,12 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
         }
 
         // Cold start: seed PromptEvolver if no version exists
-        if evolver.get_prompt(&persona).unwrap_or(None).is_none() {
-            let _ = evolver.apply_refinement(&persona, initial_prompt);
+        if evolver.get_prompt(&prompt_key).unwrap_or(None).is_none() {
+            let _ = evolver.apply_refinement(&prompt_key, initial_prompt);
         }
 
         let current_prompt = evolver
-            .get_prompt(&persona)
+            .get_prompt(&prompt_key)
             .unwrap_or(None)
             .unwrap_or_else(|| initial_prompt.to_string());
 
@@ -317,13 +347,13 @@ impl<E: AutoResearchExecutor> AutoResearchEngine<E> {
             // 3d: Compare
             let old_best_pass_rate = best_pass_rate;
             if is_new_best {
-                match evolver.apply_refinement(&persona, &mutated_prompt) {
+                match evolver.apply_refinement(&prompt_key, &mutated_prompt) {
                     Ok(version) => {
                         best_version = version;
                         best_pass_rate = candidate_pass_rate;
                         best_prompt = mutated_prompt.clone();
                         plateau_counter = 0;
-                        let _ = evolver.record_quality(&persona, candidate_pass_rate);
+                        let _ = evolver.record_quality(&prompt_key, candidate_pass_rate);
                         info!(
                             iteration,
                             version,
