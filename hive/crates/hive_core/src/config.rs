@@ -194,6 +194,7 @@ const KEY_TELNYX: &str = "api_key_telnyx";
 const KEY_XAI: &str = "api_key_xai";
 const KEY_MISTRAL: &str = "api_key_mistral";
 const KEY_VENICE: &str = "api_key_venice";
+const KEY_ZAI: &str = "api_key_zai";
 const KEY_HUE: &str = "api_key_hue";
 const KEY_AIRWEAVE: &str = "api_key_airweave";
 const KEY_KILO_PASSWORD: &str = "kilo_password";
@@ -387,6 +388,10 @@ pub struct HiveConfig {
     #[serde(skip)]
     pub venice_api_key: Option<String>,
 
+    // Z.AI (Zhipu / GLM)
+    #[serde(skip)]
+    pub zai_api_key: Option<String>,
+
     // Messaging provider tokens — stored in SecureStorage
     #[serde(skip)]
     pub slack_bot_token: Option<String>,
@@ -541,6 +546,7 @@ impl Default for HiveConfig {
             xai_api_key: None,
             mistral_api_key: None,
             venice_api_key: None,
+            zai_api_key: None,
             cloud_api_url: None,
             cloud_relay_url: None,
             cloud_jwt: None,
@@ -867,6 +873,7 @@ impl ConfigManager {
             config.xai_api_key = get_secure_key(ss, &key_map, KEY_XAI);
             config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
+            config.zai_api_key = get_secure_key(ss, &key_map, KEY_ZAI);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
             config.airweave_api_key = get_secure_key(ss, &key_map, KEY_AIRWEAVE);
             config.kilo_password = get_secure_key(ss, &key_map, KEY_KILO_PASSWORD);
@@ -920,6 +927,7 @@ impl ConfigManager {
             "xai" => config.xai_api_key.clone(),
             "mistral" => config.mistral_api_key.clone(),
             "venice" => config.venice_api_key.clone(),
+            "zai" => config.zai_api_key.clone(),
             "hue" => config.hue_api_key.clone(),
             "airweave" => config.airweave_api_key.clone(),
             "kilo_password" => config.kilo_password.clone(),
@@ -956,6 +964,7 @@ impl ConfigManager {
                 "xai" => config.xai_api_key = key.clone(),
                 "mistral" => config.mistral_api_key = key.clone(),
                 "venice" => config.venice_api_key = key.clone(),
+                "zai" => config.zai_api_key = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
                 "airweave" => config.airweave_api_key = key.clone(),
                 "kilo_password" => config.kilo_password = key.clone(),
@@ -1002,6 +1011,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_XAI, &config.xai_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_ZAI, &config.zai_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_AIRWEAVE, &config.airweave_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_KILO_PASSWORD, &config.kilo_password)?;
@@ -1112,6 +1122,7 @@ impl ConfigManager {
         ("xai", KEY_XAI),
         ("mistral", KEY_MISTRAL),
         ("venice", KEY_VENICE),
+        ("zai", KEY_ZAI),
         ("hue", KEY_HUE),
         ("airweave", KEY_AIRWEAVE),
     ];

@@ -2634,6 +2634,7 @@ fn ai_service_config(
             xai_api_key: cfg.xai_api_key.clone(),
             mistral_api_key: cfg.mistral_api_key.clone(),
             venice_api_key: cfg.venice_api_key.clone(),
+            zai_api_key: cfg.zai_api_key.clone(),
             litellm_url: cfg.litellm_url.clone(),
             litellm_api_key: cfg.litellm_api_key.clone(),
             ollama_url: cfg.ollama_url.clone(),
@@ -3237,6 +3238,13 @@ fn configured_provider_types(config: &HiveConfig) -> Vec<hive_ai::types::Provide
         providers.push(ProviderType::Venice);
     }
     if config
+        .zai_api_key
+        .as_ref()
+        .is_some_and(|key| !key.is_empty())
+    {
+        providers.push(ProviderType::Zai);
+    }
+    if config
         .cloud_api_url
         .as_ref()
         .is_some_and(|url| !url.is_empty())
@@ -3276,6 +3284,7 @@ fn provider_credentials(config: &HiveConfig) -> Vec<crate::protocol::ProviderCre
         ("xai", "xAI", config.xai_api_key.is_some()),
         ("mistral", "Mistral", config.mistral_api_key.is_some()),
         ("venice", "Venice", config.venice_api_key.is_some()),
+        ("zai", "Z.AI", config.zai_api_key.is_some()),
     ]
     .into_iter()
     .map(

@@ -28,6 +28,8 @@ pub mod venice;
 pub mod venice_catalog;
 pub mod xai;
 pub mod xai_catalog;
+pub mod zai;
+pub mod zai_catalog;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;

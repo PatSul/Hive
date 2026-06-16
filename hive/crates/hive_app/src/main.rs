@@ -138,6 +138,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         xai_api_key: config.xai_api_key.clone(),
         mistral_api_key: config.mistral_api_key.clone(),
         venice_api_key: config.venice_api_key.clone(),
+        zai_api_key: config.zai_api_key.clone(),
         litellm_url: config.litellm_url.clone(),
         litellm_api_key: config.litellm_api_key.clone(),
         ollama_url: config.ollama_url.clone(),

@@ -287,17 +287,27 @@ static CODE_BLOCK_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"```[\s\S]*?```").expect("code block regex"));
 
 /// Default model recommendations per tier.
+static FREE_MODELS: &[&str] = &["glm-4.5-flash"];
 static BUDGET_MODELS: &[&str] = &[
     "deepseek/deepseek-chat",
     "qwen/qwen-2.5-72b-instruct",
     "meta-llama/llama-3.3-70b-instruct",
+    "glm-4.5-air",
 ];
 static MID_MODELS: &[&str] = &[
     "claude-sonnet-4-20250514",
     "gpt-4o-mini",
     "gemini-1.5-flash",
+    "glm-4.6",
 ];
-static PREMIUM_MODELS: &[&str] = &["claude-opus-4-20250514", "gpt-4o", "o1", "gemini-1.5-pro"];
+static PREMIUM_MODELS: &[&str] = &[
+    "claude-opus-4-8",
+    "claude-opus-4-20250514",
+    "gpt-4o",
+    "o1",
+    "gemini-1.5-pro",
+    "glm-5.2",
+];
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -636,7 +646,8 @@ impl ComplexityClassifier {
         let models = match tier {
             ModelTier::Premium => PREMIUM_MODELS,
             ModelTier::Mid => MID_MODELS,
-            ModelTier::Budget | ModelTier::Free => BUDGET_MODELS,
+            ModelTier::Budget => BUDGET_MODELS,
+            ModelTier::Free => FREE_MODELS,
         };
         models.first().map(|s| (*s).to_owned())
     }

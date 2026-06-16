@@ -24,6 +24,7 @@ use crate::providers::openai::OpenAIProvider;
 use crate::providers::openrouter::OpenRouterProvider;
 use crate::providers::venice::VeniceProvider;
 use crate::providers::xai::XaiProvider;
+use crate::providers::zai::ZaiProvider;
 use crate::providers::{AiProvider, ProviderError};
 use crate::routing::ModelRouter;
 use crate::types::{
@@ -46,6 +47,7 @@ pub struct AiServiceConfig {
     pub xai_api_key: Option<String>,
     pub mistral_api_key: Option<String>,
     pub venice_api_key: Option<String>,
+    pub zai_api_key: Option<String>,
     pub litellm_url: Option<String>,
     pub litellm_api_key: Option<String>,
     pub ollama_url: String,
@@ -155,6 +157,12 @@ impl AiService {
                     Arc::new(VeniceProvider::new(key.clone())),
                 );
                 info!("Venice provider registered");
+            }
+            if let Some(ref key) = config.zai_api_key
+                && !key.is_empty()
+            {
+                providers.insert(ProviderType::Zai, Arc::new(ZaiProvider::new(key.clone())));
+                info!("Z.AI provider registered");
             }
         }
 
@@ -670,6 +678,7 @@ fn map_router_provider(rp: crate::routing::ProviderType) -> ProviderType {
         crate::routing::ProviderType::Doubao => ProviderType::Doubao,
         crate::routing::ProviderType::Venice => ProviderType::Venice,
         crate::routing::ProviderType::HiveGateway => ProviderType::HiveGateway,
+        crate::routing::ProviderType::Zai => ProviderType::Zai,
         crate::routing::ProviderType::Kilo => ProviderType::Kilo,
     }
 }
@@ -691,6 +700,7 @@ fn map_to_router_provider(pt: ProviderType) -> crate::routing::ProviderType {
         ProviderType::Doubao => crate::routing::ProviderType::Doubao,
         ProviderType::Venice => crate::routing::ProviderType::Venice,
         ProviderType::HiveGateway => crate::routing::ProviderType::HiveGateway,
+        ProviderType::Zai => crate::routing::ProviderType::Zai,
         ProviderType::Kilo => crate::routing::ProviderType::Kilo,
     }
 }
@@ -714,6 +724,7 @@ mod tests {
             xai_api_key: None,
             mistral_api_key: None,
             venice_api_key: None,
+            zai_api_key: None,
             huggingface_api_key: None,
             litellm_url: None,
             litellm_api_key: None,

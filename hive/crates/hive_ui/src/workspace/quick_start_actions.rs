@@ -170,6 +170,7 @@ pub(super) fn build_quick_start_data(
                     | hive_ai::types::ProviderType::XAI
                     | hive_ai::types::ProviderType::Mistral
                     | hive_ai::types::ProviderType::Venice
+                    | hive_ai::types::ProviderType::Zai
             )
         });
         let has_local = ai

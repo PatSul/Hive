@@ -42,6 +42,9 @@ pub fn provider_capabilities(provider: ProviderType) -> HashSet<ModelCapability>
         ProviderType::Doubao => [ModelCapability::ToolUse, ModelCapability::StructuredOutput]
             .into_iter()
             .collect(),
+        ProviderType::Zai => [ModelCapability::ToolUse, ModelCapability::StructuredOutput]
+            .into_iter()
+            .collect(),
         _ => HashSet::new(),
     }
 }
@@ -54,6 +57,24 @@ pub fn provider_capabilities(provider: ProviderType) -> HashSet<ModelCapability>
 pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
     vec![
         // ---- Anthropic ----
+        ModelInfo {
+            id: "claude-opus-4-8".into(),
+            name: "Claude Opus 4.8".into(),
+            provider: "anthropic".into(),
+            provider_type: ProviderType::Anthropic,
+            tier: ModelTier::Premium,
+            context_window: 200_000,
+            input_price_per_mtok: 5.0,
+            output_price_per_mtok: 25.0,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::Vision,
+                ModelCapability::ExtendedThinking,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
         ModelInfo {
             id: "claude-opus-4-6".into(),
             name: "Claude Opus 4.6".into(),
@@ -1018,6 +1039,63 @@ pub static MODEL_REGISTRY: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
             capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::StructuredOutput]),
             release_date: None,
         },
+        // ---- Z.AI (Zhipu / GLM) ----
+        ModelInfo {
+            id: "glm-5.2".into(),
+            name: "GLM-5.2".into(),
+            provider: "zai".into(),
+            provider_type: ProviderType::Zai,
+            tier: ModelTier::Premium,
+            context_window: 1_000_000,
+            input_price_per_mtok: 1.4,
+            output_price_per_mtok: 4.4,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "glm-4.6".into(),
+            name: "GLM-4.6".into(),
+            provider: "zai".into(),
+            provider_type: ProviderType::Zai,
+            tier: ModelTier::Mid,
+            context_window: 200_000,
+            input_price_per_mtok: 0.6,
+            output_price_per_mtok: 2.2,
+            capabilities: caps(&[
+                ModelCapability::ToolUse,
+                ModelCapability::StructuredOutput,
+                ModelCapability::LongContext,
+            ]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "glm-4.5-air".into(),
+            name: "GLM-4.5-Air".into(),
+            provider: "zai".into(),
+            provider_type: ProviderType::Zai,
+            tier: ModelTier::Budget,
+            context_window: 128_000,
+            input_price_per_mtok: 0.2,
+            output_price_per_mtok: 1.1,
+            capabilities: caps(&[ModelCapability::ToolUse, ModelCapability::StructuredOutput]),
+            release_date: None,
+        },
+        ModelInfo {
+            id: "glm-4.5-flash".into(),
+            name: "GLM-4.5-Flash".into(),
+            provider: "zai".into(),
+            provider_type: ProviderType::Zai,
+            tier: ModelTier::Free,
+            context_window: 128_000,
+            input_price_per_mtok: 0.0,
+            output_price_per_mtok: 0.0,
+            capabilities: caps(&[ModelCapability::ToolUse]),
+            release_date: None,
+        },
         // ---- Hugging Face ----
         ModelInfo {
             id: "meta-llama/Llama-3.3-70B-Instruct".into(),
@@ -1182,7 +1260,7 @@ mod tests {
     #[test]
     fn provider_filter() {
         let anthropic = models_for_provider(ProviderType::Anthropic);
-        assert_eq!(anthropic.len(), 7);
+        assert_eq!(anthropic.len(), 8);
         assert!(
             anthropic
                 .iter()

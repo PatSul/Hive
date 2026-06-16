@@ -198,6 +198,22 @@ static KNOWN_MODEL_STRENGTHS: Lazy<Vec<ModelStrengths>> = Lazy::new(|| {
         // -----------------------------------------------------------------
         // Anthropic
         // -----------------------------------------------------------------
+        // claude-opus-4-8 (must come before the broader "claude-opus-4"
+        // pattern so the more-specific entry matches first).
+        ModelStrengths {
+            model_pattern: "claude-opus-4-8".into(),
+            coding_score: 0.97,
+            reasoning_score: 0.98,
+            creative_writing_score: 0.93,
+            math_score: 0.95,
+            instruction_following: 0.96,
+            multilingual_score: 0.90,
+            long_context_score: 0.95,
+            speed_score: 0.4,
+            tool_use_score: 0.98,
+            vision_score: 0.92,
+            agentic_score: 0.98,
+        },
         ModelStrengths {
             model_pattern: "claude-opus-4".into(),
             coding_score: 0.97,
@@ -532,6 +548,51 @@ static KNOWN_MODEL_STRENGTHS: Lazy<Vec<ModelStrengths>> = Lazy::new(|| {
             tool_use_score: 0.72,
             vision_score: 0.0,
             agentic_score: 0.55,
+        },
+        // -----------------------------------------------------------------
+        // Z.AI (Zhipu / GLM)
+        // -----------------------------------------------------------------
+        ModelStrengths {
+            model_pattern: "glm-5.2".into(),
+            coding_score: 0.93,
+            reasoning_score: 0.92,
+            creative_writing_score: 0.85,
+            math_score: 0.90,
+            instruction_following: 0.90,
+            multilingual_score: 0.92,
+            long_context_score: 0.95,
+            speed_score: 0.6,
+            tool_use_score: 0.90,
+            vision_score: 0.0,
+            agentic_score: 0.88,
+        },
+        ModelStrengths {
+            model_pattern: "glm-4.6".into(),
+            coding_score: 0.88,
+            reasoning_score: 0.85,
+            creative_writing_score: 0.80,
+            math_score: 0.84,
+            instruction_following: 0.87,
+            multilingual_score: 0.90,
+            long_context_score: 0.88,
+            speed_score: 0.72,
+            tool_use_score: 0.85,
+            vision_score: 0.0,
+            agentic_score: 0.78,
+        },
+        ModelStrengths {
+            model_pattern: "glm-4.5-air".into(),
+            coding_score: 0.80,
+            reasoning_score: 0.78,
+            creative_writing_score: 0.75,
+            math_score: 0.76,
+            instruction_following: 0.83,
+            multilingual_score: 0.86,
+            long_context_score: 0.80,
+            speed_score: 0.85,
+            tool_use_score: 0.78,
+            vision_score: 0.0,
+            agentic_score: 0.60,
         },
     ]
 });
@@ -1121,6 +1182,7 @@ impl CapabilityRouter {
             crate::types::ProviderType::Doubao => ProviderType::Doubao,
             crate::types::ProviderType::Venice => ProviderType::Venice,
             crate::types::ProviderType::HiveGateway => ProviderType::HiveGateway,
+            crate::types::ProviderType::Zai => ProviderType::Zai,
             crate::types::ProviderType::Kilo => ProviderType::Kilo,
         }
     }
