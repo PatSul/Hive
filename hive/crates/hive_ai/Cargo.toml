@@ -8,6 +8,7 @@ license = "MIT"
 hive_core = { path = "../hive_core" }
 hive_fs = { path = "../hive_fs" }
 hive_docs = { path = "../hive_docs" }
+hive_shield = { path = "../hive_shield" }
 
 async-trait = "0.1"
 once_cell = "1"

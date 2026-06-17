@@ -9,7 +9,7 @@ pub use access_control::{
     AccessDecision, AccessPolicy, DataClassification, PolicyEngine, ProviderTrust,
 };
 pub use pii::{CloakFormat, CloakedText, PiiConfig, PiiDetector, PiiMatch, PiiReport, PiiType};
-pub use secrets::{RiskLevel, ScanResult, SecretMatch, SecretScanner, SecretType};
+pub use secrets::{RiskLevel, ScanResult, SecretMatch, SecretScanner, SecretType, redact_secrets};
 pub use shield::{HiveShield, ShieldAction, ShieldConfig, ShieldResult, UserRule};
 pub use vulnerability::{
     Assessment, DetectedThreat, PromptThreat, ThreatLevel, VulnerabilityAssessor,

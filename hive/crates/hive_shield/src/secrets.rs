@@ -112,6 +112,17 @@ static SECRET_PATTERNS: Lazy<Vec<SecretPattern>> = Lazy::new(|| {
             risk: RiskLevel::Critical,
         },
         SecretPattern {
+            // OpenAI-style API keys: `sk-...`, including project keys
+            // (`sk-proj-...`) and service-account keys (`sk-svcacct-...`).
+            // Matched as a standalone token (not just in `key = value` form) so
+            // bare keys pasted into context files / tool output are redacted.
+            secret_type: SecretType::ApiKey,
+            regex: Regex::new(r"sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}")
+                .expect("valid regex: OpenAI API key"),
+            confidence: 0.90,
+            risk: RiskLevel::Critical,
+        },
+        SecretPattern {
             secret_type: SecretType::GitlabToken,
             regex: Regex::new(r"glpat-[A-Za-z0-9\-]{20,}").expect("valid regex: GitLab token"),
             confidence: 0.95,
@@ -250,6 +261,69 @@ pub fn mask_secret(secret: &str) -> String {
     format!("{}****", &secret[..4])
 }
 
+/// Minimum length for an `extra_literals` entry to be eligible for substring
+/// redaction. Short literals (e.g. a 3-char key) would match pathologically
+/// often across ordinary text, so they are ignored.
+const MIN_LITERAL_LEN: usize = 8;
+
+/// Redact every secret detected by the shield's secret patterns, plus every
+/// caller-supplied literal (e.g. registered API keys), from `text`.
+///
+/// This is the egress-redaction primitive: it is applied to fully-assembled
+/// outbound request content (prompts, context files, RAG chunks, tool/bash
+/// output) immediately before that content reaches a model provider.
+///
+/// Behavior:
+/// - Each match of the existing [`SECRET_PATTERNS`] regex set is replaced with
+///   `‹REDACTED:{KIND}›` where `{KIND}` is the [`SecretType`] display name
+///   (e.g. `‹REDACTED:AWS_ACCESS_KEY›`). Detection is **not** weakened — the
+///   same regexes used by [`SecretScanner`] are reused verbatim.
+/// - Each non-empty string in `extra_literals` with length ≥ 8 is replaced
+///   (exact substring match) with `‹REDACTED:API_KEY›`. Literals shorter than 8
+///   chars are ignored to avoid pathological replacements of ordinary text.
+///
+/// Returns the redacted text together with the total number of redactions
+/// performed (pattern matches + literal replacements). A return count of `0`
+/// guarantees the text was returned byte-for-byte unchanged.
+///
+/// The secret *values* are never returned, logged, or otherwise exposed — only
+/// the redacted text and a count.
+pub fn redact_secrets(text: &str, extra_literals: &[String]) -> (String, usize) {
+    let mut redacted = text.to_string();
+    let mut count = 0usize;
+
+    // 1. Replace registered literals (e.g. API keys) first, by exact substring.
+    //    Done before regex passes so that a literal which also happens to match
+    //    a pattern is attributed to the api-key placeholder.
+    for literal in extra_literals {
+        if literal.len() < MIN_LITERAL_LEN {
+            continue;
+        }
+        if redacted.contains(literal.as_str()) {
+            let occurrences = redacted.matches(literal.as_str()).count();
+            redacted = redacted.replace(literal.as_str(), "‹REDACTED:API_KEY›");
+            count += occurrences;
+        }
+    }
+
+    // 2. Replace every secret-pattern match with a kind-tagged placeholder.
+    for pattern in SECRET_PATTERNS.iter() {
+        let placeholder = format!("‹REDACTED:{}›", pattern.secret_type);
+        // `replace_all` with a closure counts matches as it goes.
+        let mut local = 0usize;
+        let out = pattern.regex.replace_all(&redacted, |_: &regex::Captures<'_>| {
+            local += 1;
+            placeholder.clone()
+        });
+        if local > 0 {
+            redacted = out.into_owned();
+            count += local;
+        }
+    }
+
+    (redacted, count)
+}
+
 /// Return the 1-based line number containing byte offset `pos`.
 fn line_number_of(text: &str, pos: usize) -> usize {
     text[..pos].matches('\n').count() + 1
@@ -371,5 +445,55 @@ mod tests {
         let matches = s.scan_text(&text);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].line, 3);
+    }
+
+    #[test]
+    fn redact_secrets_replaces_pattern_matches() {
+        let fake_key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let text = format!("here is a key {fake_key} embedded in text");
+        let (redacted, count) = redact_secrets(&text, &[]);
+        assert_eq!(count, 1);
+        assert!(!redacted.contains(&fake_key));
+        assert!(redacted.contains("‹REDACTED:AWS_ACCESS_KEY›"));
+    }
+
+    #[test]
+    fn redact_secrets_replaces_extra_literals() {
+        let key = "sk-secretRegisteredKey123456".to_string();
+        let text = format!("config: api={key}");
+        let (redacted, count) = redact_secrets(&text, &[key.clone()]);
+        assert_eq!(count, 1);
+        assert!(!redacted.contains(&key));
+        assert!(redacted.contains("‹REDACTED:API_KEY›"));
+    }
+
+    #[test]
+    fn redact_secrets_ignores_short_literals() {
+        // A 4-char literal must NOT be substring-redacted (avoids mangling).
+        let text = "the cat sat on the mat".to_string();
+        let (redacted, count) = redact_secrets(&text, &["cat".to_string(), "sat".to_string()]);
+        assert_eq!(count, 0);
+        assert_eq!(redacted, text);
+    }
+
+    #[test]
+    fn redact_secrets_clean_text_unchanged() {
+        let text = "This is an ordinary sentence with no secrets.".to_string();
+        let (redacted, count) = redact_secrets(&text, &[]);
+        assert_eq!(count, 0);
+        assert_eq!(redacted, text);
+    }
+
+    #[test]
+    fn redact_secrets_counts_multiple() {
+        let fake_key = format!("AKIA{}", "IOSFODNN7EXAMPLE");
+        let pem = "-----BEGIN RSA PRIVATE KEY-----";
+        let registered = "sk-secretRegisteredKey123456".to_string();
+        let text = format!("{fake_key} and {pem} and {registered}");
+        let (redacted, count) = redact_secrets(&text, &[registered.clone()]);
+        assert_eq!(count, 3);
+        assert!(!redacted.contains(&fake_key));
+        assert!(!redacted.contains(pem));
+        assert!(!redacted.contains(&registered));
     }
 }

@@ -22,6 +22,7 @@ use crate::providers::mistral::MistralProvider;
 use crate::providers::ollama::OllamaProvider;
 use crate::providers::openai::OpenAIProvider;
 use crate::providers::openrouter::OpenRouterProvider;
+use crate::providers::redacting::RedactingProvider;
 use crate::providers::venice::VeniceProvider;
 use crate::providers::xai::XaiProvider;
 use crate::providers::zai::ZaiProvider;
@@ -77,12 +78,22 @@ pub struct AiService {
     cost_tracker: CostTracker,
     config: AiServiceConfig,
     discovery: Option<Arc<LocalDiscovery>>,
+    /// Registered API keys / secret literals that must never egress. Shared
+    /// with every wrapped `RedactingProvider`. Used to also wrap providers
+    /// registered later via [`AiService::register_external_provider`].
+    registered_keys: Arc<Vec<String>>,
 }
 
 impl AiService {
     /// Create a new service from the given configuration.
     pub fn new(config: AiServiceConfig) -> Self {
         let mut providers: HashMap<ProviderType, Arc<dyn AiProvider>> = HashMap::new();
+
+        // Collect every registered API key / secret literal from config. These
+        // are the exact strings that must never egress in outbound request
+        // content. Shared via `Arc` so wrapping every provider does not
+        // duplicate the list. (Δ5 egress redaction.)
+        let registered_keys = Arc::new(collect_registered_keys(&config));
 
         // Register cloud providers (skipped in privacy mode)
         if !config.privacy_mode {
@@ -207,6 +218,20 @@ impl AiService {
             debug!("GenericLocal provider registered at {}", url);
         }
 
+        // Δ5 egress redaction: wrap EVERY registered provider in a
+        // `RedactingProvider`. This is the single chokepoint — chat, the agent
+        // swarm (via `routing_handle`), agents, and tool outputs all resolve a
+        // provider from this map and call `chat`/`stream_chat`, so wrapping here
+        // covers all outbound egress. Secrets and registered API keys are
+        // scrubbed from the assembled `ChatRequest` immediately before dispatch.
+        for provider in providers.values_mut() {
+            let wrapped = RedactingProvider::with_shared_keys(
+                provider.clone(),
+                Arc::clone(&registered_keys),
+            );
+            *provider = Arc::new(wrapped);
+        }
+
         info!("{} AI provider(s) registered", providers.len());
 
         // Build the router and install the policy-aware routing policy parsed
@@ -223,6 +248,7 @@ impl AiService {
             cost_tracker: CostTracker::new(crate::cost::BudgetLimits::default()),
             config,
             discovery: None,
+            registered_keys,
         }
     }
 
@@ -349,7 +375,13 @@ impl AiService {
         provider: Arc<dyn AiProvider>,
     ) {
         info!("{:?} provider registered (external)", provider_type);
-        self.providers.insert(provider_type, provider);
+        // Δ5 egress redaction: wrap the external provider too, so its outbound
+        // requests are scrubbed identically to the built-in providers.
+        let wrapped = Arc::new(RedactingProvider::with_shared_keys(
+            provider,
+            Arc::clone(&self.registered_keys),
+        ));
+        self.providers.insert(provider_type, wrapped);
     }
 
     /// List all registered providers.
@@ -702,6 +734,43 @@ impl AiService {
 
         models
     }
+}
+
+// ---------------------------------------------------------------------------
+// Egress redaction: registered key collection
+// ---------------------------------------------------------------------------
+
+/// Collect every non-empty registered API key / secret literal from the
+/// service config. These are the exact strings that the egress
+/// [`RedactingProvider`] must guarantee never leave the process in outbound
+/// request content.
+///
+/// Includes provider API keys plus the LiteLLM API key and the Kilo HTTP
+/// password (both are credentials that could be pasted into a prompt). Local
+/// URLs and the `litellm_url`/`ollama_url`/`lmstudio_url` are *not* secrets and
+/// are deliberately excluded.
+fn collect_registered_keys(config: &AiServiceConfig) -> Vec<String> {
+    let candidates = [
+        config.anthropic_api_key.as_deref(),
+        config.openai_api_key.as_deref(),
+        config.openrouter_api_key.as_deref(),
+        config.google_api_key.as_deref(),
+        config.groq_api_key.as_deref(),
+        config.huggingface_api_key.as_deref(),
+        config.xai_api_key.as_deref(),
+        config.mistral_api_key.as_deref(),
+        config.venice_api_key.as_deref(),
+        config.zai_api_key.as_deref(),
+        config.litellm_api_key.as_deref(),
+        config.kilo_password.as_deref(),
+    ];
+
+    candidates
+        .into_iter()
+        .flatten()
+        .filter(|k| !k.is_empty())
+        .map(|k| k.to_string())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

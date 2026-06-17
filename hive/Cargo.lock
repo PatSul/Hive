@@ -5414,6 +5414,7 @@ dependencies = [
  "hive_core",
  "hive_docs",
  "hive_fs",
+ "hive_shield",
  "http 1.4.0",
  "lancedb",
  "once_cell",
