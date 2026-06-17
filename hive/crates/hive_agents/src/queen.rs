@@ -928,11 +928,19 @@ impl<E: AiExecutor + 'static> Queen<E> {
         let mut panel: Vec<String> = if !self.config.fusion_panel.is_empty() {
             self.config.fusion_panel.clone()
         } else {
-            vec![
-                default_model_for_tier(ModelTier::Premium),
-                default_model_for_tier(ModelTier::Mid),
-                default_model_for_tier(ModelTier::Budget),
-            ]
+            // Default to a CROSS-PROVIDER panel — provider/model diversity is the
+            // whole point of Fusion. Fall back to per-tier defaults only if the
+            // registry yields fewer than two distinct providers.
+            let cross = Self::default_fusion_panel(3);
+            if cross.len() >= 2 {
+                cross
+            } else {
+                vec![
+                    default_model_for_tier(ModelTier::Premium),
+                    default_model_for_tier(ModelTier::Mid),
+                    default_model_for_tier(ModelTier::Budget),
+                ]
+            }
         };
 
         // Deduplicate while preserving order.
@@ -947,6 +955,47 @@ impl<E: AiExecutor + 'static> Queen<E> {
             }
         }
 
+        panel
+    }
+
+    /// Build a cross-provider default Fusion panel: the strongest (highest-tier)
+    /// model from each of up to `max` distinct providers, in preference order
+    /// (the project's primary providers first). Provider diversity is the point
+    /// of Fusion, so this beats the per-tier default — which can collapse to a
+    /// single provider (e.g. two Anthropic tiers).
+    fn default_fusion_panel(max: usize) -> Vec<String> {
+        use hive_ai::model_registry::MODEL_REGISTRY;
+        use hive_ai::types::ProviderType;
+
+        let pref = [
+            ProviderType::Anthropic,
+            ProviderType::OpenAI,
+            ProviderType::Google,
+            ProviderType::Zai,
+            ProviderType::XAI,
+            ProviderType::Mistral,
+        ];
+        let mut panel = Vec::new();
+        for p in pref {
+            // Highest tier available for this provider; first-listed wins on ties
+            // (the registry lists newest models first).
+            let max_rank = MODEL_REGISTRY
+                .iter()
+                .filter(|m| m.provider_type == p)
+                .map(|m| m.tier.rank())
+                .max();
+            if let Some(rank) = max_rank {
+                if let Some(m) = MODEL_REGISTRY
+                    .iter()
+                    .find(|m| m.provider_type == p && m.tier.rank() == rank)
+                {
+                    panel.push(m.id.clone());
+                    if panel.len() >= max {
+                        break;
+                    }
+                }
+            }
+        }
         panel
     }
 
