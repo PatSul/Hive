@@ -234,6 +234,13 @@ impl CostTracker {
             .map(|limit| (limit - self.today_cost()).max(0.0))
     }
 
+    /// Remaining monthly budget (None if no limit set).
+    pub fn monthly_remaining(&self) -> Option<f64> {
+        self.budget
+            .monthly_limit
+            .map(|limit| (limit - self.month_cost()).max(0.0))
+    }
+
     /// Reset today's records.
     pub fn reset_today(&mut self) {
         let today = Utc::now().date_naive();
@@ -444,6 +451,22 @@ mod tests {
 
         let remaining = tracker.daily_remaining().unwrap();
         assert!((remaining - 1.0).abs() < 0.01); // ~$1 remaining
+    }
+
+    #[test]
+    fn cost_tracker_monthly_remaining() {
+        let budget = BudgetLimits {
+            daily_limit: None,
+            monthly_limit: Some(2.0),
+        };
+        let mut tracker = CostTracker::new(budget);
+        tracker.record("local-model", 1000, 500); // free model → no spend
+
+        let remaining = tracker.monthly_remaining().unwrap();
+        assert!((remaining - 2.0).abs() < 0.01); // ~$2 remaining
+        // No monthly limit → None.
+        let unlimited = CostTracker::default();
+        assert!(unlimited.monthly_remaining().is_none());
     }
 
     #[test]

@@ -385,9 +385,33 @@ impl AiService {
             &self.config.default_model,
             self.config.auto_routing,
             &self.available_models_for_routing(),
+            self.compute_budget_remaining(),
             messages,
             model,
         )
+    }
+
+    /// Compute the remaining spend budget (USD) for the budget-aware router.
+    ///
+    /// Takes the lesser of the daily and monthly remaining budgets, treating an
+    /// unset limit as `f64::INFINITY`. Returns `None` when both limits are unset
+    /// (unlimited) so the router's budget gate stays disabled and routing is
+    /// byte-for-byte unchanged.
+    fn compute_budget_remaining(&self) -> Option<f64> {
+        let daily = self
+            .cost_tracker
+            .daily_remaining()
+            .unwrap_or(f64::INFINITY);
+        let monthly = self
+            .cost_tracker
+            .monthly_remaining()
+            .unwrap_or(f64::INFINITY);
+        let remaining = daily.min(monthly);
+        if remaining.is_finite() {
+            Some(remaining)
+        } else {
+            None
+        }
     }
 
     /// Route a request to a provider and resolved model, honoring `auto_routing`
@@ -423,6 +447,13 @@ impl AiService {
             default_model: self.config.default_model.clone(),
             auto_routing: self.config.auto_routing,
             available_models: self.available_models_for_routing(),
+            // Snapshot the remaining budget at build time. The swarm runs
+            // off-thread and reuses the handle across a run, so the budget gate
+            // operates at per-run (not per-request) granularity. That is
+            // acceptable: the Queen separately enforces a per-run
+            // `total_cost_limit_usd`, so this snapshot only adds a graceful
+            // model-downgrade on top of that hard limit.
+            budget_remaining: self.compute_budget_remaining(),
         }
     }
 
@@ -703,12 +734,14 @@ fn resolve_provider_inner(
 /// When `model` is the configured default or `"auto"` and `auto_routing` is on,
 /// the capability/cost router picks the model from `available_models`. Otherwise
 /// the explicit model is resolved directly.
+#[allow(clippy::too_many_arguments)]
 fn resolve_provider_smart_inner(
     providers: &HashMap<ProviderType, Arc<dyn AiProvider>>,
     router: &ModelRouter,
     default_model: &str,
     auto_routing: bool,
     available_models: &[crate::types::ModelInfo],
+    budget_remaining: Option<f64>,
     messages: &[ChatMessage],
     model: &str,
 ) -> Option<(ProviderType, Arc<dyn AiProvider>, String)> {
@@ -720,12 +753,21 @@ fn resolve_provider_smart_inner(
     }
 
     // Capability-aware auto-routing: use discovered + registered cloud models.
-    let decision = router.route_with_capabilities(
-        messages,
-        available_models,
-        None, // no explicit model
-        None, // no classification context
-    );
+    // Apply the remaining-budget snapshot to a cheap clone of the router so the
+    // budget gate can downgrade an over-budget pick. With `None` (unlimited) the
+    // clone's gate is disabled and routing is byte-for-byte unchanged.
+    let decision = if budget_remaining.is_some() {
+        let mut budget_router = router.clone();
+        budget_router.set_budget_remaining(budget_remaining);
+        budget_router.route_with_capabilities(messages, available_models, None, None)
+    } else {
+        router.route_with_capabilities(
+            messages,
+            available_models,
+            None, // no explicit model
+            None, // no classification context
+        )
+    };
 
     info!(
         model = %decision.model_id,
@@ -762,6 +804,12 @@ pub struct AiRoutingHandle {
     default_model: String,
     auto_routing: bool,
     available_models: Vec<crate::types::ModelInfo>,
+    /// Remaining spend budget (USD) snapshotted when the handle was built.
+    ///
+    /// The off-thread swarm reuses this snapshot for the whole run (per-run
+    /// granularity), so the budget gate downgrades based on budget at handle
+    /// build time rather than live per-request spend. `None` = unlimited.
+    budget_remaining: Option<f64>,
 }
 
 impl AiRoutingHandle {
@@ -781,6 +829,7 @@ impl AiRoutingHandle {
             &self.default_model,
             self.auto_routing,
             &self.available_models,
+            self.budget_remaining,
             messages,
             model,
         )?;

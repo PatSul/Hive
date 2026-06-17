@@ -139,6 +139,14 @@ pub struct ModelRouter {
     fallback_manager: AutoFallbackManager,
     tier_adjuster: Option<Arc<dyn TierAdjuster>>,
     routing_policy: RuntimeRoutingPolicy,
+    /// Remaining spend budget in USD (the lesser of daily/monthly remaining).
+    ///
+    /// `None` means "unlimited" — no budget gate is applied and routing is
+    /// byte-for-byte identical to the no-budget path. When `Some(r)` and
+    /// `r.is_finite()`, [`route_with_capabilities`](Self::route_with_capabilities)
+    /// downgrades to the cheapest policy-allowed model that fits the remaining
+    /// budget (see [`apply_budget_gate`]).
+    budget_remaining: Option<f64>,
 }
 
 impl Default for ModelRouter {
@@ -155,6 +163,7 @@ impl ModelRouter {
             fallback_manager: AutoFallbackManager::with_defaults(),
             tier_adjuster: None,
             routing_policy: RuntimeRoutingPolicy::default(),
+            budget_remaining: None,
         }
     }
 
@@ -165,6 +174,7 @@ impl ModelRouter {
             fallback_manager: AutoFallbackManager::new(fallback_config),
             tier_adjuster: None,
             routing_policy: RuntimeRoutingPolicy::default(),
+            budget_remaining: None,
         }
     }
 
@@ -184,6 +194,17 @@ impl ModelRouter {
     /// unchanged.
     pub fn set_routing_policy(&mut self, policy: RuntimeRoutingPolicy) {
         self.routing_policy = policy;
+    }
+
+    /// Set the remaining spend budget in USD that the budget gate enforces.
+    ///
+    /// Pass `None` (the default) to disable the budget gate entirely — routing
+    /// is then byte-for-byte identical to the no-budget path. Pass `Some(r)`
+    /// (the lesser of daily/monthly remaining) to have
+    /// [`route_with_capabilities`](Self::route_with_capabilities) downgrade away
+    /// from a pick whose estimated request cost would exceed `r`.
+    pub fn set_budget_remaining(&mut self, v: Option<f64>) {
+        self.budget_remaining = v;
     }
 
     /// Route a request to the best available provider and model.
@@ -281,18 +302,67 @@ impl ModelRouter {
         //    weighting). When the policy is inactive this is a no-op and the
         //    behavior is byte-for-byte identical to before policy support.
         let cap_router = CapabilityRouter::new();
-        let recommendation = if self.routing_policy.is_active() {
+        let (candidates, cost_weight): (Vec<ModelInfo>, f32) = if self.routing_policy.is_active() {
             let task = classify_task(messages);
             let filtered = self.apply_policy_filter(task, available_models);
-            let candidates: &[ModelInfo] = filtered.as_deref().unwrap_or(available_models);
+            let candidates = filtered.unwrap_or_else(|| available_models.to_vec());
+            (candidates, self.routing_policy.cost_aggressiveness)
+        } else {
+            (available_models.to_vec(), 0.0)
+        };
+
+        // Produce the score-sorted ranked list (best-first). This is the same
+        // list `CapabilityRouter::recommend*` ranks internally; we materialize
+        // it here so the budget gate can walk it.
+        let task = classify_task(messages);
+        let ranked =
+            super::capability_router::rank_models_for_task_with_cost(
+                &task,
+                &candidates,
+                Some(tier),
+                cost_weight,
+            );
+
+        // 2b. Budget gate (Δ3c): when a finite budget is set, possibly downgrade
+        //     away from the top pick to the cheapest candidate that fits. With no
+        //     budget (`None`) this returns index 0 and behavior is unchanged.
+        let chosen_idx = apply_budget_gate(self.budget_remaining, &ranked, messages);
+
+        // Rebuild the recommendation for the chosen model. Passing a single-model
+        // slice reuses `CapabilityRouter`'s exact reasoning/format, so when the
+        // gate keeps index 0 the result is byte-for-byte identical to the
+        // pre-budget path.
+        let recommendation = if let Some((chosen, _score)) = ranked.get(chosen_idx) {
             cap_router.recommend_with_cost(
                 messages,
-                candidates,
+                std::slice::from_ref(chosen),
                 Some(tier),
-                self.routing_policy.cost_aggressiveness,
+                cost_weight,
             )
         } else {
-            cap_router.recommend(messages, available_models, Some(tier))
+            // Empty ranked list (candidates empty) — fall back to the original
+            // path for a sensible default recommendation.
+            cap_router.recommend_with_cost(messages, &candidates, Some(tier), cost_weight)
+        };
+
+        // If the gate downgraded the pick, annotate the reasoning and warn.
+        let recommendation = match (ranked.first(), ranked.get(chosen_idx)) {
+            (Some((orig, _)), Some((chosen, _))) if orig.id != chosen.id => {
+                let remaining = self.budget_remaining.unwrap_or(f64::INFINITY);
+                warn!(
+                    original = %orig.id,
+                    chosen = %chosen.id,
+                    remaining,
+                    "budget gate: downgraded model to fit remaining budget"
+                );
+                let mut rec = recommendation;
+                rec.reasoning = format!(
+                    "{} | budget: downgraded {}\u{2192}{} (remaining ${:.2})",
+                    rec.reasoning, orig.id, chosen.id, remaining,
+                );
+                rec
+            }
+            _ => recommendation,
         };
 
         // 3. Check provider health before committing.
@@ -615,6 +685,84 @@ fn default_for_tier(tier: ModelTier) -> (&'static str, ProviderType) {
         ModelTier::Budget => ("deepseek/deepseek-chat", ProviderType::OpenRouter),
         ModelTier::Free => ("llama3.2", ProviderType::Ollama),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Budget gate (Δ3c)
+// ---------------------------------------------------------------------------
+
+/// Estimate the USD cost of a request for a single candidate model.
+///
+/// Mirrors [`crate::cost::predict_cost`] / [`crate::cost::calculate_cost`]
+/// exactly (input tokens via the char heuristic, output ≈ 2× input, then
+/// `tokens / 1e6 * rate`) but reads the per-mtok prices from the candidate's
+/// own [`ModelInfo`] instead of looking them up in `MODEL_REGISTRY`. Using the
+/// carried prices keeps the gate correct for discovered/custom models that are
+/// not in the static registry (and makes the behavior deterministic in tests).
+fn estimate_request_cost(model: &ModelInfo, messages: &[ChatMessage]) -> f64 {
+    // Concatenate message contents — the same text a predict_cost caller would
+    // pass — and estimate input tokens with the shared heuristic.
+    let combined: String = messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let input_tokens = crate::cost::estimate_tokens(&combined);
+    let output_tokens = input_tokens * 2; // same 2× heuristic as predict_cost
+
+    let input_cost = (input_tokens as f64 / 1_000_000.0) * model.input_price_per_mtok;
+    let output_cost = (output_tokens as f64 / 1_000_000.0) * model.output_price_per_mtok;
+    input_cost + output_cost
+}
+
+/// Choose the index into a score-sorted (best-first) `ranked` list, honoring the
+/// remaining budget.
+///
+/// Returns:
+/// - `0` (the top pick) when `budget_remaining` is `None`/non-finite, the list
+///   is empty, or the top pick's estimated request cost already fits — so the
+///   no-budget path is byte-for-byte unchanged.
+/// - otherwise the first candidate (still best-first) whose estimated cost fits
+///   the budget; or, if none fit, the cheapest candidate overall (preferring a
+///   `$0` model).
+fn apply_budget_gate(
+    budget_remaining: Option<f64>,
+    ranked: &[(ModelInfo, f32)],
+    messages: &[ChatMessage],
+) -> usize {
+    let Some(remaining) = budget_remaining else {
+        return 0;
+    };
+    if !remaining.is_finite() || ranked.is_empty() {
+        return 0;
+    }
+
+    // Top pick fits — keep it (unchanged behavior).
+    if estimate_request_cost(&ranked[0].0, messages) <= remaining {
+        return 0;
+    }
+
+    // Walk the ranked (score-sorted) list for the first candidate that fits.
+    if let Some(idx) = ranked
+        .iter()
+        .position(|(m, _)| estimate_request_cost(m, messages) <= remaining)
+    {
+        return idx;
+    }
+
+    // Nothing fits — pick the cheapest candidate overall, preferring a $0 model.
+    // A $0 model has cost 0.0 which is the minimum, so plain min-by-cost already
+    // prefers free models; ties break toward the earliest (highest-scored) one.
+    ranked
+        .iter()
+        .enumerate()
+        .min_by(|(_, (a, _)), (_, (b, _))| {
+            let ca = estimate_request_cost(a, messages);
+            let cb = estimate_request_cost(b, messages);
+            ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(idx, _)| idx)
+        .unwrap_or(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,5 +1204,128 @@ mod tests {
         assert_eq!(baseline_decision.provider, policy_decision.provider);
         assert_eq!(baseline_decision.tier, policy_decision.tier);
         assert_eq!(baseline_decision.reasoning, policy_decision.reasoning);
+    }
+
+    // ------------------------------------------------------------------
+    // Budget gate tests (Δ3c)
+    // ------------------------------------------------------------------
+
+    /// Three premium models with *unknown* ids (so each gets the neutral 0.5
+    /// base capability score). With no cost weighting they tie on score and the
+    /// ranked order is purely alphabetical by id:
+    ///   1. `aaa-expensive` (input $30 / output $60 per Mtok)
+    ///   2. `bbb-cheap`     (input $1  / output $2  per Mtok)
+    ///   3. `ccc-free`      ($0 / $0)
+    /// This makes the budget gate's choice fully deterministic.
+    fn budget_models() -> Vec<ModelInfo> {
+        vec![
+            make_model_priced(
+                "aaa-expensive",
+                ModelTier::Premium,
+                TypesProviderType::OpenAI,
+                30.0,
+                60.0,
+            ),
+            make_model_priced(
+                "bbb-cheap",
+                ModelTier::Premium,
+                TypesProviderType::OpenAI,
+                1.0,
+                2.0,
+            ),
+            make_model_priced(
+                "ccc-free",
+                ModelTier::Premium,
+                TypesProviderType::OpenAI,
+                0.0,
+                0.0,
+            ),
+        ]
+    }
+
+    /// A short coding message; classifies as `Coding` so the budget models
+    /// (all Premium) receive a stable tier weight. ~50 chars → ~13 input
+    /// tokens, ~26 output tokens via the predict_cost heuristic.
+    fn budget_msgs() -> Vec<ChatMessage> {
+        vec![user_msg("Write a function to compute a checksum value")]
+    }
+
+    fn route_budget_models(router: &ModelRouter) -> RoutingDecision {
+        router.route_with_capabilities(&budget_msgs(), &budget_models(), None, None)
+    }
+
+    #[test]
+    fn budget_none_keeps_top_pick() {
+        // No budget configured → top-ranked (alphabetical) pick unchanged, and
+        // no budget annotation in the reasoning.
+        let router = setup_router();
+        let decision = route_budget_models(&router);
+        assert_eq!(decision.model_id, "aaa-expensive");
+        assert!(
+            !decision.reasoning.contains("budget:"),
+            "no budget should mean no budget note: {}",
+            decision.reasoning
+        );
+    }
+
+    #[test]
+    fn budget_ample_keeps_top_pick() {
+        // A generous budget that even the expensive model fits → unchanged.
+        let mut router = setup_router();
+        router.set_budget_remaining(Some(1_000.0));
+        let decision = route_budget_models(&router);
+        assert_eq!(decision.model_id, "aaa-expensive");
+        assert!(!decision.reasoning.contains("budget:"));
+    }
+
+    #[test]
+    fn budget_tight_downgrades_to_cheaper_that_fits() {
+        // est input ≈ 11 tokens, output ≈ 22 tokens.
+        //   aaa-expensive: 11/1e6*30 + 22/1e6*60 ≈ 0.00033 + 0.00132 = ~0.00165
+        //   bbb-cheap:     11/1e6*1  + 22/1e6*2   ≈ 0.000011 + 0.000044 = ~0.000055
+        // A budget between those two costs must skip the expensive top pick and
+        // downgrade to bbb-cheap (the first ranked candidate that fits).
+        let mut router = setup_router();
+        router.set_budget_remaining(Some(0.0005));
+        let decision = route_budget_models(&router);
+        assert_eq!(
+            decision.model_id, "bbb-cheap",
+            "should downgrade to the cheaper candidate that fits the budget"
+        );
+        assert!(
+            decision.reasoning.contains("budget: downgraded aaa-expensive\u{2192}bbb-cheap"),
+            "reasoning should note the downgrade: {}",
+            decision.reasoning
+        );
+    }
+
+    #[test]
+    fn budget_exhausted_picks_free_model() {
+        // A budget so tiny that every *priced* candidate exceeds it. The gate
+        // must fall back to the cheapest candidate, preferring the $0 model.
+        let mut router = setup_router();
+        router.set_budget_remaining(Some(0.0000001));
+        let decision = route_budget_models(&router);
+        assert_eq!(
+            decision.model_id, "ccc-free",
+            "with no priced model fitting, the $0 model must be chosen"
+        );
+        assert!(
+            decision
+                .reasoning
+                .contains("budget: downgraded aaa-expensive\u{2192}ccc-free"),
+            "reasoning should note the downgrade to the free model: {}",
+            decision.reasoning
+        );
+    }
+
+    #[test]
+    fn budget_infinite_is_treated_as_unlimited() {
+        // An explicit infinite budget must behave exactly like `None`.
+        let mut router = setup_router();
+        router.set_budget_remaining(Some(f64::INFINITY));
+        let decision = route_budget_models(&router);
+        assert_eq!(decision.model_id, "aaa-expensive");
+        assert!(!decision.reasoning.contains("budget:"));
     }
 }
