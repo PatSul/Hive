@@ -296,6 +296,24 @@ pub struct AutoFallbackManager {
     created_at: Instant,
 }
 
+impl Clone for AutoFallbackManager {
+    /// Snapshot-clone the manager. The `RwLock`-guarded health and history are
+    /// read under a shared lock and copied into fresh locks, so the clone starts
+    /// with the same state but tracks subsequent updates independently. Used to
+    /// build a `Send + Sync` routing handle for off-thread routing.
+    fn clone(&self) -> Self {
+        let provider_status = self.provider_status.read().clone();
+        let history = self.history.read().clone();
+        Self {
+            provider_status: RwLock::new(provider_status),
+            config: self.config.clone(),
+            fallback_chain: self.fallback_chain.clone(),
+            history: RwLock::new(history),
+            created_at: self.created_at,
+        }
+    }
+}
+
 impl AutoFallbackManager {
     /// Create a new fallback manager with the given configuration.
     pub fn new(config: FallbackConfig) -> Self {

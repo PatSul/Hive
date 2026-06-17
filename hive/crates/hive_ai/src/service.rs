@@ -365,17 +365,7 @@ impl AiService {
 
     /// Resolve a model ID to its provider.
     fn resolve_provider(&self, model_id: &str) -> Option<(ProviderType, Arc<dyn AiProvider>)> {
-        // Use the router to pick the provider
-        let decision = self.router.route(&[], Some(model_id), None);
-        let provider_type = map_router_provider(decision.provider);
-        if let Some(provider) = self.providers.get(&provider_type) {
-            return Some((provider_type, provider.clone()));
-        }
-        // Fallback: pick the first available provider
-        if let Some((pt, p)) = self.providers.iter().next() {
-            return Some((*pt, p.clone()));
-        }
-        None
+        resolve_provider_inner(&self.providers, &self.router, model_id)
     }
 
     /// Resolve the best provider using capability-aware routing when auto-routing.
@@ -389,36 +379,51 @@ impl AiService {
         messages: &[ChatMessage],
         model: &str,
     ) -> Option<(ProviderType, Arc<dyn AiProvider>, String)> {
-        // If the user picked a specific model, use standard resolution.
-        let is_auto = model == self.config.default_model || model == "auto";
-        if !is_auto || !self.config.auto_routing {
-            let (pt, provider) = self.resolve_provider(model)?;
-            return Some((pt, provider, model.to_string()));
+        resolve_provider_smart_inner(
+            &self.providers,
+            &self.router,
+            &self.config.default_model,
+            self.config.auto_routing,
+            &self.available_models_for_routing(),
+            messages,
+            model,
+        )
+    }
+
+    /// Route a request to a provider and resolved model, honoring `auto_routing`
+    /// and the policy-aware [`ModelRouter`].
+    ///
+    /// This is the public, `&self` entry point used by callers that already hold
+    /// the service (and can therefore see live discovery state). It returns the
+    /// chosen provider together with the concrete model ID the request should
+    /// use. When the caller passed an explicit (non-default) model, that model is
+    /// resolved directly; when it passed the configured default or `"auto"` and
+    /// `auto_routing` is enabled, the capability/cost router decides.
+    pub fn route_request(
+        &self,
+        messages: &[ChatMessage],
+        model: &str,
+    ) -> Option<(Arc<dyn AiProvider>, String)> {
+        let (_provider_type, provider, resolved) = self.resolve_provider_smart(messages, model)?;
+        Some((provider, resolved))
+    }
+
+    /// Build a cloneable, `Send + Sync + 'static` routing handle.
+    ///
+    /// The swarm executor runs off the GPUI thread and cannot borrow the
+    /// service, so it needs an owned handle that can route per request without
+    /// `&self`. The handle snapshots everything routing needs: the registered
+    /// providers (Arc-cloned), the policy-configured router (shared via `Arc`),
+    /// the configured default model, the `auto_routing` flag, and the
+    /// available-models snapshot at the time of the call.
+    pub fn routing_handle(&self) -> AiRoutingHandle {
+        AiRoutingHandle {
+            providers: self.providers.clone(),
+            router: Arc::new(self.router.clone()),
+            default_model: self.config.default_model.clone(),
+            auto_routing: self.config.auto_routing,
+            available_models: self.available_models_for_routing(),
         }
-
-        // Capability-aware auto-routing: use discovered + registered cloud models.
-        let available = self.available_models_for_routing();
-        let decision = self.router.route_with_capabilities(
-            messages, &available, None, // no explicit model
-            None, // no classification context
-        );
-
-        info!(
-            model = %decision.model_id,
-            provider = %decision.provider,
-            tier = ?decision.tier,
-            models_considered = available.len(),
-            "Capability-aware routing decision"
-        );
-
-        let provider_type = map_router_provider(decision.provider);
-        if let Some(provider) = self.providers.get(&provider_type) {
-            return Some((provider_type, provider.clone(), decision.model_id));
-        }
-
-        // Fallback: try standard resolution with the decided model
-        let (pt, provider) = self.resolve_provider(&decision.model_id)?;
-        Some((pt, provider, decision.model_id))
     }
 
     /// Send a non-streaming chat request.
@@ -665,6 +670,121 @@ impl AiService {
         }
 
         models
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared routing core (used by AiService and AiRoutingHandle)
+// ---------------------------------------------------------------------------
+
+/// Resolve a model ID to a provider using the router, falling back to the first
+/// available provider. Shared by [`AiService`] and [`AiRoutingHandle`].
+fn resolve_provider_inner(
+    providers: &HashMap<ProviderType, Arc<dyn AiProvider>>,
+    router: &ModelRouter,
+    model_id: &str,
+) -> Option<(ProviderType, Arc<dyn AiProvider>)> {
+    // Use the router to pick the provider.
+    let decision = router.route(&[], Some(model_id), None);
+    let provider_type = map_router_provider(decision.provider);
+    if let Some(provider) = providers.get(&provider_type) {
+        return Some((provider_type, provider.clone()));
+    }
+    // Fallback: pick the first available provider.
+    if let Some((pt, p)) = providers.iter().next() {
+        return Some((*pt, p.clone()));
+    }
+    None
+}
+
+/// Policy-aware "smart" routing shared by [`AiService::resolve_provider_smart`]
+/// and [`AiRoutingHandle::route`].
+///
+/// When `model` is the configured default or `"auto"` and `auto_routing` is on,
+/// the capability/cost router picks the model from `available_models`. Otherwise
+/// the explicit model is resolved directly.
+fn resolve_provider_smart_inner(
+    providers: &HashMap<ProviderType, Arc<dyn AiProvider>>,
+    router: &ModelRouter,
+    default_model: &str,
+    auto_routing: bool,
+    available_models: &[crate::types::ModelInfo],
+    messages: &[ChatMessage],
+    model: &str,
+) -> Option<(ProviderType, Arc<dyn AiProvider>, String)> {
+    // If the user picked a specific model, use standard resolution.
+    let is_auto = model == default_model || model == "auto";
+    if !is_auto || !auto_routing {
+        let (pt, provider) = resolve_provider_inner(providers, router, model)?;
+        return Some((pt, provider, model.to_string()));
+    }
+
+    // Capability-aware auto-routing: use discovered + registered cloud models.
+    let decision = router.route_with_capabilities(
+        messages,
+        available_models,
+        None, // no explicit model
+        None, // no classification context
+    );
+
+    info!(
+        model = %decision.model_id,
+        provider = %decision.provider,
+        tier = ?decision.tier,
+        models_considered = available_models.len(),
+        "Capability-aware routing decision"
+    );
+
+    let provider_type = map_router_provider(decision.provider);
+    if let Some(provider) = providers.get(&provider_type) {
+        return Some((provider_type, provider.clone(), decision.model_id));
+    }
+
+    // Fallback: try standard resolution with the decided model.
+    let (pt, provider) = resolve_provider_inner(providers, router, &decision.model_id)?;
+    Some((pt, provider, decision.model_id))
+}
+
+// ---------------------------------------------------------------------------
+// AiRoutingHandle
+// ---------------------------------------------------------------------------
+
+/// A cloneable, `Send + Sync + 'static` routing handle.
+///
+/// Built via [`AiService::routing_handle`], this owns everything needed to make
+/// policy-aware routing decisions without borrowing the service or touching the
+/// GPUI context. It is used by the agent swarm executor, which runs off-thread
+/// and must route each request to the correct provider/model on its own.
+#[derive(Clone)]
+pub struct AiRoutingHandle {
+    providers: HashMap<ProviderType, Arc<dyn AiProvider>>,
+    router: Arc<ModelRouter>,
+    default_model: String,
+    auto_routing: bool,
+    available_models: Vec<crate::types::ModelInfo>,
+}
+
+impl AiRoutingHandle {
+    /// Route a request to a provider and resolved model ID.
+    ///
+    /// Mirrors [`AiService::route_request`] but uses the snapshot captured when
+    /// the handle was created (so it is safe to call from any thread). Returns
+    /// `None` when no provider is available.
+    pub fn route(
+        &self,
+        messages: &[ChatMessage],
+        model: &str,
+    ) -> Option<(Arc<dyn AiProvider>, String)> {
+        let (_provider_type, provider, resolved) = resolve_provider_smart_inner(
+            &self.providers,
+            &self.router,
+            &self.default_model,
+            self.auto_routing,
+            &self.available_models,
+            messages,
+            model,
+        )?;
+        Some((provider, resolved))
     }
 }
 
@@ -928,5 +1048,41 @@ mod tests {
         // The model should have been selected by the capability router from
         // the registry — it should be a real model ID, not the default_model alias.
         assert!(!resolved_model.is_empty());
+    }
+
+    #[test]
+    fn test_routing_handle_routes_concrete_model_to_provider() {
+        // Service with a registered Anthropic provider.
+        let svc = AiService::new(test_config());
+        let handle = svc.routing_handle();
+
+        let messages = vec![ChatMessage::text(MessageRole::User, "Hello")];
+        // A concrete (non-default) model must take the explicit-model path and
+        // resolve to the Anthropic provider that is registered.
+        let routed = handle.route(&messages, "claude-opus-4-20250514");
+        assert!(routed.is_some(), "handle should route a concrete model");
+
+        let (provider, resolved) = routed.unwrap();
+        assert_eq!(
+            resolved, "claude-opus-4-20250514",
+            "explicit model should be preserved"
+        );
+        assert_eq!(
+            provider.provider_type(),
+            ProviderType::Anthropic,
+            "should dispatch to the Anthropic provider"
+        );
+    }
+
+    #[test]
+    fn test_routing_handle_no_providers_returns_none() {
+        let config = AiServiceConfig {
+            privacy_mode: true,
+            default_model: "test".into(),
+            ..Default::default()
+        };
+        let svc = AiService::new(config);
+        let handle = svc.routing_handle();
+        assert!(handle.route(&[], "test-model").is_none());
     }
 }

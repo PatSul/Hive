@@ -330,6 +330,7 @@ fn any_match(patterns: &[Regex], text: &str) -> bool {
 
 /// Analyzes user requests using a 12-factor scoring system to determine the
 /// optimal [`ModelTier`] for handling the request.
+#[derive(Clone)]
 pub struct ComplexityClassifier {
     // All regex state is in Lazy statics, so this struct is zero-sized for now.
     // Keeping it as a struct allows future configuration (custom model lists, etc.).

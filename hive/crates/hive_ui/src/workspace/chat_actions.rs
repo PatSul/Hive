@@ -991,12 +991,15 @@ pub(super) fn try_handle_swarm_send(
         svc.send_message(send_text, model, cx);
     });
 
-    let provider: Option<Arc<dyn AiProvider>> = if cx.has_global::<AppAiService>() {
-        cx.global::<AppAiService>().0.first_provider()
+    // Capture a Send + Sync routing handle BEFORE spawning the async task so
+    // the swarm executor can route each request policy-aware (and to the CORRECT
+    // provider) without touching `cx` off-thread.
+    let routing_handle: Option<hive_ai::AiRoutingHandle> = if cx.has_global::<AppAiService>() {
+        Some(cx.global::<AppAiService>().0.routing_handle())
     } else {
         None
     };
-    let Some(provider) = provider else {
+    let Some(routing_handle) = routing_handle else {
         workspace.chat_service.update(cx, |svc, cx| {
             svc.set_error("No AI provider available for swarm execution", cx);
         });
@@ -1054,25 +1057,45 @@ pub(super) fn try_handle_swarm_send(
     };
 
     let model_for_exec = model.to_string();
+    // Honor the user's auto_routing setting for the swarm (defaults to true).
+    let auto_routing = if cx.has_global::<AppConfig>() {
+        cx.global::<AppConfig>().0.get().auto_routing
+    } else {
+        true
+    };
     let chat_svc = workspace.chat_service.downgrade();
     cx.spawn(async move |_this, app: &mut AsyncApp| {
-        struct ProviderExecutor {
-            provider: Arc<dyn AiProvider>,
+        /// Routes each swarm request policy-aware via the captured handle, then
+        /// dispatches to the resolved provider — fixing the previous behavior
+        /// where every request went to `first_provider()` regardless of model.
+        struct RoutingExecutor {
+            handle: hive_ai::AiRoutingHandle,
         }
 
-        impl hive_agents::AiExecutor for ProviderExecutor {
+        impl hive_agents::AiExecutor for RoutingExecutor {
             async fn execute(
                 &self,
                 request: &hive_ai::types::ChatRequest,
             ) -> Result<hive_ai::types::ChatResponse, String> {
-                self.provider.chat(request).await.map_err(|e| e.to_string())
+                let (provider, resolved) = self
+                    .handle
+                    .route(&request.messages, &request.model)
+                    .ok_or("no provider available")?;
+                let mut req = request.clone();
+                req.model = resolved;
+                provider.chat(&req).await.map_err(|e| e.to_string())
             }
         }
 
-        let executor = Arc::new(ProviderExecutor { provider });
+        let executor = Arc::new(RoutingExecutor {
+            handle: routing_handle,
+        });
 
-        let mut queen =
-            hive_agents::Queen::new(hive_agents::swarm::SwarmConfig::default(), executor);
+        let swarm_config = hive_agents::swarm::SwarmConfig {
+            auto_routing,
+            ..hive_agents::swarm::SwarmConfig::default()
+        };
+        let mut queen = hive_agents::Queen::new(swarm_config, executor);
         if let Some(mem) = memory {
             queen = queen.with_memory(mem);
         }

@@ -90,6 +90,10 @@ pub struct SwarmConfig {
     pub per_team_cost_limit_usd: f64,
     /// Per-team time limit in seconds.
     pub per_team_time_limit_secs: u64,
+    /// When `true`, team agents without an explicit model override route via the
+    /// policy-aware router (request the `"auto"` model). Propagated into each
+    /// team's [`HiveMindConfig`]. Mirrors `HiveConfig::auto_routing`.
+    pub auto_routing: bool,
 }
 
 impl Default for SwarmConfig {
@@ -101,6 +105,7 @@ impl Default for SwarmConfig {
             total_time_limit_secs: 1800,
             per_team_cost_limit_usd: 5.0,
             per_team_time_limit_secs: 300,
+            auto_routing: true,
         }
     }
 }

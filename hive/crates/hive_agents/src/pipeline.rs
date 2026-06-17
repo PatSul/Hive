@@ -49,6 +49,9 @@ pub struct PipelineConfig {
     pub validation_gates: Vec<ValidationGateKind>,
     /// Whether to run context curation before AI execution (default: true).
     pub enable_context_curation: bool,
+    /// When `true`, tasks without an explicit model override request the
+    /// `"auto"` model so the policy-aware router decides (default: true).
+    pub auto_routing: bool,
 }
 
 impl Default for PipelineConfig {
@@ -61,6 +64,7 @@ impl Default for PipelineConfig {
                 ValidationGateKind::RefusalDetection,
             ],
             enable_context_curation: true,
+            auto_routing: true,
         }
     }
 }
@@ -360,6 +364,7 @@ impl<E: AiExecutor> TaskPipeline<E> {
                 self.executor.as_ref(),
                 addendum.as_deref(),
                 task.model_override.as_deref(),
+                self.config.auto_routing,
             )
             .await;
 
@@ -565,6 +570,9 @@ mod tests {
                 max_retries: 3,
                 validation_gates: vec![ValidationGateKind::OutputNotEmpty],
                 enable_context_curation: false,
+                // Disable auto_routing so the task uses the persona's concrete
+                // tier model (a known cost rate), exercising cost accumulation.
+                auto_routing: false,
                 ..Default::default()
             },
             executor.clone(),

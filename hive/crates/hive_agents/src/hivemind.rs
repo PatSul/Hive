@@ -174,6 +174,11 @@ pub struct HiveMindConfig {
     pub auto_scale: bool,
     pub consensus_threshold: f32,
     pub model_overrides: HashMap<AgentRole, String>,
+    /// When `true`, roles without an explicit override request the `"auto"`
+    /// model so the policy-aware router picks the provider/model. When `false`,
+    /// roles fall back to the hardcoded per-tier default model. Mirrors
+    /// `HiveConfig::auto_routing`.
+    pub auto_routing: bool,
 }
 
 impl Default for HiveMindConfig {
@@ -185,6 +190,7 @@ impl Default for HiveMindConfig {
             auto_scale: true,
             consensus_threshold: 0.7,
             model_overrides: HashMap::new(),
+            auto_routing: true,
         }
     }
 }
@@ -438,9 +444,17 @@ impl<E: AiExecutor> HiveMind<E> {
     }
 
     /// Get the model ID for a role, checking overrides first.
+    ///
+    /// Resolution order: an explicit per-role override always wins; otherwise,
+    /// when `auto_routing` is enabled, the role requests the `"auto"` model so
+    /// the policy-aware router decides; otherwise it falls back to the hardcoded
+    /// per-tier default model.
     pub fn model_for_role(&self, role: AgentRole) -> String {
         if let Some(override_model) = self.config.model_overrides.get(&role) {
             return override_model.clone();
+        }
+        if self.config.auto_routing {
+            return "auto".into();
         }
         default_model_for_tier(role.model_tier())
     }
@@ -1486,17 +1500,38 @@ mod tests {
     }
 
     #[test]
-    fn model_for_role_uses_override() {
-        let executor = MockExecutor::new("test");
+    fn model_for_role_override_always_wins() {
+        // An explicit override wins regardless of the auto_routing flag.
         let mut overrides = HashMap::new();
         overrides.insert(AgentRole::Coder, "custom-model-v2".into());
         let config = HiveMindConfig {
             model_overrides: overrides,
+            auto_routing: true,
             ..Default::default()
         };
-        let hm = HiveMind::new(config, executor);
+        let hm = HiveMind::new(config, MockExecutor::new("test"));
         assert_eq!(hm.model_for_role(AgentRole::Coder), "custom-model-v2");
-        // Non-overridden role uses default.
+    }
+
+    #[test]
+    fn model_for_role_auto_routing_returns_auto() {
+        // auto_routing on + no override => "auto" (router decides downstream).
+        let config = HiveMindConfig {
+            auto_routing: true,
+            ..Default::default()
+        };
+        let hm = HiveMind::new(config, MockExecutor::new("test"));
+        assert_eq!(hm.model_for_role(AgentRole::Architect), "auto");
+    }
+
+    #[test]
+    fn model_for_role_no_auto_routing_uses_tier_default() {
+        // auto_routing off + no override => hardcoded per-tier default.
+        let config = HiveMindConfig {
+            auto_routing: false,
+            ..Default::default()
+        };
+        let hm = HiveMind::new(config, MockExecutor::new("test"));
         assert_eq!(
             hm.model_for_role(AgentRole::Architect),
             default_model_for_tier(ModelTier::Premium)

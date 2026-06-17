@@ -115,6 +115,14 @@ pub struct CoordinatorConfig {
     /// Optional approval gate for high-risk task gating.
     #[serde(skip)]
     pub approval: Option<Arc<ApprovalGate>>,
+    /// When `true`, tasks without an explicit model override request the
+    /// `"auto"` model so the policy-aware router decides (default: true).
+    #[serde(default = "default_true")]
+    pub auto_routing: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for CoordinatorConfig {
@@ -128,6 +136,7 @@ impl Default for CoordinatorConfig {
             rag: None,
             budget: None,
             approval: None,
+            auto_routing: true,
         }
     }
 }
@@ -364,10 +373,13 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
         let mut failed: HashSet<String> = HashSet::new();
         let mut remaining: Vec<PlannedTask> = plan.tasks.clone();
 
-        // Build pipeline if configured.
+        // Build pipeline if configured. Propagate the coordinator's
+        // `auto_routing` into the pipeline so per-task model selection honors it.
         let pipeline = self.config.pipeline.as_ref().map(|cfg| {
+            let mut pipeline_cfg = cfg.clone();
+            pipeline_cfg.auto_routing = self.config.auto_routing;
             TaskPipeline::new(
-                cfg.clone(),
+                pipeline_cfg,
                 self.executor.clone(),
                 self.config.rag.clone(),
                 None,
@@ -592,6 +604,7 @@ impl<E: AiExecutor + 'static> Coordinator<E> {
                         self.executor.as_ref(),
                         None,
                         task.model_override.as_deref(),
+                        self.config.auto_routing,
                     )
                     .await;
 

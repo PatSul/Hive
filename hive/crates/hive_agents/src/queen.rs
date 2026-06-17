@@ -710,17 +710,31 @@ impl<E: AiExecutor + 'static> Queen<E> {
         }
     }
 
+    /// Resolve the model for a single-call team path.
+    ///
+    /// An explicit `preferred_model` always wins. Otherwise, when `auto_routing`
+    /// is enabled the team requests the `"auto"` model so the policy-aware router
+    /// decides; when it is disabled the supplied per-tier `fallback` is used.
+    fn team_model_or_auto(
+        &self,
+        preferred: &Option<String>,
+        fallback: impl FnOnce() -> String,
+    ) -> String {
+        if let Some(model) = preferred {
+            model.clone()
+        } else if self.config.auto_routing {
+            "auto".into()
+        } else {
+            fallback()
+        }
+    }
+
     /// Execute a team using the full HiveMind multi-agent pipeline.
     async fn execute_team_hivemind(
         &self,
         objective: &TeamObjective,
         description: &str,
     ) -> Result<(InnerResult, f64, Vec<String>), String> {
-        let model = objective
-            .preferred_model
-            .clone()
-            .unwrap_or_else(|| default_model_for_tier(ModelTier::Mid));
-
         let config = HiveMindConfig {
             max_agents: 5,
             cost_limit_usd: self.config.per_team_cost_limit_usd,
@@ -729,10 +743,16 @@ impl<E: AiExecutor + 'static> Queen<E> {
             consensus_threshold: 0.7,
             model_overrides: {
                 let mut m = std::collections::HashMap::new();
-                // Use the preferred model for the architect role (most important).
-                m.insert(crate::hivemind::AgentRole::Architect, model);
+                // An explicit preferred model always wins for the architect role
+                // (most important). When none is specified, leave the architect
+                // unset so `auto_routing` / per-tier defaults apply instead of
+                // pinning a fabricated default model.
+                if let Some(model) = objective.preferred_model.clone() {
+                    m.insert(crate::hivemind::AgentRole::Architect, model);
+                }
                 m
             },
+            auto_routing: self.config.auto_routing,
         };
 
         let arc_exec = ArcExecutor(Arc::clone(&self.executor));
@@ -759,14 +779,14 @@ impl<E: AiExecutor + 'static> Queen<E> {
             max_parallel: 4,
             cost_limit: self.config.per_team_cost_limit_usd,
             time_limit_secs: self.config.per_team_time_limit_secs,
-            model_for_coordination: objective
-                .preferred_model
-                .clone()
-                .unwrap_or_else(|| default_model_for_tier(ModelTier::Mid)),
+            model_for_coordination: self.team_model_or_auto(&objective.preferred_model, || {
+                default_model_for_tier(ModelTier::Mid)
+            }),
             pipeline: Some(crate::pipeline::PipelineConfig::default()),
             rag: self.rag.clone(),
             budget: self.budget.clone(),
             approval: self.approval.clone(),
+            auto_routing: self.config.auto_routing,
         };
 
         // Build a simple TaskPlan from the objective description.
@@ -796,10 +816,9 @@ impl<E: AiExecutor + 'static> Queen<E> {
         objective: &TeamObjective,
         description: &str,
     ) -> Result<(InnerResult, f64, Vec<String>), String> {
-        let model = objective
-            .preferred_model
-            .clone()
-            .unwrap_or_else(|| self.config.queen_model.clone());
+        let model = self.team_model_or_auto(&objective.preferred_model, || {
+            self.config.queen_model.clone()
+        });
 
         let system_prompt = format!(
             "You are a specialized team working on: {}\n\n\
@@ -851,10 +870,9 @@ impl<E: AiExecutor + 'static> Queen<E> {
         objective: &TeamObjective,
         description: &str,
     ) -> Result<(InnerResult, f64, Vec<String>), String> {
-        let model = objective
-            .preferred_model
-            .clone()
-            .unwrap_or_else(|| default_model_for_tier(ModelTier::Budget));
+        let model = self.team_model_or_auto(&objective.preferred_model, || {
+            default_model_for_tier(ModelTier::Budget)
+        });
 
         let request = ChatRequest {
             messages: vec![ChatMessage::text(

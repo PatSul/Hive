@@ -35,7 +35,7 @@ pub use providers::{AiProvider, ProviderError};
 pub use quick_index::QuickIndex;
 pub use rag::{DocumentChunk, IndexStats, RagQuery, RagResult, RagService, ScoredChunk};
 pub use semantic_search::{SearchEntry, SearchQuery, SearchResult, SemanticSearchService};
-pub use service::{AiService, AiServiceConfig};
+pub use service::{AiRoutingHandle, AiService, AiServiceConfig};
 pub use speculative::{SpeculativeChunk, SpeculativeConfig, SpeculativeMetrics};
 pub use toon::ContextFormat;
 pub use tts::service::{TtsService, TtsServiceConfig};

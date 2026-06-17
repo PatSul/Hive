@@ -129,6 +129,11 @@ static MODEL_MAPPINGS: &[ModelMapping] = &[
 
 /// The main router that combines complexity classification with provider
 /// fallback management to produce routing decisions.
+///
+/// `Clone` snapshots the current routing configuration (classifier, fallback
+/// chain + health, tier adjuster, and policy) so an owned, `Send + Sync` copy
+/// can be embedded in an off-thread routing handle.
+#[derive(Clone)]
 pub struct ModelRouter {
     classifier: ComplexityClassifier,
     fallback_manager: AutoFallbackManager,
