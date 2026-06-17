@@ -11,33 +11,103 @@ const AES_NONCE_LEN: usize = 12;
 const SALT_LEN: usize = 16;
 const SALT_FILENAME: &str = "storage.salt";
 
+/// Environment variable holding an optional user passphrase that is mixed into
+/// the Argon2id key derivation.
+///
+/// # Migration semantics
+///
+/// * **Unset / empty (default):** key derivation is byte-for-byte identical to
+///   the legacy scheme (`"hive-secure-storage-v2:{username}:{home}"`). Existing
+///   `~/.hive/keys.enc` files decrypt unchanged — there is zero behavior change.
+/// * **Set (non-empty):** the passphrase is appended to the derivation input
+///   (`"hive-secure-storage-v2:{username}:{home}:{passphrase}"`), producing a
+///   distinct key bound to a user secret. A local attacker with read access to
+///   the home directory can no longer reconstruct the key without the
+///   passphrase.
+///
+/// On **decrypt** the passphrase-derived key is tried first; if AEAD
+/// authentication fails (e.g. the data was written before the passphrase was
+/// set) it transparently falls back to the legacy no-passphrase key. On the
+/// next **encrypt/save** the data is rewritten with the passphrase-derived key,
+/// migrating it forward. If both keys fail, decryption returns a clear error —
+/// data is never wiped or lost.
+const VAULT_PASSPHRASE_ENV: &str = "HIVE_VAULT_PASSPHRASE";
+
+/// Reads the optional vault passphrase from the environment, treating an unset
+/// or empty value as "no passphrase" (the default, legacy-compatible path).
+fn passphrase_from_env() -> Option<String> {
+    match std::env::var(VAULT_PASSPHRASE_ENV) {
+        Ok(p) if !p.is_empty() => Some(p),
+        _ => None,
+    }
+}
+
 /// Secure storage for API keys and sensitive data.
 /// Uses AES-256-GCM encryption with a key derived via Argon2id from
-/// machine-specific context and a persisted random salt.
+/// machine-specific context, an optional user passphrase
+/// (`HIVE_VAULT_PASSPHRASE`), and a persisted random salt.
 pub struct SecureStorage {
+    /// Primary cipher used for all encryption and the first decrypt attempt.
+    /// Bound to the passphrase when one is set, otherwise the legacy key.
     cipher: Aes256Gcm,
     key_material: [u8; 32],
+    /// Legacy (no-passphrase) cipher, present only when a passphrase is set.
+    /// Used as a decrypt fallback so data written before the passphrase was set
+    /// still loads (transparent migration on next save).
+    legacy_cipher: Option<Aes256Gcm>,
 }
 
 impl SecureStorage {
     /// Create a new SecureStorage with a key derived via Argon2id.
     ///
     /// The salt is loaded from (or generated and saved to) `~/.hive/storage.salt`.
+    /// The optional `HIVE_VAULT_PASSPHRASE` environment variable is mixed into
+    /// the derivation when set; see [`VAULT_PASSPHRASE_ENV`] for migration
+    /// semantics.
     pub fn new() -> Result<Self> {
         let salt_path = Self::default_salt_path()?;
-        let key_material = Self::derive_key(&salt_path)?;
-        Ok(Self::from_key_material(key_material))
+        Self::with_salt_path(&salt_path)
     }
 
     /// Create a SecureStorage with a salt file at a custom path.
     /// Useful for testing without touching `~/.hive/`.
+    ///
+    /// Reads the optional `HIVE_VAULT_PASSPHRASE` environment variable at this
+    /// construction boundary.
     pub fn with_salt_path(salt_path: &Path) -> Result<Self> {
-        let key_material = Self::derive_key(salt_path)?;
-        Ok(Self::from_key_material(key_material))
+        let salt = Self::load_or_create_salt(salt_path)?;
+        let passphrase = passphrase_from_env();
+        Self::from_salt_and_passphrase(&salt, passphrase.as_deref())
+    }
+
+    /// Construct from an explicit salt and optional passphrase, deriving the
+    /// primary key (and, when a passphrase is set, the legacy fallback key).
+    /// This is the single place that turns derivation inputs into ciphers, so
+    /// tests can exercise the full encrypt/decrypt/migration logic without
+    /// touching the real environment.
+    fn from_salt_and_passphrase(
+        salt: &[u8; SALT_LEN],
+        passphrase: Option<&str>,
+    ) -> Result<Self> {
+        let key_material = derive_key(salt, passphrase)?;
+        let mut storage = Self::from_key_material(key_material);
+        // Only keep a legacy fallback cipher when a passphrase is actually set;
+        // with no passphrase the primary key already *is* the legacy key.
+        if passphrase.is_some() {
+            let legacy_material = derive_key(salt, None)?;
+            let legacy_key = Key::<Aes256Gcm>::from_slice(&legacy_material);
+            storage.legacy_cipher = Some(Aes256Gcm::new(legacy_key));
+        }
+        Ok(storage)
     }
 
     /// Create a duplicate instance reusing the same derived key material.
     /// Avoids re-running Argon2 key derivation.
+    ///
+    /// The legacy fallback cipher is *not* duplicated: callers that obtain a
+    /// `SecureStorage` via [`Self::duplicate`] (e.g. the config hot-reload
+    /// watcher) only encrypt with the primary key, and any read path that needs
+    /// migration fallback goes through a freshly constructed instance.
     pub fn duplicate(&self) -> Self {
         Self::from_key_material(self.key_material)
     }
@@ -48,6 +118,7 @@ impl SecureStorage {
         Self {
             cipher,
             key_material,
+            legacy_cipher: None,
         }
     }
 
@@ -69,6 +140,11 @@ impl SecureStorage {
     }
 
     /// Decrypt a hex-encoded ciphertext string.
+    ///
+    /// Tries the primary (passphrase-aware) key first. When a passphrase is set
+    /// and the primary key fails AEAD authentication, falls back to the legacy
+    /// no-passphrase key so data written before the passphrase was configured
+    /// still loads. If both keys fail, returns a clear error — no data is lost.
     pub fn decrypt(&self, hex_ciphertext: &str) -> Result<String> {
         let data = hex::decode(hex_ciphertext).context("Invalid hex")?;
         if data.len() < AES_NONCE_LEN {
@@ -78,12 +154,25 @@ impl SecureStorage {
         let (nonce_bytes, ciphertext) = data.split_at(AES_NONCE_LEN);
         let nonce = Nonce::from_slice(nonce_bytes);
 
-        let plaintext = self
-            .cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow::anyhow!("Decryption failed: {e}"))?;
+        // Primary (passphrase-aware) key first.
+        let primary_err = match self.cipher.decrypt(nonce, ciphertext) {
+            Ok(plaintext) => {
+                return String::from_utf8(plaintext).context("Decrypted data is not valid UTF-8");
+            }
+            Err(e) => e,
+        };
 
-        String::from_utf8(plaintext).context("Decrypted data is not valid UTF-8")
+        // Legacy fallback: only present when a passphrase is set. This lets
+        // keys.enc written before the passphrase was configured still decrypt
+        // (such entries are migrated forward on the next save).
+        if let Some(legacy) = &self.legacy_cipher
+            && let Ok(plaintext) = legacy.decrypt(nonce, ciphertext)
+        {
+            return String::from_utf8(plaintext).context("Decrypted data is not valid UTF-8");
+        }
+
+        // Both derivations failed — surface a clear error, never wipe data.
+        Err(anyhow::anyhow!("Decryption failed: {primary_err}"))
     }
 
     /// Returns the default salt file path: `~/.hive/storage.salt`.
@@ -117,49 +206,56 @@ impl SecureStorage {
         Ok(salt)
     }
 
-    /// Derive a 256-bit key using Argon2id with a persisted random salt and
-    /// machine-specific context (username + home directory).
-    ///
-    /// Parameters: Argon2id, m=19456 KiB (~19 MB), t=2 iterations, p=1 lane.
-    /// These are reasonable defaults that balance security and startup latency.
-    fn derive_key(salt_path: &Path) -> Result<[u8; 32]> {
-        let salt = Self::load_or_create_salt(salt_path)?;
+}
 
-        // Gather machine-specific input material.
-        let username = whoami::username();
-        let home = dirs::home_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let password = format!("hive-secure-storage-v2:{username}:{home}");
-
-        let params = Params::new(19_456, 2, 1, Some(32))
-            .map_err(|e| anyhow::anyhow!("Invalid Argon2 params: {e}"))?;
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-
-        let mut key = [0u8; 32];
-        argon2
-            .hash_password_into(password.as_bytes(), &salt, &mut key)
-            .map_err(|e| anyhow::anyhow!("Argon2 key derivation failed: {e}"))?;
-
-        Ok(key)
+/// Build the Argon2id derivation input ("password") from machine-specific
+/// context (username + home directory) and an optional user passphrase.
+///
+/// * **No passphrase:** `"hive-secure-storage-v2:{username}:{home}"` — byte-for-byte
+///   identical to the legacy scheme.
+/// * **With passphrase:** `"hive-secure-storage-v2:{username}:{home}:{passphrase}"`.
+///
+/// Kept deterministic so re-runs reproduce the same key.
+fn derivation_input(username: &str, home: &str, passphrase: Option<&str>) -> String {
+    match passphrase {
+        Some(p) => format!("hive-secure-storage-v2:{username}:{home}:{p}"),
+        None => format!("hive-secure-storage-v2:{username}:{home}"),
     }
+}
 
-    /// Derive a key from an explicit salt and password. Used in tests to verify
-    /// determinism and independence without touching the filesystem.
-    #[cfg(test)]
-    fn derive_key_raw(password: &[u8], salt: &[u8; SALT_LEN]) -> Result<[u8; 32]> {
-        let params = Params::new(19_456, 2, 1, Some(32))
-            .map_err(|e| anyhow::anyhow!("Invalid Argon2 params: {e}"))?;
-        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+/// Run Argon2id over an explicit password and salt, producing a 256-bit key.
+///
+/// Parameters: Argon2id, m=19456 KiB (~19 MB), t=2 iterations, p=1 lane.
+/// These are reasonable defaults that balance security and startup latency.
+fn argon2_derive(password: &[u8], salt: &[u8; SALT_LEN]) -> Result<[u8; 32]> {
+    let params = Params::new(19_456, 2, 1, Some(32))
+        .map_err(|e| anyhow::anyhow!("Invalid Argon2 params: {e}"))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-        let mut key = [0u8; 32];
-        argon2
-            .hash_password_into(password, salt, &mut key)
-            .map_err(|e| anyhow::anyhow!("Argon2 key derivation failed: {e}"))?;
+    let mut key = [0u8; 32];
+    argon2
+        .hash_password_into(password, salt, &mut key)
+        .map_err(|e| anyhow::anyhow!("Argon2 key derivation failed: {e}"))?;
 
-        Ok(key)
-    }
+    Ok(key)
+}
+
+/// Derive a 256-bit key from the persisted salt, machine-specific context, and
+/// an optional user passphrase. Pure with respect to the environment: the
+/// passphrase is passed in explicitly so it can be unit-tested without touching
+/// the real `HIVE_VAULT_PASSPHRASE` env var.
+///
+/// With `passphrase == None` the output is identical to the legacy scheme, so
+/// existing `keys.enc` files decrypt unchanged.
+fn derive_key(salt: &[u8; SALT_LEN], passphrase: Option<&str>) -> Result<[u8; 32]> {
+    // Gather machine-specific input material.
+    let username = whoami::username();
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let password = derivation_input(&username, &home, passphrase);
+    argon2_derive(password.as_bytes(), salt)
 }
 
 #[cfg(test)]
@@ -172,6 +268,15 @@ mod tests {
     fn storage_in(dir: &Path) -> SecureStorage {
         let salt_path = dir.join(SALT_FILENAME);
         SecureStorage::with_salt_path(&salt_path).unwrap()
+    }
+
+    /// Helper: create a SecureStorage with an explicit passphrase, bypassing the
+    /// environment entirely. This makes passphrase/migration tests deterministic
+    /// and free of env-var races (no need to mutate the global process env).
+    fn storage_in_with_passphrase(dir: &Path, passphrase: Option<&str>) -> SecureStorage {
+        let salt_path = dir.join(SALT_FILENAME);
+        let salt = SecureStorage::load_or_create_salt(&salt_path).unwrap();
+        SecureStorage::from_salt_and_passphrase(&salt, passphrase).unwrap()
     }
 
     // ---- basic encrypt / decrypt (same as before) ----
@@ -269,8 +374,8 @@ mod tests {
     fn derive_key_deterministic_with_same_salt() {
         let salt: [u8; SALT_LEN] = [1u8; SALT_LEN];
         let password = b"test-password";
-        let key1 = SecureStorage::derive_key_raw(password, &salt).unwrap();
-        let key2 = SecureStorage::derive_key_raw(password, &salt).unwrap();
+        let key1 = argon2_derive(password, &salt).unwrap();
+        let key2 = argon2_derive(password, &salt).unwrap();
         assert_eq!(key1, key2, "Same salt + password must produce same key");
     }
 
@@ -279,16 +384,16 @@ mod tests {
         let salt_a: [u8; SALT_LEN] = [1u8; SALT_LEN];
         let salt_b: [u8; SALT_LEN] = [2u8; SALT_LEN];
         let password = b"test-password";
-        let key_a = SecureStorage::derive_key_raw(password, &salt_a).unwrap();
-        let key_b = SecureStorage::derive_key_raw(password, &salt_b).unwrap();
+        let key_a = argon2_derive(password, &salt_a).unwrap();
+        let key_b = argon2_derive(password, &salt_b).unwrap();
         assert_ne!(key_a, key_b, "Different salts must produce different keys");
     }
 
     #[test]
     fn derive_key_different_passwords_produce_different_keys() {
         let salt: [u8; SALT_LEN] = [42u8; SALT_LEN];
-        let key_a = SecureStorage::derive_key_raw(b"password-a", &salt).unwrap();
-        let key_b = SecureStorage::derive_key_raw(b"password-b", &salt).unwrap();
+        let key_a = argon2_derive(b"password-a", &salt).unwrap();
+        let key_b = argon2_derive(b"password-b", &salt).unwrap();
         assert_ne!(
             key_a, key_b,
             "Different passwords must produce different keys"
@@ -298,7 +403,7 @@ mod tests {
     #[test]
     fn derived_key_is_32_bytes() {
         let salt: [u8; SALT_LEN] = [7u8; SALT_LEN];
-        let key = SecureStorage::derive_key_raw(b"any", &salt).unwrap();
+        let key = argon2_derive(b"any", &salt).unwrap();
         assert_eq!(key.len(), 32);
     }
 
@@ -400,5 +505,116 @@ mod tests {
             result.is_err(),
             "Different salts must prevent cross-decryption"
         );
+    }
+
+    // ---- vault passphrase (HIVE_VAULT_PASSPHRASE) ----
+    //
+    // These tests pass the passphrase explicitly via
+    // `from_salt_and_passphrase` / `derive_key`, so they never touch the real
+    // `HIVE_VAULT_PASSPHRASE` env var and are safe to run in parallel.
+
+    /// (1) No passphrase: encrypt then decrypt round-trips — the unchanged
+    /// default path.
+    #[test]
+    fn no_passphrase_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let storage = storage_in_with_passphrase(tmp.path(), None);
+        let plaintext = "sk-ant-no-passphrase";
+        let encrypted = storage.encrypt(plaintext).unwrap();
+        let decrypted = storage.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    /// (2) With passphrase: encrypt then decrypt round-trips.
+    #[test]
+    fn with_passphrase_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let storage = storage_in_with_passphrase(tmp.path(), Some("correct horse battery"));
+        let plaintext = "sk-ant-with-passphrase";
+        let encrypted = storage.encrypt(plaintext).unwrap();
+        let decrypted = storage.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    /// (3) MIGRATION: data encrypted with NO passphrase still decrypts after a
+    /// passphrase is set — the legacy fallback succeeds. The same salt file is
+    /// reused (a passphrase is a user secret, not a salt change).
+    #[test]
+    fn migration_legacy_data_decrypts_after_passphrase_set() {
+        let tmp = TempDir::new().unwrap();
+
+        // Encrypt with NO passphrase (the legacy / pre-upgrade state).
+        let legacy = storage_in_with_passphrase(tmp.path(), None);
+        let plaintext = "legacy-secret-value";
+        let encrypted = legacy.encrypt(plaintext).unwrap();
+
+        // Now a passphrase is configured; same salt file, passphrase added.
+        let upgraded = storage_in_with_passphrase(tmp.path(), Some("new-passphrase"));
+
+        // The passphrase-derived primary key cannot decrypt legacy data, so the
+        // fallback to the legacy no-passphrase key must succeed.
+        let decrypted = upgraded
+            .decrypt(&encrypted)
+            .expect("legacy data must decrypt via fallback after passphrase set");
+        assert_eq!(decrypted, plaintext);
+
+        // Transparent migration: re-encrypting with the passphrase instance and
+        // decrypting again still round-trips (now via the primary key).
+        let re_encrypted = upgraded.encrypt(plaintext).unwrap();
+        assert_eq!(upgraded.decrypt(&re_encrypted).unwrap(), plaintext);
+    }
+
+    /// (4) Wrong passphrase: data encrypted with passphrase A fails to decrypt
+    /// with passphrase B — cleanly (Err, no panic), and never silently returns
+    /// a different plaintext. Uses the same salt so only the passphrase differs.
+    #[test]
+    fn wrong_passphrase_fails_cleanly() {
+        let tmp = TempDir::new().unwrap();
+
+        let storage_a = storage_in_with_passphrase(tmp.path(), Some("passphrase-A"));
+        let plaintext = "guarded-by-passphrase-A";
+        let encrypted = storage_a.encrypt(plaintext).unwrap();
+
+        // storage_b shares the salt but uses a different passphrase. Its primary
+        // key differs from A's, and its legacy-fallback key also differs from
+        // A's primary key, so decryption must fail rather than yield junk.
+        let storage_b = storage_in_with_passphrase(tmp.path(), Some("passphrase-B"));
+        let result = storage_b.decrypt(&encrypted);
+        assert!(
+            result.is_err(),
+            "Wrong passphrase must fail to decrypt, not silently return other data"
+        );
+    }
+
+    /// (5) Determinism: same salt + same passphrase => same derived key, so a
+    /// later run can decrypt data written by an earlier run.
+    #[test]
+    fn derivation_deterministic_with_passphrase() {
+        let salt: [u8; SALT_LEN] = [9u8; SALT_LEN];
+        let k1 = derive_key(&salt, Some("steady-passphrase")).unwrap();
+        let k2 = derive_key(&salt, Some("steady-passphrase")).unwrap();
+        assert_eq!(k1, k2, "Same salt + passphrase must produce same key");
+
+        // And the no-passphrase derivation is likewise deterministic AND
+        // distinct from the passphrase-derived key (proves the passphrase is
+        // actually mixed in).
+        let legacy1 = derive_key(&salt, None).unwrap();
+        let legacy2 = derive_key(&salt, None).unwrap();
+        assert_eq!(legacy1, legacy2, "No-passphrase derivation must be deterministic");
+        assert_ne!(
+            k1, legacy1,
+            "Passphrase-derived key must differ from the legacy no-passphrase key"
+        );
+    }
+
+    /// The default (no-passphrase) derivation input is byte-for-byte the legacy
+    /// string, guaranteeing existing `keys.enc` files decrypt unchanged.
+    #[test]
+    fn default_derivation_input_matches_legacy_format() {
+        let legacy = derivation_input("alice", "/home/alice", None);
+        assert_eq!(legacy, "hive-secure-storage-v2:alice:/home/alice");
+
+        let with_pass = derivation_input("alice", "/home/alice", Some("pw"));
+        assert_eq!(with_pass, "hive-secure-storage-v2:alice:/home/alice:pw");
     }
 }
