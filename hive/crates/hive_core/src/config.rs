@@ -197,6 +197,7 @@ const KEY_VENICE: &str = "api_key_venice";
 const KEY_ZAI: &str = "api_key_zai";
 const KEY_JIRA_TOKEN: &str = "api_key_jira_token";
 const KEY_LINEAR: &str = "api_key_linear";
+const KEY_GITHUB_TOKEN: &str = "api_key_github_token";
 const KEY_HUE: &str = "api_key_hue";
 const KEY_AIRWEAVE: &str = "api_key_airweave";
 const KEY_KILO_PASSWORD: &str = "kilo_password";
@@ -445,6 +446,12 @@ pub struct HiveConfig {
     // Linear: API key is a secret stored in SecureStorage.
     #[serde(skip)]
     pub linear_api_key: Option<String>,
+    // GitHub Issues: the personal access token is a secret stored in
+    // SecureStorage; the default `owner/repo` target is non-secret config.
+    #[serde(skip)]
+    pub github_token: Option<String>,
+    #[serde(default)]
+    pub github_default_repo: Option<String>,
 
     // Messaging provider tokens — stored in SecureStorage
     #[serde(skip)]
@@ -613,6 +620,8 @@ impl Default for HiveConfig {
             jira_email: None,
             jira_api_token: None,
             linear_api_key: None,
+            github_token: None,
+            github_default_repo: None,
             cloud_api_url: None,
             cloud_relay_url: None,
             cloud_jwt: None,
@@ -943,6 +952,7 @@ impl ConfigManager {
             config.zai_api_key = get_secure_key(ss, &key_map, KEY_ZAI);
             config.jira_api_token = get_secure_key(ss, &key_map, KEY_JIRA_TOKEN);
             config.linear_api_key = get_secure_key(ss, &key_map, KEY_LINEAR);
+            config.github_token = get_secure_key(ss, &key_map, KEY_GITHUB_TOKEN);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
             config.airweave_api_key = get_secure_key(ss, &key_map, KEY_AIRWEAVE);
             config.kilo_password = get_secure_key(ss, &key_map, KEY_KILO_PASSWORD);
@@ -999,6 +1009,7 @@ impl ConfigManager {
             "zai" => config.zai_api_key.clone(),
             "jira" => config.jira_api_token.clone(),
             "linear" => config.linear_api_key.clone(),
+            "github" => config.github_token.clone(),
             "hue" => config.hue_api_key.clone(),
             "airweave" => config.airweave_api_key.clone(),
             "kilo_password" => config.kilo_password.clone(),
@@ -1038,6 +1049,7 @@ impl ConfigManager {
                 "zai" => config.zai_api_key = key.clone(),
                 "jira" => config.jira_api_token = key.clone(),
                 "linear" => config.linear_api_key = key.clone(),
+                "github" => config.github_token = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
                 "airweave" => config.airweave_api_key = key.clone(),
                 "kilo_password" => config.kilo_password = key.clone(),
@@ -1087,6 +1099,7 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_ZAI, &config.zai_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_JIRA_TOKEN, &config.jira_api_token)?;
         set_secure_key(ss, &mut key_map, KEY_LINEAR, &config.linear_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_GITHUB_TOKEN, &config.github_token)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_AIRWEAVE, &config.airweave_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_KILO_PASSWORD, &config.kilo_password)?;
@@ -1200,6 +1213,7 @@ impl ConfigManager {
         ("zai", KEY_ZAI),
         ("jira", KEY_JIRA_TOKEN),
         ("linear", KEY_LINEAR),
+        ("github", KEY_GITHUB_TOKEN),
         ("hue", KEY_HUE),
         ("airweave", KEY_AIRWEAVE),
     ];

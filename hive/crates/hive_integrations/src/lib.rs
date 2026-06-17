@@ -63,8 +63,8 @@ pub use microsoft::outlook_email::OutlookEmailClient;
 pub use oauth::{OAuthClient, OAuthConfig, OAuthToken};
 pub use oauth_callback::OAuthCallbackServer;
 pub use project_management::{
-    AsanaClient, Comment as PMComment, CreateIssueRequest, Issue, IssueFilters, IssuePriority,
-    IssueStatus, IssueUpdate, JiraClient, LinearClient, PMPlatform, Project as PMProject,
-    ProjectManagementHub, ProjectManagementProvider, Sprint,
+    AsanaClient, Comment as PMComment, CreateIssueRequest, GitHubIssuesClient, Issue, IssueFilters,
+    IssuePriority, IssueStatus, IssueUpdate, JiraClient, LinearClient, PMPlatform,
+    Project as PMProject, ProjectManagementHub, ProjectManagementProvider, Sprint,
 };
 pub use webhooks::{Webhook, WebhookRegistry};

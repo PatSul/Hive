@@ -6,10 +6,12 @@
 //! that routes operations to the appropriate provider.
 
 pub mod asana;
+pub mod github_issues;
 pub mod jira;
 pub mod linear;
 
 pub use asana::AsanaClient;
+pub use github_issues::GitHubIssuesClient;
 pub use jira::JiraClient;
 pub use linear::LinearClient;
 

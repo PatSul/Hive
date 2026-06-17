@@ -1034,6 +1034,32 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         }
     }
 
+    // GitHub Issues — register only when a personal access token is present and
+    // non-empty. The default `owner/repo` (if configured) is used for calls
+    // that omit a repository target. Any failure is logged and skipped.
+    if let Some(token) = config.github_token.as_deref() {
+        let token = token.trim();
+        if token.is_empty() {
+            warn!("GitHub token empty; skipping GitHub Issues provider");
+        } else {
+            let default_repo = config
+                .github_default_repo
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            match hive_integrations::project_management::GitHubIssuesClient::with_default_repo(
+                token,
+                default_repo,
+            ) {
+                Ok(client) => {
+                    pm_hub.register_provider(Box::new(client));
+                    info!("GitHub Issues provider registered");
+                }
+                Err(e) => warn!("Failed to create GitHub Issues provider: {e}"),
+            }
+        }
+    }
+
     info!(
         "ProjectManagementHub initialized with {} provider(s)",
         pm_hub.provider_count()
