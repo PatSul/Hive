@@ -5322,7 +5322,7 @@ dependencies = [
 
 [[package]]
 name = "hive_a2a"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "a2a-rs",
  "anyhow",
@@ -5348,7 +5348,7 @@ dependencies = [
 
 [[package]]
 name = "hive_admin"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -5366,7 +5366,7 @@ dependencies = [
 
 [[package]]
 name = "hive_agents"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5401,7 +5401,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ai"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -5435,7 +5435,7 @@ dependencies = [
 
 [[package]]
 name = "hive_app"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "axum 0.8.8",
@@ -5472,7 +5472,7 @@ dependencies = [
 
 [[package]]
 name = "hive_assistant"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5495,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "hive_blockchain"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5527,7 +5527,7 @@ dependencies = [
 
 [[package]]
 name = "hive_cli"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5552,7 +5552,7 @@ dependencies = [
 
 [[package]]
 name = "hive_cloud"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "async-stripe",
@@ -5571,7 +5571,7 @@ dependencies = [
 
 [[package]]
 name = "hive_core"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5602,7 +5602,7 @@ dependencies = [
 
 [[package]]
 name = "hive_docs"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5617,7 +5617,7 @@ dependencies = [
 
 [[package]]
 name = "hive_fs"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5637,7 +5637,7 @@ dependencies = [
 
 [[package]]
 name = "hive_integrations"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5658,7 +5658,7 @@ dependencies = [
 
 [[package]]
 name = "hive_kilo"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5679,7 +5679,7 @@ dependencies = [
 
 [[package]]
 name = "hive_learn"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5700,7 +5700,7 @@ dependencies = [
 
 [[package]]
 name = "hive_network"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "chrono",
  "futures",
@@ -5715,7 +5715,7 @@ dependencies = [
 
 [[package]]
 name = "hive_remote"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5754,7 +5754,7 @@ dependencies = [
 
 [[package]]
 name = "hive_shield"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "chrono",
  "once_cell",
@@ -5770,7 +5770,7 @@ dependencies = [
 
 [[package]]
 name = "hive_terminal"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5792,7 +5792,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5825,7 +5825,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui_core"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "gpui",
  "gpui-component",
@@ -5846,7 +5846,7 @@ dependencies = [
 
 [[package]]
 name = "hive_ui_panels"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "anyhow",
  "chrono",

@@ -14,9 +14,27 @@ use std::fs;
 use std::path::Path;
 use tracing::debug;
 
+use crate::memory::knowledge_graph::{EdgeKind, KnowledgeGraph, NodeKind};
+use crate::quick_index::QuickIndex;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+/// Maximum number of seed nodes matched from a query before graph expansion.
+/// Bounds the cost of graph augmentation regardless of query length.
+const MAX_GRAPH_SEEDS: usize = 8;
+
+/// Maximum number of related graph nodes emitted as `SourceType::Graph` sources
+/// in a single curation pass. Keeps graph augmentation from crowding out the
+/// primary RAG/semantic sources.
+const MAX_GRAPH_SOURCES: usize = 8;
+
+/// Fixed relevance boost applied to graph sources, mirroring the constant
+/// boosts the scorer gives to `Pattern` / `ProjectKnowledge` sources. Tuned to
+/// sit below project-knowledge (+1.0) but above an unmatched file, so a node
+/// related to a matched entity ranks alongside a weak direct TF-IDF hit.
+const GRAPH_SOURCE_BOOST: f64 = 0.4;
 
 /// Common English stopwords filtered during keyword extraction.
 const STOPWORDS: &[&str] = &[
@@ -48,6 +66,35 @@ pub enum SourceType {
     LearnedPreference,
     /// Project knowledge files (HIVE.md, README.md, etc.).
     ProjectKnowledge,
+    /// A node related to the query's matched entities, surfaced from the
+    /// knowledge graph (GraphRAG). Emitted during L2 curation when a non-empty
+    /// `KnowledgeGraph` is present.
+    Graph,
+}
+
+impl SourceType {
+    /// A stable, human-readable label for this source type.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Symbol => "symbol",
+            Self::Documentation => "documentation",
+            Self::GitHistory => "git-history",
+            Self::Dependency => "dependency",
+            Self::Config => "config",
+            Self::Test => "test",
+            Self::Pattern => "pattern",
+            Self::LearnedPreference => "learned-preference",
+            Self::ProjectKnowledge => "project-knowledge",
+            Self::Graph => "graph",
+        }
+    }
+}
+
+impl std::fmt::Display for SourceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 /// A single context source with its content and metadata.
@@ -219,6 +266,11 @@ pub struct ContextEngine {
     sources: Vec<ContextSource>,
     /// Cached IDF values keyed by term. Invalidated when sources change.
     idf_cache: HashMap<String, f64>,
+    /// Knowledge graph used to augment curation with structurally-related
+    /// entities (GraphRAG). Starts empty; an empty graph is a strict no-op, so
+    /// curation behaves byte-for-byte identically until a graph is supplied via
+    /// [`ContextEngine::set_graph`] or [`ContextEngine::rebuild_graph_from_index`].
+    graph: KnowledgeGraph,
 }
 
 impl ContextEngine {
@@ -227,6 +279,7 @@ impl ContextEngine {
         Self {
             sources: Vec::new(),
             idf_cache: HashMap::new(),
+            graph: KnowledgeGraph::new(),
         }
     }
 
@@ -312,6 +365,43 @@ impl ContextEngine {
         self.walk_directory(path)
     }
 
+    // -- Knowledge graph (GraphRAG) ----------------------------------------
+
+    /// Replace the engine's knowledge graph wholesale. This is the injection
+    /// seam used to supply a graph built elsewhere (e.g. from a higher layer
+    /// that has Obsidian links) or a synthetic graph in tests.
+    ///
+    /// Supplying [`KnowledgeGraph::new()`] (an empty graph) reverts curation to
+    /// its pre-graph behaviour.
+    pub fn set_graph(&mut self, graph: KnowledgeGraph) {
+        self.graph = graph;
+    }
+
+    /// Number of nodes in the engine's knowledge graph. `0` means graph
+    /// augmentation is inert.
+    pub fn graph_node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    /// (Re)build the knowledge graph from an in-crate [`QuickIndex`] signal.
+    ///
+    /// The graph is a file/symbol structure derived entirely from data the
+    /// `hive_ai` crate already produces — no new cross-crate dependency:
+    ///
+    /// * Each file with symbols becomes a `File` node.
+    /// * Each symbol becomes a `Symbol` node with a `Reference` edge to the file
+    ///   that defines it (`symbol -> file`).
+    /// * Symbols defined in the same file are linked pairwise with
+    ///   `CoOccurrence` edges, so neighbours of a matched symbol surface its
+    ///   siblings.
+    ///
+    /// This is intentionally cheap and re-runnable; it discards any previously
+    /// set graph. A `QuickIndex` with no symbols yields an empty graph (no-op).
+    pub fn rebuild_graph_from_index(&mut self, index: &QuickIndex) {
+        self.graph = build_graph_from_quick_index(index);
+    }
+
+
     /// Curate the most relevant sources for `query` within `budget`.
     ///
     /// Algorithm:
@@ -376,6 +466,20 @@ impl ContextEngine {
             selected_sources.push(source.clone());
             selected_scores.push(rs.clone());
         }
+
+        // Step 6 (additive): augment with knowledge-graph neighbours.
+        //
+        // Strictly a no-op when the graph is empty: `augment_with_graph` returns
+        // immediately, leaving `selected_*` and `total_tokens` untouched, so the
+        // pre-graph curation output is reproduced byte-for-byte.
+        self.augment_with_graph(
+            &query_terms,
+            budget,
+            available_tokens,
+            &mut total_tokens,
+            &mut selected_sources,
+            &mut selected_scores,
+        );
 
         let selected_count = selected_sources.len();
         debug!(
@@ -580,6 +684,173 @@ impl ContextEngine {
         }
     }
 
+    /// Augment the curated set with knowledge-graph neighbours of the query's
+    /// matched entities (GraphRAG).
+    ///
+    /// This runs after the normal greedy packing and only ever *appends*. It is
+    /// a strict no-op when the graph is empty — the early return below leaves
+    /// every `&mut` argument untouched — so curation is byte-for-byte unchanged
+    /// when no graph has been supplied.
+    ///
+    /// Steps:
+    /// 1. Match query terms against node ids/labels to find up to
+    ///    `MAX_GRAPH_SEEDS` seed nodes.
+    /// 2. Collect undirected neighbours of the seeds (the "related" nodes),
+    ///    excluding the seeds themselves and anything already selected.
+    /// 3. Emit each as a `SourceType::Graph` source, scored with the same
+    ///    TF-IDF pipeline plus a fixed graph boost, deduplicated by path and
+    ///    bounded by the token / source budget.
+    #[allow(clippy::too_many_arguments)]
+    fn augment_with_graph(
+        &self,
+        query_terms: &[&str],
+        budget: &ContextBudget,
+        available_tokens: usize,
+        total_tokens: &mut usize,
+        selected_sources: &mut Vec<ContextSource>,
+        selected_scores: &mut Vec<RelevanceScore>,
+    ) {
+        // Guard: an empty graph contributes nothing. This is the invariant that
+        // keeps non-graph curation unchanged.
+        if self.graph.node_count() == 0 || query_terms.is_empty() {
+            return;
+        }
+
+        // Step 1: match query terms against node ids/labels to seed the search.
+        // A node is a seed if any query term is a substring of its (lowercased)
+        // id or label — the same containment heuristic the path/symbol boosts
+        // use, applied to graph entities.
+        let mut seeds: Vec<String> = Vec::new();
+        let mut seen_seed: HashSet<String> = HashSet::new();
+        for (id, node) in self.graph.nodes() {
+            if seeds.len() >= MAX_GRAPH_SEEDS {
+                break;
+            }
+            let id_lower = id.to_lowercase();
+            let label_lower = node.label.to_lowercase();
+            let matched = query_terms
+                .iter()
+                .any(|t| id_lower.contains(t) || label_lower.contains(t));
+            if matched && seen_seed.insert(id.to_string()) {
+                seeds.push(id.to_string());
+            }
+        }
+        if seeds.is_empty() {
+            return;
+        }
+
+        // Set of paths already present so graph sources never duplicate an
+        // already-selected file/symbol or another graph node.
+        let mut present: HashSet<String> =
+            selected_sources.iter().map(|s| s.path.clone()).collect();
+        let seed_set: HashSet<&str> = seeds.iter().map(|s| s.as_str()).collect();
+
+        // Step 2: gather related node ids (neighbours of every seed), in a
+        // deterministic order.
+        let mut related: Vec<String> = Vec::new();
+        let mut seen_related: HashSet<String> = HashSet::new();
+        for seed in &seeds {
+            for nbr in self.graph.neighbors(seed) {
+                if seed_set.contains(nbr.as_str()) {
+                    continue; // a seed itself is not a "related" emission
+                }
+                if seen_related.insert(nbr.clone()) {
+                    related.push(nbr);
+                }
+            }
+        }
+        related.sort(); // determinism independent of seed iteration order
+
+        // Step 3: build, score, dedupe, and budget-pack graph sources.
+        let mut graph_scored: Vec<(ContextSource, RelevanceScore)> = Vec::new();
+        for related_id in &related {
+            let Some(node) = self.graph.node(related_id) else {
+                continue;
+            };
+            // The graph node's "path" is its id; skip if already selected.
+            if present.contains(related_id) {
+                continue;
+            }
+
+            // Find which seed this node connects to, for an explanation.
+            let via = seeds
+                .iter()
+                .find(|s| self.graph.neighbors(s).iter().any(|n| n == related_id))
+                .map(|s| s.as_str())
+                .unwrap_or("query");
+            let relation = self
+                .graph
+                .explain_path(via, related_id)
+                .map(|labels| labels.join(" -> "))
+                .unwrap_or_else(|| node.label.clone());
+
+            let content = format!(
+                "Graph relation: {} ({}). Connected via: {}.",
+                node.label,
+                graph_node_kind_label(node.kind),
+                relation,
+            );
+
+            let source = ContextSource {
+                path: format!("graph::{related_id}"),
+                content,
+                source_type: SourceType::Graph,
+                last_modified: Utc::now(),
+            };
+
+            // Score consistently with the rest of the pipeline: TF-IDF over the
+            // synthetic content plus a fixed graph boost (mirrors Pattern /
+            // ProjectKnowledge constant boosts).
+            let mut score = self.compute_tf_idf(query_terms, &source.content);
+            let mut reasons = Vec::new();
+            if score > 0.0 {
+                reasons.push(format!("tf-idf: {score:.4}"));
+            }
+            score += GRAPH_SOURCE_BOOST;
+            reasons.push(format!("graph neighbour of '{via}' (+{GRAPH_SOURCE_BOOST})"));
+
+            graph_scored.push((
+                source,
+                RelevanceScore {
+                    // Index into the curated `sources` slice (graph sources are
+                    // synthetic and not part of `self.sources`).
+                    source_idx: selected_sources.len() + graph_scored.len(),
+                    score,
+                    reasons,
+                },
+            ));
+        }
+
+        // Highest-scoring graph nodes first; tie-break by path for determinism.
+        graph_scored.sort_by(|a, b| {
+            b.1.score
+                .partial_cmp(&a.1.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.path.cmp(&b.0.path))
+        });
+
+        let mut emitted = 0usize;
+        for (source, mut rs) in graph_scored {
+            if emitted >= MAX_GRAPH_SOURCES || selected_sources.len() >= budget.max_sources {
+                break;
+            }
+            if present.contains(&source.path) {
+                continue;
+            }
+            let tokens = self.estimate_source_tokens(&source);
+            if *total_tokens + tokens > available_tokens {
+                continue;
+            }
+            *total_tokens += tokens;
+            present.insert(source.path.clone());
+            // Re-point the score index to the actual final slot.
+            rs.source_idx = selected_sources.len();
+            selected_sources.push(source);
+            selected_scores.push(rs);
+            emitted += 1;
+        }
+    }
+
     /// Recursively walk a directory and add text files as sources.
     fn walk_directory(&mut self, path: &Path) -> anyhow::Result<usize> {
         let mut count = 0;
@@ -638,6 +909,65 @@ impl Default for ContextEngine {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
+
+/// A short human-readable label for a graph node's kind, for inclusion in the
+/// synthetic content of a `SourceType::Graph` source.
+fn graph_node_kind_label(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::File => "file",
+        NodeKind::Symbol => "symbol",
+        NodeKind::Note => "note",
+        NodeKind::Memory => "memory",
+        NodeKind::Other => "entity",
+    }
+}
+
+/// Build a [`KnowledgeGraph`] from a [`QuickIndex`] — an in-`hive_ai` signal,
+/// so no new cross-crate dependency is introduced.
+///
+/// The structure is a file/symbol reference + co-occurrence graph:
+///
+/// * each defining file becomes a `File` node,
+/// * each symbol becomes a `Symbol` node with a `Reference` edge to its file
+///   (`symbol -> file`), and
+/// * symbols sharing a file get pairwise `CoOccurrence` edges so a matched
+///   symbol surfaces its siblings as neighbours.
+///
+/// Node ids are stable: the relative file path for files, and
+/// `"<file>::<name>"` for symbols (so identically-named symbols in different
+/// files stay distinct). The graph is empty when the index has no symbols,
+/// which makes graph augmentation a no-op.
+fn build_graph_from_quick_index(index: &QuickIndex) -> KnowledgeGraph {
+    let mut graph = KnowledgeGraph::new();
+
+    // Group symbol ids by their defining file.
+    let mut by_file: HashMap<&str, Vec<String>> = HashMap::new();
+
+    for sym in &index.key_symbols {
+        let file = sym.file.as_str();
+        let sym_id = format!("{file}::{}", sym.name);
+
+        graph.add_node(file, NodeKind::File, file);
+        graph.add_node(sym_id.clone(), NodeKind::Symbol, sym.name.clone());
+        // symbol references the file that defines it.
+        graph.add_edge(&sym_id, file, EdgeKind::Reference, 1.0);
+
+        by_file.entry(file).or_default().push(sym_id);
+    }
+
+    // Link symbols that co-occur in the same file (pairwise, undirected by
+    // convention — a single directed edge suffices since `neighbors` is
+    // undirected).
+    for ids in by_file.values() {
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                graph.add_edge(&ids[i], &ids[j], EdgeKind::CoOccurrence, 1.0);
+            }
+        }
+    }
+
+    graph
+}
 
 /// Infer the `SourceType` from a file path based on common patterns.
 fn infer_source_type(path: &Path) -> SourceType {
@@ -918,6 +1248,7 @@ mod tests {
             SourceType::Pattern,
             SourceType::LearnedPreference,
             SourceType::ProjectKnowledge,
+            SourceType::Graph,
         ];
 
         for variant in &variants {
@@ -925,6 +1256,8 @@ mod tests {
             let deserialized: SourceType = serde_json::from_str(&json).unwrap();
             assert_eq!(*variant, deserialized);
         }
+        // Graph serializes in snake_case like the other variants.
+        assert_eq!(serde_json::to_string(&SourceType::Graph).unwrap(), "\"graph\"");
     }
 
     // -- Convenience methods ------------------------------------------------
@@ -1067,5 +1400,180 @@ mod tests {
         let facts = extract_facts(summary);
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].category, FactCategory::Fact);
+    }
+
+    // -- GraphRAG augmentation tests ---------------------------------------
+
+    use crate::memory::knowledge_graph::{EdgeKind, KnowledgeGraph, NodeKind};
+
+    /// Build a synthetic graph where the query term "auth" matches a seed node
+    /// that is connected to two related nodes the query does NOT mention.
+    fn auth_graph() -> KnowledgeGraph {
+        let mut g = KnowledgeGraph::new();
+        // Seed: matched by the query keyword "auth".
+        g.add_node("auth_service", NodeKind::Symbol, "auth_service");
+        // Related neighbours — not mentioned in the query at all.
+        g.add_node("token_store", NodeKind::Symbol, "token_store");
+        g.add_node("session_cache", NodeKind::Symbol, "session_cache");
+        g.add_edge("auth_service", "token_store", EdgeKind::Reference, 1.0);
+        g.add_edge("auth_service", "session_cache", EdgeKind::CoOccurrence, 1.0);
+        // A wholly unrelated, disconnected node — must never surface.
+        g.add_node("unrelated_widget", NodeKind::Symbol, "unrelated_widget");
+        g
+    }
+
+    #[test]
+    fn test_graph_augments_with_related_nodes() {
+        let mut engine = ContextEngine::new();
+        // One ordinary source so curate() runs its normal path.
+        engine.add_file("main.rs", "fn main() { let x = compute(); }");
+        engine.set_graph(auth_graph());
+        assert!(engine.graph_node_count() > 0);
+
+        let result = engine.curate("auth login flow", &default_budget());
+
+        // Graph sources for the seed's neighbours must be present.
+        let graph_paths: Vec<&str> = result
+            .sources
+            .iter()
+            .filter(|s| s.source_type == SourceType::Graph)
+            .map(|s| s.path.as_str())
+            .collect();
+        assert!(
+            graph_paths.contains(&"graph::token_store"),
+            "expected token_store neighbour, got {graph_paths:?}"
+        );
+        assert!(
+            graph_paths.contains(&"graph::session_cache"),
+            "expected session_cache neighbour, got {graph_paths:?}"
+        );
+        // The seed itself is not emitted as a related node...
+        assert!(!graph_paths.contains(&"graph::auth_service"));
+        // ...and the disconnected, unmatched node never appears.
+        assert!(!graph_paths.contains(&"graph::unrelated_widget"));
+
+        // Each graph source carries a graph-neighbour reason for explainability.
+        let graph_scores: Vec<&RelevanceScore> = result
+            .scores
+            .iter()
+            .zip(result.sources.iter())
+            .filter(|(_, s)| s.source_type == SourceType::Graph)
+            .map(|(rs, _)| rs)
+            .collect();
+        assert!(!graph_scores.is_empty());
+        for rs in graph_scores {
+            assert!(rs.reasons.iter().any(|r| r.contains("graph neighbour")));
+        }
+    }
+
+    #[test]
+    fn test_empty_graph_leaves_curation_unchanged() {
+        // Two identical engines; only one differs by having an explicitly-empty
+        // graph set. Their curated output must be identical.
+        let build = || {
+            let mut e = ContextEngine::new();
+            e.add_file("main.rs", "fn main() { let x = auth(); }");
+            e.add_file("util.rs", "fn helper() {}");
+            e.add_project_knowledge("README", "# Project with auth");
+            e
+        };
+
+        let mut baseline = build();
+        let baseline_result = baseline.curate("auth helper", &default_budget());
+
+        let mut with_empty_graph = build();
+        with_empty_graph.set_graph(KnowledgeGraph::new());
+        assert_eq!(with_empty_graph.graph_node_count(), 0);
+        let graph_result = with_empty_graph.curate("auth helper", &default_budget());
+
+        // No graph sources at all.
+        assert!(
+            graph_result
+                .sources
+                .iter()
+                .all(|s| s.source_type != SourceType::Graph),
+            "empty graph must not emit any Graph sources"
+        );
+
+        // Byte-for-byte equivalent curation: same selection, order, tokens.
+        assert_eq!(graph_result.selected_count, baseline_result.selected_count);
+        assert_eq!(graph_result.original_count, baseline_result.original_count);
+        assert_eq!(graph_result.total_tokens, baseline_result.total_tokens);
+        let baseline_paths: Vec<&str> =
+            baseline_result.sources.iter().map(|s| s.path.as_str()).collect();
+        let graph_paths: Vec<&str> =
+            graph_result.sources.iter().map(|s| s.path.as_str()).collect();
+        assert_eq!(graph_paths, baseline_paths);
+    }
+
+    #[test]
+    fn test_graph_no_seed_match_is_noop() {
+        // Non-empty graph, but the query matches no node => no graph sources.
+        let mut engine = ContextEngine::new();
+        engine.add_file("main.rs", "fn main() {}");
+        engine.set_graph(auth_graph());
+
+        let result = engine.curate("completely different topic", &default_budget());
+        assert!(result
+            .sources
+            .iter()
+            .all(|s| s.source_type != SourceType::Graph));
+    }
+
+    #[test]
+    fn test_graph_sources_respect_source_budget() {
+        let mut engine = ContextEngine::new();
+        engine.add_file("main.rs", "fn main() { auth(); }");
+        engine.set_graph(auth_graph());
+
+        // Only allow a single source total — the non-graph file fills it, so no
+        // graph source can be appended.
+        let budget = ContextBudget {
+            max_tokens: 100_000,
+            max_sources: 1,
+            reserved_tokens: 0,
+        };
+        let result = engine.curate("auth", &budget);
+        assert!(result.selected_count <= 1);
+        assert!(result
+            .sources
+            .iter()
+            .all(|s| s.source_type != SourceType::Graph));
+    }
+
+    #[test]
+    fn test_rebuild_graph_from_index_builds_file_symbol_graph() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("auth.rs"),
+            "pub fn auth_login() {}\npub fn auth_logout() {}\n",
+        )
+        .unwrap();
+
+        let index = crate::quick_index::QuickIndex::build(dir.path());
+        let mut engine = ContextEngine::new();
+        engine.rebuild_graph_from_index(&index);
+
+        // File + at least the two symbols => non-empty graph.
+        assert!(
+            engine.graph_node_count() >= 3,
+            "expected file + symbol nodes, got {}",
+            engine.graph_node_count()
+        );
+
+        engine.add_file("driver.rs", "fn caller() { auth_login(); }");
+        let result = engine.curate("auth_login", &default_budget());
+
+        // Querying one symbol should surface its co-occurring sibling and/or
+        // its defining file as graph neighbours.
+        let has_graph_source = result
+            .sources
+            .iter()
+            .any(|s| s.source_type == SourceType::Graph);
+        assert!(
+            has_graph_source,
+            "expected at least one Graph source from the index-built graph"
+        );
     }
 }

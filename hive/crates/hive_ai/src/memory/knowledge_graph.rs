@@ -154,6 +154,17 @@ impl KnowledgeGraph {
         self.index.get(id).and_then(|&idx| self.graph.node_weight(idx))
     }
 
+    /// Iterate over all `(id, node)` pairs in the graph. Useful for callers that
+    /// need to match nodes against external signals (e.g. a query's keywords)
+    /// before expanding via [`neighbors`]. Order is unspecified.
+    ///
+    /// [`neighbors`]: KnowledgeGraph::neighbors
+    pub fn nodes(&self) -> impl Iterator<Item = (&str, &Node)> {
+        self.graph
+            .node_indices()
+            .map(move |idx| (self.graph[idx].id.as_str(), &self.graph[idx]))
+    }
+
     /// Return the ids of all nodes adjacent to `id`, treating the graph as
     /// undirected (both outgoing and incoming neighbours). Deduplicated and
     /// sorted for deterministic output.

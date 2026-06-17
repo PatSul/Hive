@@ -302,6 +302,12 @@ pub(super) fn handle_send_text(
         if cx.has_global::<AppContextEngine>() {
             if let Ok(mut ctx_engine) = cx.global::<AppContextEngine>().0.lock() {
                 ctx_engine.clear_ephemeral();
+                // L2 (coding): refresh the knowledge graph from the current code
+                // index so GraphRAG augmentation (SourceType::Graph) reflects the
+                // live project. Cheap + re-runnable; inert until the index exists.
+                if context_tier == hive_ai::ContextTier::L2 && cx.has_global::<AppQuickIndex>() {
+                    ctx_engine.rebuild_graph_from_index(&cx.global::<AppQuickIndex>().0);
+                }
             }
         }
 
