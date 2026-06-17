@@ -10,7 +10,8 @@ use super::{
     SwitchToCosts, SwitchToFiles, SwitchToHelp, SwitchToHistory, SwitchToKanban,
     SwitchToLearning, SwitchToLogs, SwitchToModels, SwitchToMonitor, SwitchToNetwork,
     SwitchToPromptLibrary, SwitchToQuickStart, SwitchToReview, SwitchToRouting,
-    SwitchToSettings, SwitchToShield, SwitchToSkills, SwitchToSpecs, SwitchToTerminal,
+    SwitchToRoutingMatrix, SwitchToSettings, SwitchToShield, SwitchToSkills, SwitchToSpecs,
+    SwitchToTerminal,
     SwitchToTokenLaunch, SwitchToWorkflows, SwitchToWorkspace, TogglePinWorkspace,
     ToggleProjectDropdown,
 };
@@ -354,6 +355,15 @@ pub(super) fn handle_switch_to_routing(
     cx: &mut Context<HiveWorkspace>,
 ) {
     switch_to_panel(workspace, Panel::Routing, cx);
+}
+
+pub(super) fn handle_switch_to_routing_matrix(
+    workspace: &mut HiveWorkspace,
+    _action: &SwitchToRoutingMatrix,
+    _window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    switch_to_panel(workspace, Panel::RoutingMatrix, cx);
 }
 
 pub(super) fn handle_switch_to_models(

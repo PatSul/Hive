@@ -19,21 +19,22 @@ fn test_from_index_valid() {
     assert_eq!(Panel::from_index(14), Some(Panel::Review));
     assert_eq!(Panel::from_index(15), Some(Panel::Skills));
     assert_eq!(Panel::from_index(16), Some(Panel::Routing));
-    assert_eq!(Panel::from_index(17), Some(Panel::Models));
-    assert_eq!(Panel::from_index(18), Some(Panel::Learning));
-    assert_eq!(Panel::from_index(19), Some(Panel::Shield));
-    assert_eq!(Panel::from_index(20), Some(Panel::Assistant));
-    assert_eq!(Panel::from_index(21), Some(Panel::TokenLaunch));
-    assert_eq!(Panel::from_index(22), Some(Panel::Network));
-    assert_eq!(Panel::from_index(23), Some(Panel::Terminal));
-    assert_eq!(Panel::from_index(24), Some(Panel::Settings));
-    assert_eq!(Panel::from_index(25), Some(Panel::Help));
-    assert_eq!(Panel::from_index(26), Some(Panel::QuickStart));
+    assert_eq!(Panel::from_index(17), Some(Panel::RoutingMatrix));
+    assert_eq!(Panel::from_index(18), Some(Panel::Models));
+    assert_eq!(Panel::from_index(19), Some(Panel::Learning));
+    assert_eq!(Panel::from_index(20), Some(Panel::Shield));
+    assert_eq!(Panel::from_index(21), Some(Panel::Assistant));
+    assert_eq!(Panel::from_index(22), Some(Panel::TokenLaunch));
+    assert_eq!(Panel::from_index(23), Some(Panel::Network));
+    assert_eq!(Panel::from_index(24), Some(Panel::Terminal));
+    assert_eq!(Panel::from_index(25), Some(Panel::Settings));
+    assert_eq!(Panel::from_index(26), Some(Panel::Help));
+    assert_eq!(Panel::from_index(27), Some(Panel::QuickStart));
 }
 
 #[test]
 fn test_from_index_out_of_bounds() {
-    assert_eq!(Panel::from_index(27), None);
+    assert_eq!(Panel::from_index(28), None);
     assert_eq!(Panel::from_index(100), None);
     assert_eq!(Panel::from_index(usize::MAX), None);
 }
@@ -54,7 +55,7 @@ fn test_sidebar_default_panel_is_chat() {
 
 #[test]
 fn test_panel_all_count() {
-    assert_eq!(Panel::ALL.len(), 27);
+    assert_eq!(Panel::ALL.len(), 28);
 }
 
 // -- Panel stored round-trip tests --------------------------------------

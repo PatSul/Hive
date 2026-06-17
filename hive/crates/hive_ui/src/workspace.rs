@@ -115,7 +115,8 @@ pub use hive_ui_core::{
     SwitchToChat, SwitchToCodeMap, SwitchToCosts, SwitchToFiles, SwitchToHelp, SwitchToHistory,
     SwitchToKanban, SwitchToLearning, SwitchToLogs, SwitchToModels, SwitchToMonitor,
     SwitchToNetwork, SwitchToPromptLibrary, SwitchToQuickStart, SwitchToReview, SwitchToRouting,
-    SwitchToSettings, SwitchToShield, SwitchToSkills, SwitchToSpecs, SwitchToTerminal,
+    SwitchToRoutingMatrix, SwitchToSettings, SwitchToShield, SwitchToSkills, SwitchToSpecs,
+    SwitchToTerminal,
     SwitchToTokenLaunch, SwitchToWorkflows, SwitchToWorkspace, TerminalClear, TerminalKill,
     TerminalRestart, TerminalSubmitCommand, ThemeChanged, ToggleCommandPalette,
     ToggleDisclosure, TogglePinWorkspace, ToggleProjectDropdown, TokenLaunchCreateWallet,
@@ -148,6 +149,7 @@ use hive_ui_panels::panels::{
         ReviewPanel,
     },
     routing::{RoutingData, RoutingPanel},
+    routing_matrix::{RoutingMatrixSaved, RoutingMatrixView},
     settings::{SettingsSaved, SettingsView},
     shield::{ShieldConfigChanged, ShieldPanelData, ShieldView},
     skills::{SkillsData, SkillsPanel},
@@ -291,6 +293,7 @@ pub struct HiveWorkspace {
     agents_remote_prompt_input: Entity<InputState>,
     chat_service: Entity<ChatService>,
     settings_view: Entity<SettingsView>,
+    routing_matrix_view: Entity<RoutingMatrixView>,
     shield_view: Entity<ShieldView>,
     models_browser_view: Entity<ModelsBrowserView>,
     workflow_builder_view: Entity<WorkflowBuilderView>,
@@ -766,6 +769,20 @@ impl HiveWorkspace {
         )
         .detach();
 
+        // Create the interactive routing matrix view entity.
+        let routing_matrix_view = cx.new(|cx| RoutingMatrixView::new(window, cx));
+
+        // When the routing policy is saved, persist to AppConfig and live-apply
+        // it to the running router.
+        cx.subscribe_in(
+            &routing_matrix_view,
+            window,
+            |this, _view, _event: &RoutingMatrixSaved, _window, cx| {
+                settings_actions::handle_routing_matrix_save(this, cx);
+            },
+        )
+        .detach();
+
         // Create the interactive shield view entity.
         let shield_view = cx.new(|cx| ShieldView::new(window, cx));
 
@@ -1019,6 +1036,7 @@ impl HiveWorkspace {
             agents_remote_prompt_input,
             chat_service,
             settings_view,
+            routing_matrix_view,
             shield_view,
             models_browser_view,
             workflow_builder_view,
@@ -1556,6 +1574,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(navigation::handle_switch_to_review))
             .on_action(cx.listener(navigation::handle_switch_to_skills))
             .on_action(cx.listener(navigation::handle_switch_to_routing))
+            .on_action(cx.listener(navigation::handle_switch_to_routing_matrix))
             .on_action(cx.listener(navigation::handle_switch_to_models))
             .on_action(cx.listener(navigation::handle_switch_to_token_launch))
             .on_action(cx.listener(navigation::handle_switch_to_specs))

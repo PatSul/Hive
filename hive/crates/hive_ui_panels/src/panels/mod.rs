@@ -18,6 +18,7 @@ pub mod prompt_library;
 pub mod quick_start;
 pub mod review;
 pub mod routing;
+pub mod routing_matrix;
 pub mod settings;
 pub mod shield;
 pub mod skills;

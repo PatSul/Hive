@@ -92,6 +92,7 @@ impl ShellHeaderData {
             Panel::Shield => "Review safety and privacy controls",
             Panel::Skills => "Manage installed skills",
             Panel::Routing => "Tune model routing",
+            Panel::RoutingMatrix => "Set per-category routing policy",
             Panel::Models => "Choose and connect models",
             Panel::TokenLaunch => "Manage token launch tools",
             Panel::Settings => "Configure the workspace",
@@ -152,6 +153,7 @@ impl ShellHeaderData {
             Panel::Review
             | Panel::Skills
             | Panel::Routing
+            | Panel::RoutingMatrix
             | Panel::Models
             | Panel::TokenLaunch
             | Panel::Settings

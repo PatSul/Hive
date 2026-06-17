@@ -172,6 +172,7 @@ register_ui_actions! {
     "switch_to_review"      => SwitchToReview,      "Switch to Review panel";
     "switch_to_skills"      => SwitchToSkills,      "Switch to Skills panel";
     "switch_to_routing"     => SwitchToRouting,     "Switch to Routing panel";
+    "switch_to_routing_matrix" => SwitchToRoutingMatrix, "Switch to Routing Matrix panel";
     "switch_to_models"      => SwitchToModels,      "Switch to Models panel";
     "switch_to_token_launch"=> SwitchToTokenLaunch, "Switch to Token Launch panel";
     "switch_to_specs"       => SwitchToSpecs,       "Switch to Specs panel";

@@ -19,6 +19,7 @@ pub(super) fn render_sidebar(
     let utility_panels = [
         Panel::Skills,
         Panel::Routing,
+        Panel::RoutingMatrix,
         Panel::Models,
         Panel::TokenLaunch,
         Panel::Settings,

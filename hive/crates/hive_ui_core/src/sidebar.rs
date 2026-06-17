@@ -1,6 +1,6 @@
 use gpui_component::IconName;
 
-/// The 27 navigable panels in the application.
+/// The 28 navigable panels in the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Panel {
     Chat,
@@ -21,6 +21,7 @@ pub enum Panel {
     Review,
     Skills,
     Routing,
+    RoutingMatrix,
     Models,
     Learning,
     Shield,
@@ -33,7 +34,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 27] = [
+    pub const ALL: [Panel; 28] = [
         Panel::Chat,
         Panel::History,
         Panel::Files,
@@ -51,6 +52,7 @@ impl Panel {
         Panel::Review,
         Panel::Skills,
         Panel::Routing,
+        Panel::RoutingMatrix,
         Panel::Models,
         Panel::Learning,
         Panel::Shield,
@@ -83,6 +85,7 @@ impl Panel {
             Self::Review => "Git Ops",
             Self::Skills => "Skills",
             Self::Routing => "Routing",
+            Self::RoutingMatrix => "Routing Matrix",
             Self::Models => "Models",
             Self::Learning => "Learning",
             Self::Shield => "Shield",
@@ -130,6 +133,7 @@ impl Panel {
             | Self::Shield => Some(ShellDestination::Observe),
             Self::Skills
             | Self::Routing
+            | Self::RoutingMatrix
             | Self::Models
             | Self::TokenLaunch
             | Self::Settings
@@ -162,6 +166,7 @@ impl Panel {
             Self::Review => IconName::Eye,
             Self::Skills => IconName::Star,
             Self::Routing => IconName::Map,
+            Self::RoutingMatrix => IconName::LayoutDashboard,
             Self::Models => IconName::BookOpen,
             Self::Learning => IconName::Redo2,
             Self::Shield => IconName::EyeOff,
@@ -198,6 +203,7 @@ impl Panel {
             "Review" | "GitOps" => Self::Review,
             "Skills" => Self::Skills,
             "Routing" => Self::Routing,
+            "RoutingMatrix" => Self::RoutingMatrix,
             "Models" => Self::Models,
             "Learning" => Self::Learning,
             "Shield" => Self::Shield,
@@ -232,6 +238,7 @@ impl Panel {
             Self::Review => "Review",
             Self::Skills => "Skills",
             Self::Routing => "Routing",
+            Self::RoutingMatrix => "RoutingMatrix",
             Self::Models => "Models",
             Self::Learning => "Learning",
             Self::Shield => "Shield",

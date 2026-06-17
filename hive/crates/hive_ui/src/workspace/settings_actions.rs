@@ -107,6 +107,9 @@ pub(super) fn handle_theme_changed(
     workspace.models_browser_view.update(cx, |view, cx| {
         view.set_theme(new_theme.clone(), cx);
     });
+    workspace.routing_matrix_view.update(cx, |view, cx| {
+        view.set_theme(new_theme.clone(), cx);
+    });
     workspace.channels_view.update(cx, |view, cx| {
         view.set_theme(new_theme.clone(), cx);
     });
@@ -540,6 +543,47 @@ pub(super) fn handle_settings_save_from_view(
     rebuild_knowledge_hub(workspace, cx);
     refresh_runtime_integrations_from_config(workspace, cx);
     push_keys_to_models_browser(workspace, cx);
+
+    cx.notify();
+}
+
+/// Persist the Routing Matrix panel's policy to config and live-apply it to the
+/// running router.
+///
+/// Mirrors [`handle_settings_save_from_view`]: read the assembled
+/// [`hive_core::config::RoutingPolicy`] from the view, write it through
+/// `ConfigManager`, then push the parsed runtime policy into the live
+/// `ModelRouter` so routing changes take effect immediately.
+pub(super) fn handle_routing_matrix_save(
+    workspace: &mut HiveWorkspace,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    info!("Routing Matrix: persisting routing policy");
+
+    let policy = workspace.routing_matrix_view.read(cx).collect_policy(cx);
+
+    if cx.has_global::<AppConfig>() {
+        let policy_for_config = policy.clone();
+        if let Err(e) = cx.global::<AppConfig>().0.update(move |cfg| {
+            cfg.routing_policy = policy_for_config;
+        }) {
+            warn!("Routing Matrix: failed to save config: {e}");
+        }
+    }
+
+    // Live-apply to the running router so the new policy takes effect without a
+    // restart.
+    if cx.has_global::<AppAiService>() {
+        let runtime = hive_ai::routing::policy::RuntimeRoutingPolicy::from_config(&policy);
+        cx.global_mut::<AppAiService>()
+            .0
+            .router_mut()
+            .set_routing_policy(runtime);
+    }
+
+    // Refresh the read-only Routing panel data so any open view reflects the
+    // updated router state.
+    super::data_refresh::refresh_routing_data(workspace, cx);
 
     cx.notify();
 }

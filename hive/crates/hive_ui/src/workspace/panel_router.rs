@@ -46,6 +46,7 @@ pub(super) fn render_active_panel(
         Panel::Review => ReviewPanel::render(&workspace.review_data, theme).into_any_element(),
         Panel::Skills => SkillsPanel::render(&workspace.skills_data, theme).into_any_element(),
         Panel::Routing => RoutingPanel::render(&workspace.routing_data, theme).into_any_element(),
+        Panel::RoutingMatrix => workspace.routing_matrix_view.clone().into_any_element(),
         Panel::Workflows => workspace.workflow_builder_view.clone().into_any_element(),
         Panel::Channels => workspace.channels_view.clone().into_any_element(),
         Panel::Models => workspace.models_browser_view.clone().into_any_element(),
