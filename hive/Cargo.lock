@@ -5419,6 +5419,7 @@ dependencies = [
  "lancedb",
  "once_cell",
  "parking_lot",
+ "petgraph",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",

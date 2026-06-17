@@ -732,6 +732,71 @@ fn extract_wiki_links(content: &str) -> Vec<String> {
     links
 }
 
+// -- Knowledge-graph adapter ------------------------------------------------
+
+/// Build directed `(from, to)` link pairs from a set of Obsidian pages.
+///
+/// This is the GraphRAG v1 adapter input. It bridges Obsidian's `[[wiki-links]]`
+/// (which Hive already parses) to the generic, string-id knowledge-graph engine
+/// in `hive_ai` (`hive_ai::memory::knowledge_graph::KnowledgeGraph`). The graph
+/// engine is intentionally kept generic so that this crate does not need to
+/// depend on `hive_ai`; the call site feeds these pairs to
+/// `KnowledgeGraph::from_link_pairs(&pairs, EdgeKind::Link)`.
+///
+/// Each pair is `(source_page_path, target_page_path)`. A page's `outlinks`
+/// are resolved to the target page's relative path (so node ids are stable
+/// page paths); if a link cannot be resolved to a known page, the raw link
+/// target is used verbatim so dangling links still appear in the graph.
+///
+/// Edges are deduplicated so a page that links the same target twice yields a
+/// single pair.
+pub fn obsidian_link_pairs(pages: &[ObsidianPage]) -> Vec<(String, String)> {
+    // Map from a page's stem and full path to its canonical relative path, so
+    // we can resolve `[[wiki-link]]` targets to stable node ids.
+    let mut by_path: HashMap<String, String> = HashMap::new();
+    let mut by_stem: HashMap<String, String> = HashMap::new();
+    for page in pages {
+        by_path.insert(page.path.clone(), page.path.clone());
+        let stem = Path::new(&page.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&page.path)
+            .to_lowercase();
+        // First page wins for a given stem (mirrors a simple vault layout).
+        by_stem.entry(stem).or_insert_with(|| page.path.clone());
+    }
+
+    let resolve = |link: &str| -> String {
+        let with_ext = if link.ends_with(".md") {
+            link.to_string()
+        } else {
+            format!("{link}.md")
+        };
+        if let Some(p) = by_path.get(&with_ext) {
+            return p.clone();
+        }
+        let stem = link.rsplit('/').next().unwrap_or(link).to_lowercase();
+        if let Some(p) = by_stem.get(&stem) {
+            return p.clone();
+        }
+        // Dangling link: keep the raw target as its own node id.
+        link.to_string()
+    };
+
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for page in pages {
+        for link in &page.outlinks {
+            let target = resolve(link);
+            let pair = (page.path.clone(), target);
+            if pair.0 != pair.1 && seen.insert(pair.clone()) {
+                pairs.push(pair);
+            }
+        }
+    }
+    pairs
+}
+
 /// Tokenize a string into lowercase words for search.
 fn tokenize(text: &str) -> Vec<String> {
     text.to_lowercase()
@@ -898,6 +963,48 @@ mod tests {
         let content = "No links here.";
         let links = extract_wiki_links(content);
         assert!(links.is_empty());
+    }
+
+    fn fake_page(path: &str, outlinks: &[&str]) -> ObsidianPage {
+        ObsidianPage {
+            path: path.to_string(),
+            title: path.trim_end_matches(".md").to_string(),
+            content: String::new(),
+            front_matter: HashMap::new(),
+            tags: vec![],
+            backlinks: vec![],
+            outlinks: outlinks.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_obsidian_link_pairs_resolves_to_paths() {
+        // a -> b (by stem), b -> c (by stem), a -> c.
+        let pages = vec![
+            fake_page("a.md", &["b", "c"]),
+            fake_page("b.md", &["c"]),
+            fake_page("c.md", &[]),
+        ];
+        let mut pairs = obsidian_link_pairs(&pages);
+        pairs.sort();
+
+        assert_eq!(
+            pairs,
+            vec![
+                ("a.md".to_string(), "b.md".to_string()),
+                ("a.md".to_string(), "c.md".to_string()),
+                ("b.md".to_string(), "c.md".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_obsidian_link_pairs_dangling_and_dedup() {
+        // "missing" has no page; the raw target is kept. Duplicate links dedupe.
+        let pages = vec![fake_page("a.md", &["a.md", "missing", "missing"])];
+        let pairs = obsidian_link_pairs(&pages);
+        // Self-link (a -> a) is dropped; "missing" appears once verbatim.
+        assert_eq!(pairs, vec![("a.md".to_string(), "missing".to_string())]);
     }
 
     #[test]

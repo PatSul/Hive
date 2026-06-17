@@ -10,7 +10,7 @@ pub mod notion;
 pub mod obsidian;
 
 pub use notion::NotionClient;
-pub use obsidian::ObsidianProvider;
+pub use obsidian::{ObsidianProvider, obsidian_link_pairs};
 
 use std::collections::HashMap;
 use std::fmt;

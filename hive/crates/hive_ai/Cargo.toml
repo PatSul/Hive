@@ -33,6 +33,9 @@ lancedb = "0.26"
 arrow-array = "57"
 arrow-schema = "57"
 
+# Knowledge-graph engine (GraphRAG v1)
+petgraph = "0.8"
+
 [dev-dependencies]
 bytes = "1"
 http = "1"
