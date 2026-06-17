@@ -581,6 +581,7 @@ impl LogsPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scroll()
             .bg(theme.bg_primary)
             .p(theme.space_3)
@@ -647,6 +648,7 @@ impl LogsPanel {
     fn log_message(message: &str, level: LogLevel, theme: &HiveTheme) -> Div {
         div()
             .flex_1()
+            .min_w(px(0.0))
             .text_size(theme.font_size_sm)
             .text_color(Self::message_color(level, theme))
             .child(message.to_string())

@@ -137,7 +137,7 @@ pub fn build_hive_agent_info(config: &A2aConfig) -> SimpleAgentInfo {
                 .to_string(),
         )
         .with_provider(
-            "AIrglow Studio".to_string(),
+            "Hive".to_string(),
             "https://hivecode.app".to_string(),
         )
         .with_version(env!("CARGO_PKG_VERSION").to_string())
@@ -158,7 +158,7 @@ pub fn build_hive_agent_card(config: &A2aConfig) -> AgentCard {
             .to_string(),
         url: base_url,
         provider: Some(AgentProvider {
-            organization: "AIrglow Studio".to_string(),
+            organization: "Hive".to_string(),
             url: "https://hivecode.app".to_string(),
         }),
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -277,7 +277,7 @@ mod tests {
         let card = build_hive_agent_card(&config);
 
         let provider = card.provider.as_ref().expect("provider should be set");
-        assert_eq!(provider.organization, "AIrglow Studio");
+        assert_eq!(provider.organization, "Hive");
         assert_eq!(provider.url, "https://hivecode.app");
     }
 

@@ -870,6 +870,7 @@ fn render_directory_tab(
         .flex()
         .flex_col()
         .flex_1()
+        .min_h(px(0.0))
         .overflow_y_scroll();
 
     // Category filter bar

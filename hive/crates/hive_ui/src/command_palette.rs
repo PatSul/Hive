@@ -197,11 +197,13 @@ fn render_palette_item(item: &CommandPaletteItem, theme: &HiveTheme) -> AnyEleme
                 .flex_col()
                 .gap(px(2.0))
                 .flex_1()
+                .min_w(px(0.0))
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .flex_wrap()
+                        .w_full()
                         .items_center()
                         .gap(theme.space_2)
                         .child(

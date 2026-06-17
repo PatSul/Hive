@@ -448,6 +448,7 @@ fn render_event_row(event: &UpcomingEvent, theme: &HiveTheme) -> AnyElement {
         .child(
             div()
                 .flex_1()
+                .min_w(px(0.0))
                 .text_size(theme.font_size_sm)
                 .text_color(theme.text_primary)
                 .child(event.title.clone()),
@@ -661,6 +662,7 @@ fn render_reminders_section(reminders: &[ActiveReminder], theme: &HiveTheme) -> 
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.0))
                             .text_size(theme.font_size_sm)
                             .text_color(color)
                             .child(reminder.title.clone()),
@@ -883,6 +885,7 @@ fn render_recent_actions(actions: &[RecentAction], theme: &HiveTheme) -> AnyElem
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.0))
                             .text_size(theme.font_size_xs)
                             .text_color(theme.text_secondary)
                             .child(action.description.clone()),

@@ -680,6 +680,7 @@ impl RoutingPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_sm)
                     .text_color(theme.text_primary)
                     .child(mapping.task_type.clone()),
@@ -995,6 +996,7 @@ impl RoutingPanel {
     fn cell_flex(text: &str, color: Hsla, theme: &HiveTheme) -> Div {
         div()
             .flex_1()
+            .min_w(px(0.0))
             .text_size(theme.font_size_sm)
             .text_color(color)
             .child(text.to_string())
@@ -1235,6 +1237,7 @@ impl RoutingPanel {
     fn rule_condition_cell(condition: &str, theme: &HiveTheme) -> Div {
         div()
             .flex_1()
+            .min_w(px(0.0))
             .text_size(theme.font_size_sm)
             .text_color(theme.text_primary)
             .child(condition.to_string())

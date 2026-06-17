@@ -1703,6 +1703,7 @@ impl ModelsBrowserView {
                     .flex_col()
                     .gap(px(2.0))
                     .flex_1()
+                    .min_w(px(0.0))
                     .child(
                         div()
                             .flex()

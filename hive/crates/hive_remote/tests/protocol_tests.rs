@@ -39,8 +39,8 @@ fn sample_registry() -> PanelRegistry {
 
 fn sample_workspace() -> WorkspaceSummary {
     WorkspaceSummary {
-        name: "AIrglowStudio".into(),
-        path: "H:/WORK/AG/AIrglowStudio".into(),
+        name: "DemoWorkspace".into(),
+        path: "H:/WORK/AG/DemoWorkspace".into(),
         is_current: true,
         is_pinned: true,
     }
@@ -101,7 +101,7 @@ fn session_snapshot_serialization_includes_shell_state() {
 
     assert_eq!(parsed.active_destination, ShellDestination::Build);
     assert_eq!(parsed.active_panel, "chat");
-    assert_eq!(parsed.current_workspace.name, "AIrglowStudio");
+    assert_eq!(parsed.current_workspace.name, "DemoWorkspace");
     assert_eq!(parsed.pending_approval_count, 2);
     assert!(parsed.is_streaming);
     assert_eq!(parsed.panel_registry.utility_panels.len(), 1);
@@ -111,7 +111,7 @@ fn session_snapshot_serialization_includes_shell_state() {
 fn home_panel_payload_roundtrip() {
     let payload = PanelPayload::Home(HomePanelData {
         project_name: "Hive".into(),
-        project_root: "H:/WORK/AG/AIrglowStudio".into(),
+        project_root: "H:/WORK/AG/DemoWorkspace".into(),
         project_summary: "Remote mission control".into(),
         current_model: "auto".into(),
         pending_approval_count: 1,
@@ -229,15 +229,15 @@ fn build_core_payloads_roundtrip() {
             conversations: vec![],
         }),
         PanelPayload::Files(FilesPanelData {
-            workspace_root: "H:/WORK/AG/AIrglowStudio".into(),
-            current_path: "H:/WORK/AG/AIrglowStudio".into(),
+            workspace_root: "H:/WORK/AG/DemoWorkspace".into(),
+            current_path: "H:/WORK/AG/DemoWorkspace".into(),
             breadcrumbs: vec![],
             entries: vec![],
             preview: None,
             preview_error: None,
         }),
         PanelPayload::Specs(SpecsPanelData {
-            workspace_root: "H:/WORK/AG/AIrglowStudio".into(),
+            workspace_root: "H:/WORK/AG/DemoWorkspace".into(),
             selected_spec_id: None,
             specs: vec![],
             selected_spec: None,
@@ -250,7 +250,7 @@ fn build_core_payloads_roundtrip() {
             orchestration_modes: vec![],
         }),
         PanelPayload::GitOps(GitOpsPanelData {
-            repo_path: "H:/WORK/AG/AIrglowStudio".into(),
+            repo_path: "H:/WORK/AG/DemoWorkspace".into(),
             is_repo: true,
             branch: Some("main".into()),
             dirty_count: 0,
@@ -261,7 +261,7 @@ fn build_core_payloads_roundtrip() {
             error: None,
         }),
         PanelPayload::Terminal(TerminalPanelData {
-            cwd: "H:/WORK/AG/AIrglowStudio".into(),
+            cwd: "H:/WORK/AG/DemoWorkspace".into(),
             is_running: true,
             last_exit_code: None,
             lines: vec![],
@@ -279,8 +279,8 @@ fn build_core_payloads_roundtrip() {
 fn automate_and_assist_payloads_roundtrip() {
     let payloads = vec![
         PanelPayload::Workflows(WorkflowsPanelData {
-            workspace_root: "H:/WORK/AG/AIrglowStudio".into(),
-            source_dir: "H:/WORK/AG/AIrglowStudio/.hive/workflows".into(),
+            workspace_root: "H:/WORK/AG/DemoWorkspace".into(),
+            source_dir: "H:/WORK/AG/DemoWorkspace/.hive/workflows".into(),
             workflows: vec![WorkflowSummaryData {
                 id: "builtin:hive-dogfood-v1".into(),
                 name: "Local Build Check".into(),
@@ -406,7 +406,7 @@ fn automate_and_assist_payloads_roundtrip() {
 fn utility_payloads_roundtrip() {
     let payloads = vec![
         PanelPayload::Settings(SettingsPanelData {
-            current_workspace: "H:/WORK/AG/AIrglowStudio".into(),
+            current_workspace: "H:/WORK/AG/DemoWorkspace".into(),
             theme: "hive-light".into(),
             privacy_mode: false,
             shield_enabled: true,

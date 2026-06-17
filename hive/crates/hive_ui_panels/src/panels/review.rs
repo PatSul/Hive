@@ -1119,6 +1119,7 @@ impl ReviewPanel {
     fn file_path_cell(entry: &ReviewFileEntry, theme: &HiveTheme) -> Div {
         div()
             .flex_1()
+            .min_w(px(0.0))
             .flex()
             .flex_row()
             .items_center()
@@ -1494,6 +1495,7 @@ impl ReviewPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_sm)
                     .text_color(theme.text_primary)
                     .overflow_hidden()

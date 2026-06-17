@@ -179,6 +179,7 @@ impl ShellHeader {
             .id("shell-header")
             .flex()
             .flex_col()
+            .w_full()
             .gap(theme.space_3)
             .px(theme.space_4)
             .py(theme.space_3)
@@ -199,6 +200,7 @@ fn render_mission_row(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
         .flex()
         .flex_row()
         .flex_wrap()
+        .w_full()
         .items_start()
         .justify_between()
         .gap(theme.space_3)
@@ -213,6 +215,7 @@ fn render_mission_row(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
                         .flex()
                         .flex_row()
                         .flex_wrap()
+                        .w_full()
                         .items_center()
                         .gap(theme.space_2)
                         .child(header_badge(data.destination.label(), theme.accent_aqua, theme))
@@ -547,7 +550,7 @@ mod tests {
         let data = ShellHeaderData::new(
             ShellDestination::Home,
             Panel::QuickStart,
-            "AIrglowStudio",
+            "DemoWorkspace",
             Some("Ship A Feature".into()),
             "",
             2,
@@ -556,6 +559,6 @@ mod tests {
 
         let detail = data.mission_detail();
         assert!(detail.contains("ship a feature"));
-        assert!(detail.contains("AIrglowStudio"));
+        assert!(detail.contains("DemoWorkspace"));
     }
 }

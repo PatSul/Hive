@@ -44,6 +44,7 @@ pub fn render_wallet_card(
                 .flex()
                 .flex_col()
                 .flex_1()
+                .min_w(px(0.0))
                 .gap(px(2.0))
                 .child(
                     div()

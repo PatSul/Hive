@@ -293,6 +293,7 @@ impl Render for RoutingMatrixView {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .size_full()
             .p(theme.space_4)
             .gap(theme.space_4)
@@ -353,11 +354,7 @@ fn cost_card(
     cost_value: f32,
     theme: &HiveTheme,
 ) -> impl IntoElement {
-    let presets = [
-        ("Quality", 0.0_f32),
-        ("Balanced", 0.5),
-        ("Thrift", 1.0),
-    ];
+    let presets = [("Quality", 0.0_f32), ("Balanced", 0.5), ("Thrift", 1.0)];
 
     let mut preset_row = div().flex().flex_row().flex_wrap().gap(theme.space_2);
     for (label, value) in presets {
@@ -491,11 +488,7 @@ fn category_card(
     }
 
     // Allow-list model chips.
-    let mut chips = div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .gap(theme.space_2);
+    let mut chips = div().flex().flex_row().flex_wrap().gap(theme.space_2);
     if available_models.is_empty() {
         chips = chips.child(
             div()
@@ -510,7 +503,10 @@ fn category_card(
             let model_id = model.id.clone();
             chips = chips.child(
                 div()
-                    .id(SharedString::from(format!("allow-{row_index}-{}", model.id)))
+                    .id(SharedString::from(format!(
+                        "allow-{row_index}-{}",
+                        model.id
+                    )))
                     .cursor_pointer()
                     .px(theme.space_2)
                     .py(theme.space_1)

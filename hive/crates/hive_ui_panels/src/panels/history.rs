@@ -399,6 +399,7 @@ fn render_conversation_list(
         .flex()
         .flex_col()
         .flex_1()
+        .min_h(px(0.0))
         .overflow_y_scroll()
         .p(theme.space_2)
         .gap(theme.space_1);
@@ -499,6 +500,7 @@ fn render_conversation_card(
                 .child(
                     div()
                         .flex_1()
+                        .min_w(px(0.0))
                         .text_size(theme.font_size_base)
                         .text_color(theme.text_primary)
                         .font_weight(FontWeight::MEDIUM)

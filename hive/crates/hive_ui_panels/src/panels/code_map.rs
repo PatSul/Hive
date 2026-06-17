@@ -231,6 +231,9 @@ fn render_symbol_row(sym: &CodeMapSymbol, theme: &HiveTheme) -> impl IntoElement
         .child(
             // Symbol name
             div()
+                .flex_1()
+                .min_w(px(0.0))
+                .overflow_hidden()
                 .text_size(theme.font_size_sm)
                 .text_color(theme.text_primary)
                 .child(sym.name.clone()),

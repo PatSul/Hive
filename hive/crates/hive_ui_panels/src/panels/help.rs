@@ -1280,7 +1280,7 @@ fn render_open_source_credits(theme: &HiveTheme) -> AnyElement {
             div()
                 .text_size(theme.font_size_xs)
                 .text_color(theme.text_muted)
-                .child("\u{00A9} 2025\u{2013}2026 Airglow Studios. All rights reserved."),
+                .child("\u{00A9} 2025\u{2013}2026 Hive. All rights reserved."),
         );
 
     card(theme)

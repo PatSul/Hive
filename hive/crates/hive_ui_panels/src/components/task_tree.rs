@@ -252,6 +252,7 @@ impl Render for TaskTreeView {
                 .child(
                     div()
                         .flex_1()
+                        .min_w(px(0.0))
                         .flex()
                         .flex_col()
                         .child(

@@ -401,6 +401,7 @@ impl ActivityPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scrollbar()
             .p(theme.space_4)
             .gap(theme.space_4)
@@ -460,6 +461,7 @@ impl ActivityPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scrollbar()
             .p(theme.space_4)
             .gap(theme.space_4)
@@ -475,7 +477,12 @@ impl ActivityPanel {
                         .flex_row()
                         .flex_wrap()
                         .gap(theme.space_2)
-                        .child(metric_card("System", &data.runtime.status_label, theme.accent_aqua, theme))
+                        .child(metric_card(
+                            "System",
+                            &data.runtime.status_label,
+                            theme.accent_aqua,
+                            theme,
+                        ))
                         .child(metric_card(
                             "Active agents",
                             data.runtime.active_agents.to_string(),
@@ -504,9 +511,12 @@ impl ActivityPanel {
                             theme,
                         )),
                 )
-                .when_some(data.runtime.current_run_id.as_ref(), |el: Div, run_id| {
-                    el.child(fact_card("Current run", run_id, theme.text_primary, theme))
-                }),
+                .when_some(
+                    data.runtime.current_run_id.as_ref(),
+                    |el: Div, run_id| {
+                        el.child(fact_card("Current run", run_id, theme.text_primary, theme))
+                    },
+                ),
             )
             .child(
                 render_section_shell(
@@ -588,6 +598,7 @@ impl ActivityPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scrollbar()
             .p(theme.space_4)
             .gap(theme.space_4)
@@ -696,6 +707,7 @@ impl ActivityPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scrollbar()
             .p(theme.space_4)
             .gap(theme.space_4)
@@ -900,6 +912,7 @@ impl ActivityPanel {
                             .flex_col()
                             .gap(theme.space_1)
                             .flex_1()
+                            .min_w(px(0.0))
                             .child(
                                 div()
                                     .text_size(theme.font_size_base)
@@ -1034,6 +1047,7 @@ impl ActivityPanel {
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.0))
                             .text_size(theme.font_size_xs)
                             .text_color(theme.text_primary)
                             .child(entry.summary.clone()),
@@ -1095,7 +1109,12 @@ fn render_section_shell(title: &str, detail: &str, theme: &HiveTheme) -> Div {
         )
 }
 
-fn metric_card(title: &str, value: impl Into<String>, color: Hsla, theme: &HiveTheme) -> AnyElement {
+fn metric_card(
+    title: &str,
+    value: impl Into<String>,
+    color: Hsla,
+    theme: &HiveTheme,
+) -> AnyElement {
     div()
         .min_w(px(110.0))
         .px(theme.space_3)
@@ -1202,7 +1221,12 @@ fn attention_entries(data: &ActivityData) -> Vec<&ActivityEntry> {
 fn runtime_entries(data: &ActivityData) -> Vec<&ActivityEntry> {
     data.entries
         .iter()
-        .filter(|entry| matches!(entry.category.as_str(), "agent" | "task" | "tool" | "heartbeat"))
+        .filter(|entry| {
+            matches!(
+                entry.category.as_str(),
+                "agent" | "task" | "tool" | "heartbeat"
+            )
+        })
         .take(8)
         .collect()
 }

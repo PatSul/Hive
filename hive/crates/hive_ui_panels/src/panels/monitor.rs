@@ -1034,6 +1034,7 @@ impl MonitorPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_xs)
                     .text_color(theme.text_primary)
                     .child(task.description.clone()),

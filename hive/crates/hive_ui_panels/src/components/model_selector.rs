@@ -9,7 +9,10 @@ use hive_ai::types::{ModelInfo, ModelTier, ProviderType};
 use hive_ui_core::{AppTheme, HiveTheme, SwitchToModels};
 
 /// Max models to show per provider group before requiring expansion.
-const MAX_VISIBLE_PER_GROUP: usize = 8;
+// Show the full model list per provider and let the dropdown's own
+// `max_h(500) + overflow_y_scroll` handle long lists. A small cap here left
+// nothing to scroll, so wheel events fell through to the page behind it.
+const MAX_VISIBLE_PER_GROUP: usize = 500;
 
 // ---------------------------------------------------------------------------
 // Events

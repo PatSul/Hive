@@ -316,6 +316,7 @@ impl NetworkPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_xs)
                     .text_color(theme.text_muted)
                     .font_weight(FontWeight::SEMIBOLD)
@@ -383,6 +384,7 @@ impl NetworkPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_sm)
                     .text_color(theme.text_secondary)
                     .font_family(theme.font_mono.clone())

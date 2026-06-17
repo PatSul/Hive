@@ -195,8 +195,7 @@ fn persona_kind_label(persona: &PersonaKind) -> String {
 /// Strip path separators and traversal sequences from a workflow ID so it
 /// cannot escape its target directory when used in a filename.
 fn sanitize_workflow_id(id: &str) -> String {
-    id.replace(['/', '\\', ':', '\0'], "_")
-        .replace("..", "_")
+    id.replace(['/', '\\', ':', '\0'], "_").replace("..", "_")
 }
 
 /// Full serialisable state of the workflow canvas.
@@ -703,11 +702,7 @@ impl WorkflowBuilderView {
         cx.notify();
     }
 
-    pub fn set_active_workflow_id(
-        &mut self,
-        workflow_id: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_active_workflow_id(&mut self, workflow_id: Option<String>, cx: &mut Context<Self>) {
         self.active_workflow_id = workflow_id;
         cx.notify();
     }
@@ -825,8 +820,7 @@ impl WorkflowBuilderView {
     }
 
     fn palette_item_supported(label: &str, kind: NodeKind) -> bool {
-        !matches!(kind, NodeKind::Condition)
-            && !matches!(label, "Execute Skill")
+        !matches!(kind, NodeKind::Condition) && !matches!(label, "Execute Skill")
     }
 
     fn palette_item_note(label: &str, kind: NodeKind) -> Option<&'static str> {
@@ -860,7 +854,11 @@ impl WorkflowBuilderView {
                 continue;
             }
 
-            if let Some(node) = self.canvas.nodes.iter().find(|candidate| candidate.id == node_id)
+            if let Some(node) = self
+                .canvas
+                .nodes
+                .iter()
+                .find(|candidate| candidate.id == node_id)
                 && node.kind == NodeKind::Action
             {
                 ordered_action_ids.push(node.id.clone());
@@ -895,16 +893,29 @@ impl WorkflowBuilderView {
             ActionType::RunCommand { command } if command.trim().is_empty() => {
                 Some(format!("'{}' has no command configured.", node.label))
             }
-            ActionType::CallApi { url, method } if url.trim().is_empty() || method.trim().is_empty() => {
-                Some(format!("'{}' is missing its API URL or method.", node.label))
+            ActionType::CallApi { url, method }
+                if url.trim().is_empty() || method.trim().is_empty() =>
+            {
+                Some(format!(
+                    "'{}' is missing its API URL or method.",
+                    node.label
+                ))
             }
-            ActionType::SendMessage { channel, content } if channel.trim().is_empty() || content.trim().is_empty() => {
-                Some(format!("'{}' is missing its channel or message.", node.label))
+            ActionType::SendMessage { channel, content }
+                if channel.trim().is_empty() || content.trim().is_empty() =>
+            {
+                Some(format!(
+                    "'{}' is missing its channel or message.",
+                    node.label
+                ))
             }
             ActionType::SendNotification { title, body }
                 if title.trim().is_empty() || body.trim().is_empty() =>
             {
-                Some(format!("'{}' is missing its notification title or body.", node.label))
+                Some(format!(
+                    "'{}' is missing its notification title or body.",
+                    node.label
+                ))
             }
             ActionType::CreateTask { title } if title.trim().is_empty() => {
                 Some(format!("'{}' is missing a task title.", node.label))
@@ -917,10 +928,7 @@ impl WorkflowBuilderView {
         }
     }
 
-    fn validation_issues(
-        &self,
-        connected_ids: &HashSet<String>,
-    ) -> (Vec<String>, Vec<String>) {
+    fn validation_issues(&self, connected_ids: &HashSet<String>) -> (Vec<String>, Vec<String>) {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 
@@ -940,7 +948,10 @@ impl WorkflowBuilderView {
         if trigger_count == 0 {
             errors.push("Add a Trigger node before running the workflow.".into());
         } else if trigger_count > 1 {
-            warnings.push("Multiple Trigger nodes are present. Hive only follows the first trigger today.".into());
+            warnings.push(
+                "Multiple Trigger nodes are present. Hive only follows the first trigger today."
+                    .into(),
+            );
         }
 
         if action_nodes.is_empty() {
@@ -1126,8 +1137,14 @@ impl WorkflowBuilderView {
                     .rounded(theme.radius_md)
                     .bg(bg)
                     .text_size(theme.font_size_xs)
-                    .text_color(if is_supported { color } else { theme.text_muted })
-                    .when(is_supported, |el| el.cursor_pointer().hover(|s| s.bg(theme.bg_surface)))
+                    .text_color(if is_supported {
+                        color
+                    } else {
+                        theme.text_muted
+                    })
+                    .when(is_supported, |el| {
+                        el.cursor_pointer().hover(|s| s.bg(theme.bg_surface))
+                    })
                     .when(is_supported, |el| {
                         el.on_mouse_down(
                             MouseButton::Left,
@@ -1144,9 +1161,12 @@ impl WorkflowBuilderView {
                                         300.0,
                                         200.0,
                                     ),
-                                    NodeKind::Condition => {
-                                        CanvasNode::new_condition(&label_str, Vec::new(), 300.0, 200.0)
-                                    }
+                                    NodeKind::Condition => CanvasNode::new_condition(
+                                        &label_str,
+                                        Vec::new(),
+                                        300.0,
+                                        200.0,
+                                    ),
                                     NodeKind::Output => CanvasNode::new_output(300.0, 200.0),
                                 };
                                 this.add_node(node, cx);
@@ -1566,10 +1586,7 @@ impl WorkflowBuilderView {
 
         // Common fields
         let label = node.label.clone();
-        let timeout = node
-            .timeout_secs
-            .map(|t| t.to_string())
-            .unwrap_or_default();
+        let timeout = node.timeout_secs.map(|t| t.to_string()).unwrap_or_default();
         let retry = node.retry_count.to_string();
 
         self.prop_label_input.update(cx, |s, cx| {
@@ -1605,9 +1622,12 @@ impl WorkflowBuilderView {
                 ActionType::SendMessage { channel, content } => {
                     (channel.clone(), "Channel...", content.clone(), "Content...")
                 }
-                ActionType::CallApi { url, method } => {
-                    (url.clone(), "URL...", method.clone(), "Method (GET, POST...)")
-                }
+                ActionType::CallApi { url, method } => (
+                    url.clone(),
+                    "URL...",
+                    method.clone(),
+                    "Method (GET, POST...)",
+                ),
                 ActionType::CreateTask { title } => {
                     (title.clone(), "Task title...", String::new(), "")
                 }
@@ -1964,10 +1984,8 @@ impl Render for WorkflowBuilderView {
         let theme = &self.theme;
         let node_count = self.canvas.nodes.len();
         let edge_count = self.canvas.edges.len();
-        let connected_ids: HashSet<String> =
-            self.connected_action_ids().into_iter().collect();
-        let (validation_errors, validation_warnings) =
-            self.validation_issues(&connected_ids);
+        let connected_ids: HashSet<String> = self.connected_action_ids().into_iter().collect();
+        let (validation_errors, validation_warnings) = self.validation_issues(&connected_ids);
         let can_run = validation_errors.is_empty();
 
         // Header
@@ -2316,7 +2334,9 @@ impl Render for WorkflowBuilderView {
         let palette = self.render_node_palette(theme, cx).into_any_element();
 
         // Properties (right)
-        let properties = self.render_properties_panel(theme, &connected_ids).into_any_element();
+        let properties = self
+            .render_properties_panel(theme, &connected_ids)
+            .into_any_element();
 
         let show_palette = self.show_node_palette;
 

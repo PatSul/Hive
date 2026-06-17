@@ -67,6 +67,10 @@ pub(super) fn render_context_rail(
                 .flex()
                 .flex_col()
                 .flex_1()
+                // min_h(0) lets this flex child shrink below its content height so
+                // overflow scrolling actually engages (otherwise the rail can't reach
+                // the bottom sections).
+                .min_h(px(0.0))
                 .overflow_y_scrollbar()
                 .px(theme.space_3)
                 .py(theme.space_3)
@@ -819,6 +823,9 @@ fn render_context_action_row(
                 .flex_col()
                 .gap(px(2.0))
                 .flex_1()
+                // min_w(0) lets the text column shrink so long detail strings wrap
+                // inside the card instead of overflowing the rail's right edge.
+                .min_w(px(0.0))
                 .child(
                     div()
                         .text_size(theme.font_size_sm)

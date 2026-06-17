@@ -652,6 +652,7 @@ fn cortex_event_row(event: &CortexEventDisplay, theme: &HiveTheme) -> AnyElement
         .child(
             div()
                 .flex_1()
+                .min_w(px(0.0))
                 .text_size(theme.font_size_xs)
                 .text_color(theme.text_primary)
                 .child(event.summary.clone()),
@@ -997,6 +998,7 @@ fn render_log_entry(entry: &LogEntryDisplay, theme: &HiveTheme) -> AnyElement {
         .child(
             div()
                 .flex_1()
+                .min_w(px(0.0))
                 .text_size(theme.font_size_xs)
                 .text_color(theme.text_secondary)
                 .child(entry.description.clone()),

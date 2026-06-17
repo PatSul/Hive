@@ -15,10 +15,10 @@
 <p align="center">
   <a href="https://hivecode.app"><img src="https://img.shields.io/badge/website-hivecode.app-f59e0b" alt="Website" /></a>
   <a href="https://github.com/PatSul/Hive/releases"><img src="https://img.shields.io/github/v/release/PatSul/Hive?label=download&color=brightgreen&cache=1" alt="Download" /></a>
-  <img src="https://img.shields.io/badge/version-0.3.32-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-0.3.37-blue" alt="Version" />
   <img src="https://img.shields.io/badge/language-Rust-orange?logo=rust" alt="Rust" />
   <img src="https://img.shields.io/badge/tests-targeted%20matrix-brightgreen" alt="Tests" />
-  <img src="https://img.shields.io/badge/crates-21-blue" alt="Crates" />
+  <img src="https://img.shields.io/badge/crates-22-blue" alt="Crates" />
   <img src="https://img.shields.io/badge/warnings-tracked-yellow" alt="Warnings" />
   <img src="https://img.shields.io/badge/lines-200k%2B-informational" alt="Lines of Rust" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20(Apple%20Silicon)%20%7C%20Linux%20(x64%20%2B%20ARM64)-informational" alt="Windows | macOS (Apple Silicon) | Linux (x64 + ARM64)" />
@@ -43,7 +43,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 
 ### Development Excellence
 - Multi-agent swarm (Queen + teams)
-- 15 AI providers with capability-aware routing
+- 16 AI providers with capability-aware routing
 - **LanceDB vector memory** (chunks + durable memories)
 - **Embedding providers** (OpenAI + Ollama)
 - **Background code indexing** with change detection
@@ -138,7 +138,7 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 
 ### AI Providers
 
-15 providers with **capability-aware routing** and fallback:
+16 providers with **capability-aware routing** and fallback:
 
 | Cloud | Local |
 |---|---|
@@ -146,6 +146,7 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 | OpenAI (GPT) | LM Studio |
 | Google (Gemini) | Generic OpenAI-compatible |
 | OpenRouter (100+ models) | LiteLLM proxy |
+| z.ai (GLM) | Kilo (local agent) |
 | Groq (fast inference) | |
 | xAI (Grok) | |
 | Venice AI | |
@@ -154,7 +155,7 @@ Every team gets its own **git worktree** (`swarm/{run_id}/{team_id}`) for confli
 | HuggingFace | |
 | HiveGateway (cloud proxy) | |
 
-Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding. Venice uses OpenAI-compatible SSE streaming via `/api/v1/chat/completions`.
+Features: **capability-aware task routing** (12 task types, 19 model profiles), complexity classification, 14-entry fallback chain, per-model cost tracking, streaming support, budget enforcement, speculative decoding. The **Director** layer adds per-category model pools, quality floors, and a cost-aggressiveness control so the best-value model is chosen per task and downgraded within budget — configurable in the **Routing Matrix** panel. Every provider is wrapped by a **RedactingProvider** so HiveShield scrubs PII/secrets on the outbound path. Venice uses OpenAI-compatible SSE streaming via `/api/v1/chat/completions`.
 
 ### Streaming
 
@@ -605,7 +606,7 @@ On startup, Hive automatically backfills any JSON-only conversations into SQLite
 
 ---
 
-## Architecture — 21-Crate Workspace
+## Architecture — 22-Crate Workspace
 
 ```
 hive/crates/
@@ -619,13 +620,15 @@ hive/crates/
 │                      42 files · 26,000+ lines
 ├── hive_core          Config, SecurityGateway, persistence (SQLite), Kanban, channels, scheduling
 │                      18 files · 9,800+ lines
-├── hive_ai            10 AI providers, capability-aware router, complexity classifier, context engine,
+├── hive_ai            16 AI providers, Director + capability-aware router, complexity classifier, context engine,
 │                      RAG, embeddings (OpenAI + Ollama), LanceDB memory, background indexer, TOON encoding
 │                      50+ files · 22,000+ lines
 ├── hive_agents        Queen, HiveMind, Coordinator, collective memory, MCP (22 tools),
 │                      Universal Skills (SkillLoader + SkillExecutor, TOML persistence),
 │                      personas, knowledge acquisition, competence detection, skill authoring
 │                      28+ files · 23,000+ lines
+├── hive_kilo          Kilo.ai coding-agent integration — provider, executor, MCP + PTY bridges
+│                      Bridges the Kilo local REST agent into Hive's AI + swarm layers
 ├── hive_shield        PII detection, secrets scanning, vulnerability assessment, access control
 │                      6 files · 2,005 lines
 ├── hive_learn         Outcome tracking, routing learner, preference model, prompt evolution
@@ -881,8 +884,8 @@ Configure provider preferences, model routing rules, budget limits, and security
 
 | Metric | Value |
 |---|---|
-| Version | 0.3.32 |
-| Crates | 21 |
+| Version | 0.3.37 |
+| Crates | 22 |
 | Rust source files | 400+ |
 | Lines of Rust | 200,000+ |
 | Tests | Targeted verification matrix |
@@ -913,6 +916,19 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 ---
 
 ## Changelog
+
+### v0.3.37
+
+**Director Routing, Fusion, Egress Redaction, GraphRAG & Build-Ticket**
+
+- **z.ai / GLM provider** — Added z.ai (GLM models) to the built-in provider roster, alongside Claude Opus 4.8 in the routing profiles.
+- **Director routing** — Per-category model pools with quality floors and a cost-aggressiveness control: the Director picks the best-value model per task category and downgrades within budget without dropping below the quality floor. The new **Routing Matrix** panel chooses which models are eligible in each category.
+- **Fusion** — Cross-provider `panel → judge → synthesis` orchestration mode (inspired by OpenRouter Fusion): several models answer, a judge ranks them, and a synthesizer merges the strongest result.
+- **Egress redaction** — A `RedactingProvider` decorator now wraps every provider, so HiveShield PII/secret redaction is enforced on the actual outbound request path.
+- **GraphRAG** — A petgraph-backed `KnowledgeGraph` is wired into the ContextEngine as a first-class retrieval source alongside vector + TF-IDF.
+- **build-ticket CLI** — `hive build-ticket` pulls a ticket from Jira / Linear / GitHub, grounds the swarm in the real repository files (gitignore-aware, keyword-ranked, token-budgeted), and produces grounded, reviewable edits behind a draft/approval-gated PR — never auto-merging.
+- **Encrypted vault hardening** — Optional `HIVE_VAULT_PASSPHRASE` folded into Argon2id key derivation for the key vault (migration-safe).
+- **Home redesign** — A single primary "Start a run" card, a first-class "New project / Open folder" action, and a centered, lower-density command center.
 
 ### v0.3.32
 

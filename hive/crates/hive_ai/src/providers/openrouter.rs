@@ -24,7 +24,7 @@ use crate::types::{
 // ---------------------------------------------------------------------------
 
 const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
-const HTTP_REFERER: &str = "https://hive.airglow.studio";
+const HTTP_REFERER: &str = "https://hivecode.app";
 const X_TITLE: &str = "Hive";
 
 // ---------------------------------------------------------------------------
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn openrouter_headers_are_correct() {
-        assert_eq!(HTTP_REFERER, "https://hive.airglow.studio");
+        assert_eq!(HTTP_REFERER, "https://hivecode.app");
         assert_eq!(X_TITLE, "Hive");
     }
 

@@ -322,6 +322,7 @@ impl CostsPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_xs)
                     .text_color(theme.text_muted)
                     .font_weight(FontWeight::SEMIBOLD)
@@ -379,6 +380,7 @@ impl CostsPanel {
                     .flex()
                     .flex_row()
                     .flex_1()
+                    .min_w(px(0.0))
                     .items_center()
                     .gap(theme.space_2)
                     .child(

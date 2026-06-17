@@ -583,6 +583,7 @@ impl FilesPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_sm)
                     .text_color(theme.text_primary)
                     .overflow_hidden()
@@ -630,6 +631,7 @@ impl FilesPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scroll()
             .p(theme.space_2)
             .child(inner)
@@ -937,6 +939,7 @@ impl FilesPanel {
             .flex()
             .flex_col()
             .flex_1()
+            .min_h(px(0.0))
             .overflow_y_scroll()
             .py(theme.space_2);
 
@@ -1093,6 +1096,7 @@ impl FilesPanel {
             .child(
                 div()
                     .flex_1()
+                    .min_w(px(0.0))
                     .text_size(theme.font_size_base)
                     .text_color(name_color)
                     .font_weight(name_weight)

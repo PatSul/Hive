@@ -4,8 +4,8 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::{
-    HiveTheme, QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate,
-    SwitchToWorkspace,
+    HiveTheme, OpenWorkspaceDirectory, QuickStartOpenPanel, QuickStartRunProject,
+    QuickStartSelectTemplate, SwitchToWorkspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +124,12 @@ impl QuickStartPanel {
         detail_input: &Entity<InputState>,
         theme: &HiveTheme,
     ) -> impl IntoElement {
+        // IMPORTANT: keep this a plain full-width flex column. Wrapping the
+        // content in `.items_center()` + a `.w_full().max_w()` child makes the
+        // children's width indefinite during layout measurement, which makes
+        // `flex_wrap` rows report a single-line height and then render wrapped —
+        // the next section overlaps them, and content spills past the right edge.
+        // A definite full-width column measures wrapped rows correctly.
         div()
             .id("quick-start-panel")
             .flex()
@@ -133,13 +139,14 @@ impl QuickStartPanel {
             .p(theme.space_4)
             .pb(px(48.0))
             .gap(theme.space_4)
+            // Primary zone: where you are + the one thing to do.
             .child(render_hero(data, theme))
+            .child(render_start_card(data, detail_input, theme))
             .child(render_priority_section(data, theme))
-            .child(render_templates_section(data, theme))
-            .child(render_launch_section(data, detail_input, theme))
-            .when(!data.saved_workspaces.is_empty(), |el| {
-                el.child(render_workspace_section(data, theme))
-            })
+            // Open or switch project.
+            .child(render_projects_section(data, theme))
+            // Secondary zone: diagnostics and setup, visually subdued.
+            .child(more_divider(theme))
             .child(render_next_steps_section(data, theme))
             .child(render_status_section(data, theme))
             .child(render_setup_section(data, theme))
@@ -147,67 +154,56 @@ impl QuickStartPanel {
 }
 
 fn render_hero(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
-    let summary = if data.project_summary.trim().is_empty() {
-        "Hive will use the current workspace as the project context for a guided run.".to_string()
+    let model_label = if data.current_model.trim().is_empty() {
+        "Model pending".to_string()
     } else {
-        data.project_summary.clone()
+        format!("Model: {}", data.current_model)
+    };
+    let model_color = if data.current_model.trim().is_empty() {
+        theme.accent_yellow
+    } else {
+        theme.accent_green
     };
 
-    card(theme)
-        .bg(theme.bg_secondary)
-        .border_color(theme.accent_cyan)
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_3)
+        .child(
+            div()
+                .w(px(40.0))
+                .h(px(40.0))
+                .rounded(theme.radius_lg)
+                .bg(theme.accent_cyan)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(IconName::Star)
+                        .size_6()
+                        .text_color(theme.text_on_accent),
+                ),
+        )
         .child(
             div()
                 .flex()
-                .flex_row()
-                .items_start()
-                .gap(theme.space_4)
+                .flex_col()
+                .gap(px(2.0))
+                .flex_1()
+                .min_w(px(0.0))
                 .child(
                     div()
-                        .w(px(48.0))
-                        .h(px(48.0))
-                        .rounded(theme.radius_lg)
-                        .bg(theme.accent_cyan)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            Icon::new(IconName::Star)
-                                .size_6()
-                                .text_color(theme.text_on_accent),
-                        ),
+                        .text_size(theme.font_size_xl)
+                        .text_color(theme.text_primary)
+                        .font_weight(FontWeight::BOLD)
+                        .child(format!("Home / {}", data.project_name)),
                 )
                 .child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap(theme.space_2)
-                        .flex_1()
-                        .child(
-                            div()
-                                .text_size(theme.font_size_xl)
-                                .text_color(theme.text_primary)
-                                .font_weight(FontWeight::BOLD)
-                                .child(format!("Home / {}", data.project_name)),
-                        )
-                        .child(
-                            div()
-                                .text_size(theme.font_size_sm)
-                                .text_color(theme.text_secondary)
-                                .child("Use Home as the command center for the next move: resume work, clear blockers, and launch the next project run."),
-                        )
-                        .child(
-                            div()
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.text_muted)
-                                .child(data.project_root.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(theme.font_size_sm)
-                                .text_color(theme.text_muted)
-                                .child(summary),
-                        ),
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child(data.project_root.clone()),
                 ),
         )
         .child(
@@ -215,42 +211,15 @@ fn render_hero(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
                 .flex()
                 .flex_row()
                 .flex_wrap()
+                .flex_shrink_0()
+                .items_center()
                 .gap(theme.space_2)
                 .child(stat_chip(
                     format!("{} files", data.total_files),
                     theme.accent_aqua,
                     theme,
                 ))
-                .child(stat_chip(
-                    format!("{} symbols", data.key_symbols),
-                    theme.accent_green,
-                    theme,
-                ))
-                .child(stat_chip(
-                    format!("{} dependencies", data.dependencies),
-                    theme.accent_yellow,
-                    theme,
-                )),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap(theme.space_2)
-                .child(stat_chip(
-                    if data.current_model.trim().is_empty() {
-                        "Model pending".into()
-                    } else {
-                        format!("Model: {}", data.current_model)
-                    },
-                    if data.current_model.trim().is_empty() {
-                        theme.accent_yellow
-                    } else {
-                        theme.accent_green
-                    },
-                    theme,
-                ))
+                .child(stat_chip(model_label, model_color, theme))
                 .child(stat_chip(
                     format!("{} approvals", data.pending_approvals),
                     if data.pending_approvals > 0 {
@@ -259,7 +228,107 @@ fn render_hero(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
                         theme.accent_aqua
                     },
                     theme,
-                ))
+                )),
+        )
+        .into_any_element()
+}
+
+/// The single primary card: pick a mission, describe the outcome, launch a run.
+/// Merges the former "Choose The Mission" + "Launch" sections so there is one
+/// unmistakable focal point on the Home screen.
+fn render_start_card(
+    data: &QuickStartPanelData,
+    detail_input: &Entity<InputState>,
+    theme: &HiveTheme,
+) -> AnyElement {
+    let template_id = data.selected_template.clone();
+    let run_input = detail_input.clone();
+    let button_label = if data.launch_ready {
+        "Start Guided Run"
+    } else {
+        "Finish Setup First"
+    };
+
+    let mut missions = div().flex().flex_row().flex_wrap().gap(theme.space_3);
+    for template in &data.templates {
+        missions = missions.child(render_template_card(
+            template,
+            template.id == data.selected_template,
+            theme,
+        ));
+    }
+
+    let mut section = card(theme)
+        .bg(theme.bg_secondary)
+        .border_color(theme.accent_cyan)
+        .child(section_header(
+            "Start a run",
+            "Pick a mission, describe the outcome, and Hive launches a guided run on this project.",
+            theme,
+        ))
+        .child(missions)
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child("What should Hive do next on this project?"),
+        )
+        .child(
+            Input::new(detail_input)
+                .text_size(theme.font_size_sm)
+                .cleanable(true),
+        )
+        .child(status_banner(
+            &data.launch_hint,
+            if data.launch_ready {
+                theme.accent_green
+            } else {
+                theme.accent_yellow
+            },
+            theme,
+        ));
+
+    if let Some(status) = data.last_launch_status.as_ref() {
+        section = section.child(status_banner(status, theme.accent_aqua, theme));
+    }
+
+    section
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap(theme.space_3)
+                .child(
+                    div()
+                        .text_size(theme.font_size_xs)
+                        .text_color(theme.text_muted)
+                        .child("Launches a fresh, project-scoped chat run."),
+                )
+                .child(primary_button(
+                    button_label,
+                    if data.launch_ready {
+                        theme.accent_cyan
+                    } else {
+                        theme.bg_primary
+                    },
+                    if data.launch_ready {
+                        theme.text_on_accent
+                    } else {
+                        theme.text_primary
+                    },
+                    move |_event, window, cx| {
+                        window.dispatch_action(
+                            Box::new(QuickStartRunProject {
+                                template_id: template_id.clone(),
+                                detail: run_input.read(cx).value().to_string(),
+                            }),
+                            cx,
+                        );
+                    },
+                    theme,
+                )),
         )
         .into_any_element()
 }
@@ -276,7 +345,7 @@ fn render_priority_section(data: &QuickStartPanelData, theme: &HiveTheme) -> Any
         .gap(theme.space_3)
         .child(section_header(
             "What Needs Attention",
-            "Home should answer what to resume, what is blocked, and what Hive should do next before you scan the rest of the app.",
+            "Resume work, clear blockers, and see what Hive recommends next.",
             theme,
         ))
         .child(grid)
@@ -293,9 +362,9 @@ fn render_status_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyEl
         .flex()
         .flex_col()
         .gap(theme.space_3)
-        .child(section_header(
+        .child(subsection_header(
             "At A Glance",
-            "Use Home to clear blockers, jump to the right surface, and resume work without browsing the whole app.",
+            "Models, spend, and safety signals at a glance.",
             theme,
         ))
         .child(grid)
@@ -355,9 +424,9 @@ fn render_setup_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyEle
         .flex()
         .flex_col()
         .gap(theme.space_3)
-        .child(section_header(
+        .child(subsection_header(
             "Recommended Setup",
-            "Home checks the current project and points you at the next required panel when something is missing.",
+            "What Hive suggests configuring next.",
             theme,
         ));
 
@@ -368,69 +437,30 @@ fn render_setup_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyEle
     content.into_any_element()
 }
 
-fn render_templates_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
-    let mut grid = div().flex().flex_row().flex_wrap().gap(theme.space_3);
-    for template in &data.templates {
-        grid = grid.child(render_template_card(
-            template,
-            template.id == data.selected_template,
-            theme,
-        ));
-    }
-
-    div()
+/// Open a new project folder or jump back into a recent one. Always visible so
+/// "start a brand-new project" is a first-class action, not just resuming.
+fn render_projects_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
+    let mut content = div()
         .flex()
         .flex_col()
         .gap(theme.space_3)
         .child(section_header(
-            "Choose The Mission",
-            "Pick the kind of run you want Hive to start on this project.",
+            "Projects",
+            "Open a new folder or jump back into a recent project.",
             theme,
         ))
-        .child(grid)
-        .into_any_element()
-}
+        .child(render_new_project_card(theme));
 
-fn render_launch_section(
-    data: &QuickStartPanelData,
-    detail_input: &Entity<InputState>,
-    theme: &HiveTheme,
-) -> AnyElement {
-    let template_id = data.selected_template.clone();
-    let run_input = detail_input.clone();
-    let button_label = if data.launch_ready {
-        "Start Guided Run"
-    } else {
-        "Finish Setup First"
-    };
-    let mut section = card(theme)
-        .child(section_header(
-            "Launch",
-            "Describe the outcome you want. Home will open Chat, seed the project brief, and start the run.",
-            theme,
-        ))
-        .child(
-            div()
-                .text_size(theme.font_size_xs)
-                .text_color(theme.text_muted)
-                .child("What should Hive do next on this project?"),
-        )
-        .child(Input::new(detail_input).text_size(theme.font_size_sm).cleanable(true))
-        .child(status_banner(
-            &data.launch_hint,
-            if data.launch_ready {
-                theme.accent_green
-            } else {
-                theme.accent_yellow
-            },
-            theme,
-        ));
-
-    if let Some(status) = data.last_launch_status.as_ref() {
-        section = section.child(status_banner(status, theme.accent_aqua, theme));
+    for workspace in &data.saved_workspaces {
+        content = content.child(render_workspace_card(workspace, theme));
     }
 
-    section
+    content.into_any_element()
+}
+
+fn render_new_project_card(theme: &HiveTheme) -> AnyElement {
+    card(theme)
+        .border_color(theme.accent_aqua)
         .child(
             div()
                 .flex()
@@ -440,30 +470,53 @@ fn render_launch_section(
                 .gap(theme.space_3)
                 .child(
                     div()
-                        .text_size(theme.font_size_xs)
-                        .text_color(theme.text_muted)
-                        .child("Home launches a fresh chat run so the kickoff stays clean and project-scoped."),
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(theme.space_3)
+                        .flex_1()
+                        .child(
+                            div()
+                                .w(px(36.0))
+                                .h(px(36.0))
+                                .rounded(theme.radius_md)
+                                .bg(theme.accent_aqua)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(theme.font_size_xl)
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(theme.text_on_accent)
+                                .child("+"),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.0))
+                                .child(
+                                    div()
+                                        .text_size(theme.font_size_base)
+                                        .text_color(theme.text_primary)
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("New project"),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(theme.font_size_sm)
+                                        .text_color(theme.text_secondary)
+                                        .child(
+                                            "Open any folder on your machine as a Hive workspace.",
+                                        ),
+                                ),
+                        ),
                 )
                 .child(primary_button(
-                    button_label,
-                    if data.launch_ready {
-                        theme.accent_cyan
-                    } else {
-                        theme.bg_primary
-                    },
-                    if data.launch_ready {
-                        theme.text_on_accent
-                    } else {
-                        theme.text_primary
-                    },
+                    "Open folder\u{2026}",
+                    theme.accent_aqua,
+                    theme.text_on_accent,
                     move |_event, window, cx| {
-                        window.dispatch_action(
-                            Box::new(QuickStartRunProject {
-                                template_id: template_id.clone(),
-                                detail: run_input.read(cx).value().to_string(),
-                            }),
-                            cx,
-                        );
+                        window.dispatch_action(Box::new(OpenWorkspaceDirectory), cx);
                     },
                     theme,
                 )),
@@ -481,31 +534,13 @@ fn render_next_steps_section(data: &QuickStartPanelData, theme: &HiveTheme) -> A
         .flex()
         .flex_col()
         .gap(theme.space_3)
-        .child(section_header(
+        .child(subsection_header(
             "Continue In The Workspace",
-            "Home gets the project moving. These tabs are the fastest handoff points after the kickoff run starts.",
+            "Fast handoff points once a run is underway.",
             theme,
         ))
         .child(grid)
         .into_any_element()
-}
-
-fn render_workspace_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
-    let mut content = div()
-        .flex()
-        .flex_col()
-        .gap(theme.space_3)
-        .child(section_header(
-            "Resume A Workspace",
-            "Pinned and recent projects stay visible here so Home can double as a fast project switcher.",
-            theme,
-        ));
-
-    for workspace in &data.saved_workspaces {
-        content = content.child(render_workspace_card(workspace, theme));
-    }
-
-    content.into_any_element()
 }
 
 fn render_setup_card(item: &QuickStartSetupDisplay, theme: &HiveTheme) -> AnyElement {
@@ -836,6 +871,47 @@ fn section_header(title: &str, description: &str, theme: &HiveTheme) -> AnyEleme
                 .text_color(theme.text_muted)
                 .child(description.to_string()),
         )
+        .into_any_element()
+}
+
+/// Lighter header for the subdued "MORE" zone so diagnostics sit below the
+/// primary actions without competing for attention.
+fn subsection_header(title: &str, description: &str, theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .child(
+            div()
+                .text_size(theme.font_size_base)
+                .text_color(theme.text_secondary)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title.to_string()),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_muted)
+                .child(description.to_string()),
+        )
+        .into_any_element()
+}
+
+fn more_divider(theme: &HiveTheme) -> AnyElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(theme.space_3)
+        .pt(theme.space_2)
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_muted)
+                .child("MORE"),
+        )
+        .child(div().h(px(1.0)).flex_1().bg(theme.border))
         .into_any_element()
 }
 
