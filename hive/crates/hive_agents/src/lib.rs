@@ -16,6 +16,7 @@ pub mod knowledge_acquisition;
 pub mod mcp_client;
 pub mod mcp_server;
 pub mod message_queue;
+pub mod mission;
 pub mod persistence;
 pub mod personas;
 pub mod pipeline;
@@ -68,6 +69,10 @@ pub use knowledge_acquisition::{
 pub use message_queue::{
     AgentMessage, AgentMessageQueue, MessagePriority, SharedMessageQueue, classify_input,
     shared_queue, strip_prefix,
+};
+pub use mission::{
+    BuildOpts, BuildOutcome, PrOpener, RiskTier, build_from_ticket, build_from_ticket_with_url,
+    ticket_branch_name,
 };
 pub use persistence::{AgentPersistenceService, AgentSnapshot, CompletedTask};
 pub use personas::{
