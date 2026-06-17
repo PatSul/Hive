@@ -195,6 +195,8 @@ const KEY_XAI: &str = "api_key_xai";
 const KEY_MISTRAL: &str = "api_key_mistral";
 const KEY_VENICE: &str = "api_key_venice";
 const KEY_ZAI: &str = "api_key_zai";
+const KEY_JIRA_TOKEN: &str = "api_key_jira_token";
+const KEY_LINEAR: &str = "api_key_linear";
 const KEY_HUE: &str = "api_key_hue";
 const KEY_AIRWEAVE: &str = "api_key_airweave";
 const KEY_KILO_PASSWORD: &str = "kilo_password";
@@ -431,6 +433,19 @@ pub struct HiveConfig {
     #[serde(skip)]
     pub zai_api_key: Option<String>,
 
+    // Project management integrations
+    // Jira: base URL + email are non-secret (persisted in config.json); the
+    // API token is a secret stored in SecureStorage.
+    #[serde(default)]
+    pub jira_base_url: Option<String>,
+    #[serde(default)]
+    pub jira_email: Option<String>,
+    #[serde(skip)]
+    pub jira_api_token: Option<String>,
+    // Linear: API key is a secret stored in SecureStorage.
+    #[serde(skip)]
+    pub linear_api_key: Option<String>,
+
     // Messaging provider tokens — stored in SecureStorage
     #[serde(skip)]
     pub slack_bot_token: Option<String>,
@@ -594,6 +609,10 @@ impl Default for HiveConfig {
             mistral_api_key: None,
             venice_api_key: None,
             zai_api_key: None,
+            jira_base_url: None,
+            jira_email: None,
+            jira_api_token: None,
+            linear_api_key: None,
             cloud_api_url: None,
             cloud_relay_url: None,
             cloud_jwt: None,
@@ -922,6 +941,8 @@ impl ConfigManager {
             config.mistral_api_key = get_secure_key(ss, &key_map, KEY_MISTRAL);
             config.venice_api_key = get_secure_key(ss, &key_map, KEY_VENICE);
             config.zai_api_key = get_secure_key(ss, &key_map, KEY_ZAI);
+            config.jira_api_token = get_secure_key(ss, &key_map, KEY_JIRA_TOKEN);
+            config.linear_api_key = get_secure_key(ss, &key_map, KEY_LINEAR);
             config.hue_api_key = get_secure_key(ss, &key_map, KEY_HUE);
             config.airweave_api_key = get_secure_key(ss, &key_map, KEY_AIRWEAVE);
             config.kilo_password = get_secure_key(ss, &key_map, KEY_KILO_PASSWORD);
@@ -976,6 +997,8 @@ impl ConfigManager {
             "mistral" => config.mistral_api_key.clone(),
             "venice" => config.venice_api_key.clone(),
             "zai" => config.zai_api_key.clone(),
+            "jira" => config.jira_api_token.clone(),
+            "linear" => config.linear_api_key.clone(),
             "hue" => config.hue_api_key.clone(),
             "airweave" => config.airweave_api_key.clone(),
             "kilo_password" => config.kilo_password.clone(),
@@ -1013,6 +1036,8 @@ impl ConfigManager {
                 "mistral" => config.mistral_api_key = key.clone(),
                 "venice" => config.venice_api_key = key.clone(),
                 "zai" => config.zai_api_key = key.clone(),
+                "jira" => config.jira_api_token = key.clone(),
+                "linear" => config.linear_api_key = key.clone(),
                 "hue" => config.hue_api_key = key.clone(),
                 "airweave" => config.airweave_api_key = key.clone(),
                 "kilo_password" => config.kilo_password = key.clone(),
@@ -1060,6 +1085,8 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_MISTRAL, &config.mistral_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_VENICE, &config.venice_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_ZAI, &config.zai_api_key)?;
+        set_secure_key(ss, &mut key_map, KEY_JIRA_TOKEN, &config.jira_api_token)?;
+        set_secure_key(ss, &mut key_map, KEY_LINEAR, &config.linear_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_HUE, &config.hue_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_AIRWEAVE, &config.airweave_api_key)?;
         set_secure_key(ss, &mut key_map, KEY_KILO_PASSWORD, &config.kilo_password)?;
@@ -1171,6 +1198,8 @@ impl ConfigManager {
         ("mistral", KEY_MISTRAL),
         ("venice", KEY_VENICE),
         ("zai", KEY_ZAI),
+        ("jira", KEY_JIRA_TOKEN),
+        ("linear", KEY_LINEAR),
         ("hue", KEY_HUE),
         ("airweave", KEY_AIRWEAVE),
     ];

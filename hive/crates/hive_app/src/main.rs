@@ -93,6 +93,27 @@ fn discover_git_root(path: std::path::PathBuf) -> std::path::PathBuf {
     canonical
 }
 
+/// Best-effort extraction of the Atlassian subdomain from a Jira base URL.
+///
+/// Accepts either a full URL (e.g. `https://mycompany.atlassian.net`) or a
+/// bare subdomain (e.g. `mycompany`). Used to build issue browse URLs. Falls
+/// back to the trimmed input when no `.atlassian.net` host is detected so the
+/// client still functions against custom hosts.
+fn jira_domain_from_base_url(base_url: &str) -> String {
+    let host = base_url
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim();
+
+    host.strip_suffix(".atlassian.net")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| host.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
@@ -964,11 +985,61 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     ))));
     info!("CrossChannelService initialized");
 
-    // Project management hub — always create, providers added when tokens configured.
-    let pm =
-        std::sync::Arc::new(hive_integrations::project_management::ProjectManagementHub::new());
+    // Project management hub — always create, providers added when creds configured.
+    let mut pm_hub = hive_integrations::project_management::ProjectManagementHub::new();
+
+    // Jira — register only when base URL, email, and API token are all present
+    // and non-empty. Any failure is logged and skipped (never panics startup).
+    if let (Some(base_url), Some(email), Some(token)) = (
+        config.jira_base_url.as_deref(),
+        config.jira_email.as_deref(),
+        config.jira_api_token.as_deref(),
+    ) {
+        let base_url = base_url.trim();
+        let email = email.trim();
+        let token = token.trim();
+        if base_url.is_empty() || email.is_empty() || token.is_empty() {
+            warn!("Jira credentials incomplete or empty; skipping Jira provider");
+        } else {
+            // Derive the Atlassian subdomain from the configured base URL so
+            // browse URLs resolve correctly, then point the client at the
+            // REST v3 API under that base URL.
+            let domain = jira_domain_from_base_url(base_url);
+            let rest_base = format!("{}/rest/api/3", base_url.trim_end_matches('/'));
+            match hive_integrations::project_management::JiraClient::with_base_url(
+                &domain, email, token, &rest_base,
+            ) {
+                Ok(client) => {
+                    pm_hub.register_provider(Box::new(client));
+                    info!("Jira provider registered");
+                }
+                Err(e) => warn!("Failed to create Jira provider: {e}"),
+            }
+        }
+    }
+
+    // Linear — register only when an API key is present and non-empty.
+    if let Some(api_key) = config.linear_api_key.as_deref() {
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            warn!("Linear API key empty; skipping Linear provider");
+        } else {
+            match hive_integrations::project_management::LinearClient::new(api_key) {
+                Ok(client) => {
+                    pm_hub.register_provider(Box::new(client));
+                    info!("Linear provider registered");
+                }
+                Err(e) => warn!("Failed to create Linear provider: {e}"),
+            }
+        }
+    }
+
+    info!(
+        "ProjectManagementHub initialized with {} provider(s)",
+        pm_hub.provider_count()
+    );
+    let pm = std::sync::Arc::new(pm_hub);
     cx.set_global(AppProjectManagement(pm));
-    info!("ProjectManagementHub initialized");
 
     // Knowledge hub — always create, providers added when tokens configured.
     let mut knowledge_hub = hive_integrations::knowledge::KnowledgeHub::new();
