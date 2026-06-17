@@ -2645,6 +2645,7 @@ fn ai_service_config(
             privacy_mode: cfg.privacy_mode,
             default_model: cfg.default_model.clone(),
             auto_routing: cfg.auto_routing,
+            routing_policy: cfg.routing_policy.clone(),
         },
         None => AiServiceConfig {
             default_model: fallback_model.into(),

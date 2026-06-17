@@ -8,8 +8,10 @@ mod auto_fallback;
 pub mod capability_router;
 mod complexity_classifier;
 mod model_router;
+pub mod policy;
 
 pub use auto_fallback::*;
 pub use capability_router::*;
 pub use complexity_classifier::*;
 pub use model_router::*;
+pub use policy::*;

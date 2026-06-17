@@ -115,6 +115,31 @@ impl std::fmt::Display for CapabilityTaskType {
     }
 }
 
+impl CapabilityTaskType {
+    /// Parse a lowercase display string (the inverse of [`Display`]) into a
+    /// `CapabilityTaskType`. Case-insensitive and tolerant of surrounding
+    /// whitespace. Returns `None` for unknown categories.
+    ///
+    /// [`Display`]: std::fmt::Display
+    pub fn from_display(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "coding" => Some(Self::Coding),
+            "reasoning" => Some(Self::Reasoning),
+            "creative writing" => Some(Self::CreativeWriting),
+            "math" => Some(Self::Math),
+            "instruction following" => Some(Self::InstructionFollowing),
+            "translation" => Some(Self::Translation),
+            "summarization" => Some(Self::Summarization),
+            "data analysis" => Some(Self::DataAnalysis),
+            "tool use" => Some(Self::ToolUse),
+            "agentic" => Some(Self::Agentic),
+            "vision" => Some(Self::Vision),
+            "general chat" => Some(Self::GeneralChat),
+            _ => None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Model strengths
 // ---------------------------------------------------------------------------
@@ -954,6 +979,32 @@ pub fn rank_models_for_task(
     available_models: &[ModelInfo],
     tier_preference: Option<ModelTier>,
 ) -> Vec<(ModelInfo, f32)> {
+    // Cost-neutral ranking — preserves the exact behavior callers rely on.
+    rank_models_for_task_with_cost(task, available_models, tier_preference, 0.0)
+}
+
+/// Rank available models for a task, optionally applying a cost penalty.
+///
+/// When `cost_weight > 0.0`, each candidate's capability score has
+/// `cost_weight * normalized_price` subtracted, where `normalized_price` is the
+/// model's combined input+output price divided by the maximum combined price
+/// across all candidates. If every candidate price is zero (or `cost_weight` is
+/// zero) no penalty is applied, making the result identical to the cost-neutral
+/// [`rank_models_for_task`].
+pub fn rank_models_for_task_with_cost(
+    task: &CapabilityTaskType,
+    available_models: &[ModelInfo],
+    tier_preference: Option<ModelTier>,
+    cost_weight: f32,
+) -> Vec<(ModelInfo, f32)> {
+    // Determine the maximum combined price across candidates for normalization.
+    // Guard divide-by-zero: if all prices are 0 we apply no cost penalty.
+    let max_price = available_models
+        .iter()
+        .map(|m| m.input_price_per_mtok + m.output_price_per_mtok)
+        .fold(0.0_f64, f64::max);
+    let apply_cost = cost_weight > 0.0 && max_price > 0.0;
+
     let mut scored: Vec<(ModelInfo, f32)> = available_models
         .iter()
         .map(|model| {
@@ -962,7 +1013,13 @@ pub fn rank_models_for_task(
                 .unwrap_or(0.5); // unknown models get a neutral baseline
 
             let tw = tier_weight(model.tier, tier_preference);
-            let final_score = base_score * tw;
+            let mut final_score = base_score * tw;
+
+            if apply_cost {
+                let combined = model.input_price_per_mtok + model.output_price_per_mtok;
+                let normalized_price = (combined / max_price) as f32;
+                final_score -= cost_weight * normalized_price;
+            }
 
             (model.clone(), final_score)
         })
@@ -1061,16 +1118,37 @@ impl CapabilityRouter {
         available_models: &[ModelInfo],
         tier_preference: Option<ModelTier>,
     ) -> RoutingRecommendation {
+        // Cost-neutral path — identical behavior to before cost weighting existed.
+        self.recommend_with_cost(messages, available_models, tier_preference, 0.0)
+    }
+
+    /// Like [`recommend`](Self::recommend) but additionally applies a cost
+    /// penalty when `cost_weight > 0.0`.
+    ///
+    /// After computing each candidate's capability score, the model's
+    /// normalized price (`(input + output) / max_over_candidates`) is scaled by
+    /// `cost_weight` and subtracted from the score, then candidates are
+    /// re-ranked. With `cost_weight == 0.0` (or when every candidate price is
+    /// zero) no penalty is applied and the result is byte-for-byte identical to
+    /// the cost-neutral path.
+    pub fn recommend_with_cost(
+        &self,
+        messages: &[ChatMessage],
+        available_models: &[ModelInfo],
+        tier_preference: Option<ModelTier>,
+        cost_weight: f32,
+    ) -> RoutingRecommendation {
         let task = classify_task(messages);
 
-        debug!(%task, "Capability router: classified task");
+        debug!(%task, cost_weight, "Capability router: classified task");
 
         // Handle the empty-models edge case.
         if available_models.is_empty() {
             return self.default_recommendation(task);
         }
 
-        let ranked = rank_models_for_task(&task, available_models, tier_preference);
+        let ranked =
+            rank_models_for_task_with_cost(&task, available_models, tier_preference, cost_weight);
 
         // The top entry is our recommendation.
         let (model, score) = ranked.first().expect(
@@ -1556,5 +1634,85 @@ mod tests {
         let score = s.score_for_task(&CapabilityTaskType::DataAnalysis);
         let expected = (s.reasoning_score + s.math_score + s.coding_score) / 3.0;
         assert!((score - expected).abs() < 0.001);
+    }
+
+    // -- Cost-weighted ranking tests --
+
+    fn make_model_priced(
+        id: &str,
+        tier: ModelTier,
+        provider: TypesProviderType,
+        input_price: f64,
+        output_price: f64,
+    ) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: id.to_string(),
+            provider: provider.to_string(),
+            provider_type: provider,
+            tier,
+            context_window: 128_000,
+            input_price_per_mtok: input_price,
+            output_price_per_mtok: output_price,
+            capabilities: ModelCapabilities::default(),
+            release_date: None,
+        }
+    }
+
+    #[test]
+    fn cost_weight_zero_matches_neutral_ranking() {
+        let models = sample_models();
+        let neutral = rank_models_for_task(&CapabilityTaskType::Coding, &models, None);
+        let with_zero =
+            rank_models_for_task_with_cost(&CapabilityTaskType::Coding, &models, None, 0.0);
+        let neutral_ids: Vec<_> = neutral.iter().map(|(m, _)| m.id.clone()).collect();
+        let zero_ids: Vec<_> = with_zero.iter().map(|(m, _)| m.id.clone()).collect();
+        assert_eq!(neutral_ids, zero_ids);
+    }
+
+    #[test]
+    fn high_cost_weight_prefers_cheaper_comparable_model() {
+        // Two unknown-capability models (both score the neutral 0.5) at the same
+        // tier; only price differs. With a high cost weight, the cheaper model
+        // must rank first.
+        let models = vec![
+            make_model_priced(
+                "zzz-pricey-model",
+                ModelTier::Premium,
+                TypesProviderType::OpenAI,
+                30.0,
+                60.0,
+            ),
+            make_model_priced(
+                "aaa-cheap-model",
+                ModelTier::Premium,
+                TypesProviderType::OpenAI,
+                1.0,
+                2.0,
+            ),
+        ];
+        let ranked = rank_models_for_task_with_cost(
+            &CapabilityTaskType::Coding,
+            &models,
+            Some(ModelTier::Premium),
+            0.5,
+        );
+        assert_eq!(
+            ranked[0].0.id, "aaa-cheap-model",
+            "cheaper comparable model should rank first under cost pressure"
+        );
+    }
+
+    #[test]
+    fn all_zero_prices_apply_no_penalty() {
+        // sample_models() all have zero prices; cost weighting must be a no-op.
+        let models = sample_models();
+        let high_cost =
+            rank_models_for_task_with_cost(&CapabilityTaskType::Coding, &models, None, 1.0);
+        let neutral = rank_models_for_task(&CapabilityTaskType::Coding, &models, None);
+        for ((hm, hs), (nm, ns)) in high_cost.iter().zip(neutral.iter()) {
+            assert_eq!(hm.id, nm.id);
+            assert!((hs - ns).abs() < f32::EPSILON);
+        }
     }
 }

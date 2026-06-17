@@ -278,6 +278,45 @@ fn set_secure_key(
 }
 
 // ---------------------------------------------------------------------------
+// Routing policy (persisted, non-secret)
+// ---------------------------------------------------------------------------
+
+/// Per-category model routing policy.
+///
+/// Persisted in `config.json` (not a secret). Parsed into a runtime form by
+/// `hive_ai`; the primitive shape lives here so `hive_core` carries no
+/// dependency on `hive_ai`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CategoryPolicy {
+    /// CapabilityTaskType as a lowercase display string, e.g. "coding","reasoning",
+    /// "creative writing","math","instruction following","translation","summarization",
+    /// "data analysis","tool use","agentic","vision","general chat".
+    pub category: String,
+    /// Allowed model ids/patterns (substring match). Empty = all models allowed.
+    #[serde(default)]
+    pub allow: Vec<String>,
+    /// Minimum tier: "free"|"budget"|"mid"|"premium". Empty = no floor.
+    #[serde(default)]
+    pub floor: String,
+}
+
+/// Global, policy-aware routing configuration.
+///
+/// With all fields at their defaults (empty categories, zero
+/// cost-aggressiveness, empty escalation pool) routing behaves exactly as it
+/// did before this policy existed — the policy is strictly additive.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RoutingPolicy {
+    #[serde(default)]
+    pub categories: Vec<CategoryPolicy>,
+    /// 0.0 (quality-max) .. 1.0 (thrift-max).
+    #[serde(default)]
+    pub cost_aggressiveness: f32,
+    #[serde(default)]
+    pub escalation_pool: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // HiveConfig
 // ---------------------------------------------------------------------------
 
@@ -459,6 +498,14 @@ pub struct HiveConfig {
     /// Context encoding format: "markdown" (default) or "toon" (token-efficient).
     #[serde(default)]
     pub context_format: String,
+
+    // Model routing policy
+    /// Policy-aware routing configuration: per-category allow-lists, quality
+    /// floors, and a global cost-aggressiveness knob. Defaults to an empty
+    /// policy, leaving routing behavior unchanged. Persisted in config.json
+    /// (not a secret).
+    #[serde(default)]
+    pub routing_policy: RoutingPolicy,
 }
 
 fn default_kilo_url() -> String {
@@ -559,6 +606,7 @@ impl Default for HiveConfig {
             notion_api_key: None,
             auto_apply_enabled: default_auto_apply(),
             context_format: String::new(),
+            routing_policy: RoutingPolicy::default(),
         }
     }
 }

@@ -153,6 +153,21 @@ pub enum ModelTier {
     Premium,
 }
 
+impl ModelTier {
+    /// Ordinal rank of this tier (`Free`=0, `Budget`=1, `Mid`=2, `Premium`=3).
+    ///
+    /// Used for floor comparisons in routing policy where a numeric ordering is
+    /// needed but the enum intentionally does not derive `Ord`.
+    pub fn rank(&self) -> u8 {
+        match self {
+            Self::Free => 0,
+            Self::Budget => 1,
+            Self::Mid => 2,
+            Self::Premium => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderType {

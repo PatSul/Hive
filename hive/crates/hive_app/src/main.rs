@@ -149,6 +149,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         privacy_mode: config.privacy_mode,
         default_model: config.default_model.clone(),
         auto_routing: config.auto_routing,
+        routing_policy: config.routing_policy.clone(),
     };
     cx.set_global(AppAiService(hive_ai::AiService::new(ai_config)));
 

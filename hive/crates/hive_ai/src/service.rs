@@ -61,6 +61,9 @@ pub struct AiServiceConfig {
     pub privacy_mode: bool,
     pub default_model: String,
     pub auto_routing: bool,
+    /// Policy-aware routing configuration (per-category allow-lists, quality
+    /// floors, cost-aggressiveness). Defaults to an empty/inactive policy.
+    pub routing_policy: hive_core::config::RoutingPolicy,
 }
 
 // ---------------------------------------------------------------------------
@@ -206,9 +209,17 @@ impl AiService {
 
         info!("{} AI provider(s) registered", providers.len());
 
+        // Build the router and install the policy-aware routing policy parsed
+        // from config. With a default/empty policy this leaves routing
+        // behavior unchanged.
+        let mut router = ModelRouter::new();
+        router.set_routing_policy(
+            crate::routing::policy::RuntimeRoutingPolicy::from_config(&config.routing_policy),
+        );
+
         Self {
             providers,
-            router: ModelRouter::new(),
+            router,
             cost_tracker: CostTracker::new(crate::cost::BudgetLimits::default()),
             config,
             discovery: None,
@@ -736,6 +747,7 @@ mod tests {
             privacy_mode: false,
             default_model: "claude-sonnet-4-5".into(),
             auto_routing: true,
+            routing_policy: Default::default(),
         }
     }
 
