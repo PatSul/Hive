@@ -1,3 +1,4 @@
+pub mod build_ticket;
 pub mod chat;
 pub mod config;
 pub mod login;

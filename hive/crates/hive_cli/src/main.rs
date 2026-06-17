@@ -51,6 +51,22 @@ enum Commands {
         #[command(subcommand)]
         action: ToolAction,
     },
+    /// Turn a ticket into a built branch (and optionally a draft PR)
+    BuildTicket {
+        /// Ticket source: jira, linear, or github
+        source: String,
+        /// Ticket reference / id (e.g. PROJ-123)
+        id: String,
+        /// Open a draft PR unattended. Off by default → approval-gated, no PR.
+        #[arg(long)]
+        open_pr: bool,
+        /// Local git repository to build in (default: current directory)
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Base branch the PR should target
+        #[arg(long, default_value = "main")]
+        base: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -129,5 +145,12 @@ async fn main() -> anyhow::Result<()> {
                 workspace,
             } => commands::tools::call(workspace, &name, &args).await,
         },
+        Commands::BuildTicket {
+            source,
+            id,
+            open_pr,
+            repo,
+            base,
+        } => commands::build_ticket::run(&source, &id, open_pr, repo, base).await,
     }
 }

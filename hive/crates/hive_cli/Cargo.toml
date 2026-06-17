@@ -12,9 +12,11 @@ path = "src/main.rs"
 [dependencies]
 hive_a2a = { path = "../hive_a2a" }
 hive_agents = { path = "../hive_agents" }
+hive_ai = { path = "../hive_ai" }
 hive_core = { path = "../hive_core" }
 hive_integrations = { path = "../hive_integrations" }
 hive_terminal = { path = "../hive_terminal" }
+async-trait.workspace = true
 ratatui = "0.29"
 crossterm = "0.28"
 clap = { version = "4", features = ["derive"] }

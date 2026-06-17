@@ -5529,11 +5529,13 @@ name = "hive_cli"
 version = "0.3.35"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "crossterm 0.28.1",
  "dirs 6.0.0",
  "hive_a2a",
  "hive_agents",
+ "hive_ai",
  "hive_core",
  "hive_integrations",
  "hive_terminal",

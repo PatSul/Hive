@@ -120,14 +120,48 @@ impl GitHubClient {
         head: &str,
         base: &str,
     ) -> Result<Value> {
+        self.create_pull_inner(owner, repo, title, body, head, base, false)
+            .await
+    }
+
+    /// Create a new **draft** pull request.
+    ///
+    /// Identical to [`GitHubClient::create_pull`] but sets `draft: true` so the
+    /// PR is opened in draft state and is never mergeable until a human marks it
+    /// ready for review. Used by the headless ticket-build flow, which only ever
+    /// opens draft PRs.
+    pub async fn create_draft_pull(
+        &self,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: &str,
+        head: &str,
+        base: &str,
+    ) -> Result<Value> {
+        self.create_pull_inner(owner, repo, title, body, head, base, true)
+            .await
+    }
+
+    async fn create_pull_inner(
+        &self,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        body: &str,
+        head: &str,
+        base: &str,
+        draft: bool,
+    ) -> Result<Value> {
         let url = format!("{}/repos/{owner}/{repo}/pulls", self.base_url);
         let payload = serde_json::json!({
             "title": title,
             "body": body,
             "head": head,
             "base": base,
+            "draft": draft,
         });
-        debug!(url = %url, title = %title, head = %head, base = %base, "creating pull request");
+        debug!(url = %url, title = %title, head = %head, base = %base, draft, "creating pull request");
         self.post(&url, &payload).await
     }
 
