@@ -24,6 +24,7 @@ pub mod plugin_manager;
 pub mod plugin_types;
 pub mod prompt_template;
 pub mod queen;
+pub mod repo_context;
 pub mod response_parser;
 pub mod skill_authoring;
 pub mod skill_executor;
@@ -73,6 +74,9 @@ pub use message_queue::{
 pub use mission::{
     BranchPusher, BuildOpts, BuildOutcome, GitBranchPusher, PrOpener, RiskTier, build_from_ticket,
     build_from_ticket_full, build_from_ticket_with_url, push_branch, ticket_branch_name,
+};
+pub use repo_context::{
+    DEFAULT_TOKEN_BUDGET, EDIT_FORMAT_INSTRUCTION, assemble_repo_context, build_grounded_objective,
 };
 pub use persistence::{AgentPersistenceService, AgentSnapshot, CompletedTask};
 pub use personas::{

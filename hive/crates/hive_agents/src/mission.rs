@@ -504,9 +504,27 @@ pub async fn build_from_ticket_full<E: AiExecutor + 'static>(
         }
     }
 
+    // --- Ground the objective in the real repository ---------------------
+    // When a real repo is supplied, inject the relevant repo files INTO the
+    // objective so the swarm produces grounded edits (full-file rewrites of
+    // files it has actually seen) rather than blind/hallucinated ones. The
+    // walk is gitignore-aware, skips build/VCS/vendored dirs and binary /
+    // oversized files, ranks by keyword overlap with the ticket, and is bounded
+    // by a token budget (see [`crate::repo_context`]). When `repo_path` is
+    // `None` (tests / dry runs) we keep today's behavior: run on the raw
+    // objective with no context.
+    let grounded_objective = match opts.repo_path {
+        Some(ref repo_path) => crate::repo_context::build_grounded_objective(
+            repo_path,
+            objective,
+            crate::repo_context::DEFAULT_TOKEN_BUDGET,
+        ),
+        None => objective.to_string(),
+    };
+
     // --- Run the swarm ----------------------------------------------------
     let queen = Queen::new(opts.swarm_config.clone(), executor);
-    let swarm_result = match queen.execute(objective).await {
+    let swarm_result = match queen.execute(&grounded_objective).await {
         Ok(r) => r,
         Err(e) => {
             return BuildOutcome::Error {
