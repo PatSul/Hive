@@ -71,8 +71,8 @@ pub use message_queue::{
     shared_queue, strip_prefix,
 };
 pub use mission::{
-    BuildOpts, BuildOutcome, PrOpener, RiskTier, build_from_ticket, build_from_ticket_with_url,
-    ticket_branch_name,
+    BranchPusher, BuildOpts, BuildOutcome, GitBranchPusher, PrOpener, RiskTier, build_from_ticket,
+    build_from_ticket_full, build_from_ticket_with_url, push_branch, ticket_branch_name,
 };
 pub use persistence::{AgentPersistenceService, AgentSnapshot, CompletedTask};
 pub use personas::{

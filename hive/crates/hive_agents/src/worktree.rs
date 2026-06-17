@@ -200,6 +200,153 @@ impl WorktreeManager {
         })
     }
 
+    /// Create a worktree on an explicit, caller-supplied branch name.
+    ///
+    /// Unlike [`WorktreeManager::create_worktree`] (which derives a
+    /// `swarm/{run_id}/{team_id}` branch), this creates a worktree whose branch
+    /// is exactly `branch_name` — e.g. `hive/ticket-proj-9`. The branch is
+    /// created off the repository HEAD; the user's existing working tree is
+    /// never touched because all work happens inside the linked worktree.
+    ///
+    /// `slot` is a short, filesystem-safe directory name under
+    /// `.hive-worktrees/` (e.g. the sanitized ticket tail). The returned
+    /// [`TeamWorktree::team_id`] is that slot, and `branch_name` is the exact
+    /// branch the worktree tracks — so a caller can rely on
+    /// `result.branch_name == branch_name` (after slash-preserving sanitization).
+    ///
+    /// Protected branches (`main`/`master`) are rejected to avoid ever creating
+    /// a worktree that hijacks them.
+    pub fn create_branch_worktree(
+        &self,
+        branch_name: &str,
+        slot: &str,
+    ) -> Result<TeamWorktree, String> {
+        // Sanitize the branch name but PRESERVE '/' so `hive/ticket-x` survives.
+        let safe_branch: String = branch_name
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '/')
+            .collect();
+        let safe_slot = Self::sanitize_branch_component(slot);
+
+        if safe_branch.is_empty() || safe_slot.is_empty() {
+            return Err("branch name and slot must contain valid characters".into());
+        }
+        if safe_branch == "main" || safe_branch == "master" {
+            return Err("Refusing to create a worktree on a protected branch".into());
+        }
+
+        let worktree_path = self.worktrees_dir().join(&safe_slot);
+        let validated_path = self.validate_worktree_path(&worktree_path)?;
+
+        info!(
+            branch = %safe_branch,
+            path = %validated_path.display(),
+            "Creating ticket worktree"
+        );
+
+        let repo = Repository::open(&self.repo_path)
+            .map_err(|e| format!("Failed to open repository: {e}"))?;
+
+        let head = repo.head().map_err(|e| format!("Failed to get HEAD: {e}"))?;
+        let head_commit = head
+            .peel_to_commit()
+            .map_err(|e| format!("Failed to peel HEAD to commit: {e}"))?;
+
+        // Create the branch off HEAD. If it already exists, reuse it (force=false
+        // would fail; we surface a clear error so the caller can decide).
+        if repo.find_branch(&safe_branch, BranchType::Local).is_err() {
+            repo.branch(&safe_branch, &head_commit, false)
+                .map_err(|e| format!("Failed to create branch '{safe_branch}': {e}"))?;
+            info!(branch = %safe_branch, "Created ticket branch from HEAD");
+        }
+
+        let branch_ref = format!("refs/heads/{safe_branch}");
+        let reference = repo
+            .find_reference(&branch_ref)
+            .map_err(|e| format!("Failed to find branch reference: {e}"))?;
+
+        // git2 worktree_add requires the target directory not to pre-exist.
+        if validated_path.exists() {
+            std::fs::remove_dir_all(&validated_path)
+                .map_err(|e| format!("Failed to clean worktree directory: {e}"))?;
+        }
+
+        repo.worktree(
+            &safe_slot,
+            &validated_path,
+            Some(git2::WorktreeAddOptions::new().reference(Some(&reference))),
+        )
+        .map_err(|e| format!("Failed to add worktree: {e}"))?;
+
+        info!(
+            slot = %safe_slot,
+            branch = %safe_branch,
+            path = %validated_path.display(),
+            "Ticket worktree created successfully"
+        );
+
+        Ok(TeamWorktree {
+            team_id: safe_slot,
+            branch_name: safe_branch,
+            worktree_path: validated_path,
+        })
+    }
+
+    /// Stage every change in a worktree and create a single commit on its
+    /// branch. Returns the new commit hash.
+    ///
+    /// Operates entirely inside the linked worktree at `worktree_path`, so the
+    /// user's primary working tree is untouched. Returns an error (never a
+    /// panic) if there is nothing to commit, so callers can decide whether an
+    /// empty change set is acceptable.
+    pub fn commit_worktree_changes(
+        worktree_path: &Path,
+        message: &str,
+    ) -> Result<String, String> {
+        let repo = Repository::open(worktree_path)
+            .map_err(|e| format!("Failed to open worktree repo: {e}"))?;
+
+        // Stage all changes (new, modified, deleted).
+        let mut index = repo
+            .index()
+            .map_err(|e| format!("Failed to read index: {e}"))?;
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .map_err(|e| format!("Failed to stage changes: {e}"))?;
+        index
+            .write()
+            .map_err(|e| format!("Failed to write index: {e}"))?;
+
+        let tree_oid = index
+            .write_tree()
+            .map_err(|e| format!("Failed to write tree: {e}"))?;
+        let tree = repo
+            .find_tree(tree_oid)
+            .map_err(|e| format!("Failed to find tree: {e}"))?;
+
+        let parent = repo
+            .head()
+            .map_err(|e| format!("Failed to get worktree HEAD: {e}"))?
+            .peel_to_commit()
+            .map_err(|e| format!("Failed to peel HEAD: {e}"))?;
+
+        // Refuse to create an empty commit so an empty branch is detectable.
+        if tree_oid == parent.tree().map_err(|e| format!("parent tree: {e}"))?.id() {
+            return Err("No changes to commit in worktree".into());
+        }
+
+        let sig = repo.signature().unwrap_or_else(|_| {
+            git2::Signature::now("Hive Swarm", "hive@localhost")
+                .expect("static signature should never fail")
+        });
+
+        let oid = repo
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+            .map_err(|e| format!("Failed to commit: {e}"))?;
+
+        Ok(format!("{oid}"))
+    }
+
     /// Merge a team's branch into a target branch.
     ///
     /// Performs merge analysis and attempts a fast-forward or normal merge.
