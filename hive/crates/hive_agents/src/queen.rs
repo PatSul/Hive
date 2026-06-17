@@ -180,9 +180,11 @@ impl<E: AiExecutor + 'static> Queen<E> {
              - \"name\": short descriptive name\n\
              - \"description\": detailed description of what this team should do\n\
              - \"dependencies\": array of team ids that must complete first (empty for independent teams)\n\
-             - \"orchestration_mode\": one of \"hivemind\", \"coordinator\", \"native_provider\", \"single_shot\"\n\
+             - \"orchestration_mode\": one of \"hivemind\", \"coordinator\", \"native_provider\", \"single_shot\", \"fusion\"\n\
              - \"scope_paths\": array of relevant file/directory paths\n\
              - \"priority\": 0-9 (0 = highest priority)\n\n\
+             Orchestration mode guidance:\n\
+             - Fusion: run several models in parallel and synthesize via a judge -- use for high-stakes architecture/decision tasks where diverse perspectives reduce blind spots (costs more, slower).\n\n\
              Goal: {goal}\n\
              {memory_context}\n\n\
              Respond with ONLY a JSON array."
@@ -682,6 +684,10 @@ impl<E: AiExecutor + 'static> Queen<E> {
                 self.execute_team_singleshot(objective, &enriched_description)
                     .await
             }
+            OrchestrationMode::Fusion => {
+                self.execute_team_fusion(objective, &enriched_description)
+                    .await
+            }
         };
 
         let duration_ms = team_start.elapsed().as_millis() as u64;
@@ -904,6 +910,207 @@ impl<E: AiExecutor + 'static> Queen<E> {
         ))
     }
 
+    /// Resolve the panel of model IDs used by a Fusion run.
+    ///
+    /// Precedence:
+    /// 1. An explicit `preferred_model` on the objective (single-model panel
+    ///    override) wins -- callers can force a specific model.
+    /// 2. Otherwise `config.fusion_panel`, if non-empty.
+    /// 3. Otherwise a derived default: the deduped set of the per-tier defaults
+    ///    `[Premium, Mid, Budget]`. If that yields fewer than two distinct
+    ///    models (some tiers map to the same id), the `queen_model` is added as
+    ///    a distinct fallback so the panel always has at least two members.
+    fn resolve_fusion_panel(&self, objective: &TeamObjective) -> Vec<String> {
+        if let Some(model) = &objective.preferred_model {
+            return vec![model.clone()];
+        }
+
+        let mut panel: Vec<String> = if !self.config.fusion_panel.is_empty() {
+            self.config.fusion_panel.clone()
+        } else {
+            vec![
+                default_model_for_tier(ModelTier::Premium),
+                default_model_for_tier(ModelTier::Mid),
+                default_model_for_tier(ModelTier::Budget),
+            ]
+        };
+
+        // Deduplicate while preserving order.
+        let mut seen = HashSet::new();
+        panel.retain(|m| seen.insert(m.clone()));
+
+        // Ensure at least two distinct panelists for a meaningful fusion.
+        if panel.len() < 2 {
+            let fallback = self.config.queen_model.clone();
+            if !panel.contains(&fallback) {
+                panel.push(fallback);
+            }
+        }
+
+        panel
+    }
+
+    /// Execute a team by running a panel of models in parallel and synthesizing
+    /// their outputs via a separate judge model (OpenRouter "Fusion" style).
+    ///
+    /// 1. Resolve the panel (see [`Queen::resolve_fusion_panel`]).
+    /// 2. Dispatch one identical `ChatRequest` per panel model concurrently,
+    ///    tolerating individual failures.
+    /// 3. Feed the surviving labeled responses to a judge model that produces a
+    ///    structured synthesis and a single best final answer.
+    ///
+    /// Falls back to a single SingleShot-style call if the entire panel fails.
+    async fn execute_team_fusion(
+        &self,
+        objective: &TeamObjective,
+        description: &str,
+    ) -> Result<(InnerResult, f64, Vec<String>), String> {
+        let panel = self.resolve_fusion_panel(objective);
+
+        let panel_system_prompt = format!(
+            "You are a member of an expert panel working on the objective for team '{}'. \
+             Provide your own thorough, independent analysis and solution. \
+             Do not assume other panelists' views -- reason from first principles.",
+            objective.name
+        );
+
+        // Build one request per panel model (same task content + system prompt;
+        // model pinned to the panel member, never "auto").
+        let requests: Vec<(String, ChatRequest)> = panel
+            .iter()
+            .map(|model| {
+                let req = ChatRequest {
+                    messages: vec![ChatMessage::text(
+                        MessageRole::User,
+                        description.to_string(),
+                    )],
+                    model: model.clone(),
+                    max_tokens: 4096,
+                    temperature: Some(0.3),
+                    system_prompt: Some(panel_system_prompt.clone()),
+                    // Tool parity with sibling single-call modes: this layer does
+                    // not plumb tool definitions, so every panelist gets the same
+                    // (tool-free) request shape.
+                    tools: None,
+                    cache_system_prompt: false,
+                };
+                (model.clone(), req)
+            })
+            .collect();
+
+        // Dispatch all panel calls concurrently.
+        let futures_iter = requests.iter().map(|(model, req)| async move {
+            (model.clone(), self.executor.execute(req).await)
+        });
+        let outcomes = futures::future::join_all(futures_iter).await;
+
+        // Collect survivors; accumulate cost across every successful call.
+        let mut survivors: Vec<(String, ChatResponse)> = Vec::new();
+        let mut total_cost = 0.0;
+        for (model, outcome) in outcomes {
+            match outcome {
+                Ok(resp) => {
+                    let cost = estimate_cost(&model, &resp);
+                    self.add_cost(cost);
+                    total_cost += cost;
+                    survivors.push((model, resp));
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        target: "queen::fusion",
+                        team = %objective.id,
+                        model = %model,
+                        "Fusion panelist failed: {err}"
+                    );
+                }
+            }
+        }
+
+        // If nothing survived, fall back to a single SingleShot-style call so the
+        // team still produces output rather than failing outright.
+        if survivors.is_empty() {
+            tracing::warn!(
+                target: "queen::fusion",
+                team = %objective.id,
+                "All Fusion panelists failed; falling back to a single call"
+            );
+            return self.execute_team_singleshot(objective, description).await;
+        }
+
+        // Build the judge prompt presenting each survivor's response, labeled by
+        // model id, and asking for a structured synthesis + single final answer.
+        let judge_model = self
+            .config
+            .fusion_judge
+            .clone()
+            .unwrap_or_else(|| self.config.queen_model.clone());
+
+        let mut panel_sections = String::new();
+        for (i, (model, resp)) in survivors.iter().enumerate() {
+            panel_sections.push_str(&format!(
+                "### Panelist {} -- model `{}`\n{}\n\n",
+                i + 1,
+                model,
+                resp.content
+            ));
+        }
+
+        let judge_prompt = format!(
+            "You are the JUDGE in a model-fusion panel. {n} models independently \
+             addressed the same objective. Read every panelist response below, then \
+             produce a synthesis.\n\n\
+             Objective:\n{description}\n\n\
+             Panelist responses:\n{panel_sections}\n\
+             Produce your answer in this structure:\n\
+             1. **Consensus** -- points all/most panelists agree on.\n\
+             2. **Contradictions** -- where panelists directly disagree, and which view is better supported.\n\
+             3. **Partial coverage** -- important aspects only some panelists addressed.\n\
+             4. **Unique insights** -- valuable points raised by a single panelist.\n\
+             5. **Blind spots** -- gaps none of the panelists covered.\n\
+             6. **Final answer** -- a single, best, decisive answer grounded in the analysis above.",
+            n = survivors.len(),
+        );
+
+        let judge_request = ChatRequest {
+            messages: vec![ChatMessage::text(MessageRole::User, judge_prompt)],
+            model: judge_model.clone(),
+            max_tokens: 4096,
+            temperature: Some(0.3),
+            system_prompt: Some(
+                "You are an impartial synthesis judge. Weigh each panelist on the \
+                 merits, surface disagreements honestly, and deliver one decisive \
+                 final answer. Do not simply concatenate the inputs."
+                    .into(),
+            ),
+            tools: None,
+            cache_system_prompt: false,
+        };
+
+        let judge_response = self.executor.execute(&judge_request).await?;
+        let judge_cost = estimate_cost(&judge_model, &judge_response);
+        self.add_cost(judge_cost);
+        total_cost += judge_cost;
+
+        let panel_models: Vec<String> = survivors.iter().map(|(m, _)| m.clone()).collect();
+        let mut insights = extract_insights_from_text(&judge_response.content);
+        insights.push(format!(
+            "Fusion: {} panelist(s) [{}] synthesized by judge '{}'",
+            panel_models.len(),
+            panel_models.join(", "),
+            judge_model
+        ));
+
+        Ok((
+            InnerResult::Fusion {
+                content: judge_response.content,
+                panel: panel_models,
+                judge: judge_model,
+            },
+            total_cost,
+            insights,
+        ))
+    }
+
     /// Build a context string from completed prior team results.
     fn build_cross_team_context(&self, prior_results: &[TeamResult]) -> String {
         if prior_results.is_empty() {
@@ -927,7 +1134,8 @@ impl<E: AiExecutor + 'static> Queen<E> {
                     summaries.join("\n")
                 }
                 Some(InnerResult::Native { content, .. })
-                | Some(InnerResult::SingleShot { content, .. }) => truncate_str(content, 500),
+                | Some(InnerResult::SingleShot { content, .. })
+                | Some(InnerResult::Fusion { content, .. }) => truncate_str(content, 500),
                 None => continue,
             };
 
@@ -975,7 +1183,8 @@ impl<E: AiExecutor + 'static> Queen<E> {
                             .collect::<Vec<_>>()
                             .join("\n\n"),
                         Some(InnerResult::Native { content, .. })
-                        | Some(InnerResult::SingleShot { content, .. }) => content.clone(),
+                        | Some(InnerResult::SingleShot { content, .. })
+                        | Some(InnerResult::Fusion { content, .. }) => content.clone(),
                         None => "(no output)".into(),
                     };
                     team_sections.push(format!(
@@ -2067,5 +2276,156 @@ mod tests {
         // Goal with only short words should return empty context.
         let ctx = queen.gather_memory_context("do it");
         assert!(ctx.is_empty());
+    }
+
+    // -- Fusion orchestration ------------------------------------------------
+
+    /// Executor that records every requested model and keys its response off the
+    /// request model, so tests can prove which models were dispatched. Any model
+    /// in `fail_models` returns an error (to simulate a failing panelist).
+    struct FusionMockExecutor {
+        seen_models: Mutex<Vec<String>>,
+        fail_models: Vec<String>,
+    }
+
+    impl FusionMockExecutor {
+        fn new() -> Self {
+            Self {
+                seen_models: Mutex::new(Vec::new()),
+                fail_models: Vec::new(),
+            }
+        }
+
+        fn failing(models: &[&str]) -> Self {
+            Self {
+                seen_models: Mutex::new(Vec::new()),
+                fail_models: models.iter().map(|s| s.to_string()).collect(),
+            }
+        }
+
+        fn models_seen(&self) -> Vec<String> {
+            self.seen_models.lock().unwrap().clone()
+        }
+    }
+
+    impl AiExecutor for FusionMockExecutor {
+        async fn execute(&self, request: &ChatRequest) -> Result<ChatResponse, String> {
+            self.seen_models
+                .lock()
+                .unwrap()
+                .push(request.model.clone());
+
+            if self.fail_models.iter().any(|m| m == &request.model) {
+                return Err(format!("simulated failure for {}", request.model));
+            }
+
+            // The judge prompt asks for a structured synthesis; key the content
+            // off the model so tests can distinguish panelists from the judge.
+            let content = format!("response-from::{}", request.model);
+            Ok(ChatResponse {
+                content,
+                model: request.model.clone(),
+                usage: TokenUsage::default(),
+                finish_reason: FinishReason::Stop,
+                thinking: None,
+                tool_calls: None,
+            })
+        }
+    }
+
+    fn fusion_objective() -> TeamObjective {
+        TeamObjective {
+            id: "team-fusion".into(),
+            name: "High-Stakes Decision".into(),
+            description: "Decide the system architecture".into(),
+            dependencies: vec![],
+            orchestration_mode: OrchestrationMode::Fusion,
+            scope_paths: vec![],
+            priority: 0,
+            preferred_model: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn fusion_dispatches_panel_and_judge_and_returns_judge_output() {
+        let executor = Arc::new(FusionMockExecutor::new());
+        let config = SwarmConfig {
+            // Explicit, fully-distinct panel and judge so we can assert exactly.
+            fusion_panel: vec!["model-a".into(), "model-b".into(), "model-c".into()],
+            fusion_judge: Some("judge-model".into()),
+            ..Default::default()
+        };
+        let queen = Queen::new(config, Arc::clone(&executor));
+
+        let result = queen.execute_team(&fusion_objective(), &[]).await;
+        assert_eq!(result.status, TeamStatus::Completed, "{:?}", result.error);
+
+        // Every panel model AND the judge were dispatched.
+        let seen = executor.models_seen();
+        for m in ["model-a", "model-b", "model-c", "judge-model"] {
+            assert!(seen.contains(&m.to_string()), "missing dispatch for {m}: {seen:?}");
+        }
+
+        // The returned output is the judge's synthesized answer, not a panelist's.
+        match result.inner.expect("inner result") {
+            InnerResult::Fusion {
+                content,
+                panel,
+                judge,
+            } => {
+                assert_eq!(content, "response-from::judge-model");
+                assert_eq!(judge, "judge-model");
+                assert_eq!(panel, vec!["model-a", "model-b", "model-c"]);
+            }
+            other => panic!("expected Fusion inner result, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fusion_tolerates_a_single_failing_panelist() {
+        // model-b fails; the run should still complete from the survivors.
+        let executor = Arc::new(FusionMockExecutor::failing(&["model-b"]));
+        let config = SwarmConfig {
+            fusion_panel: vec!["model-a".into(), "model-b".into(), "model-c".into()],
+            fusion_judge: Some("judge-model".into()),
+            ..Default::default()
+        };
+        let queen = Queen::new(config, Arc::clone(&executor));
+
+        let result = queen.execute_team(&fusion_objective(), &[]).await;
+        assert_eq!(result.status, TeamStatus::Completed, "{:?}", result.error);
+
+        match result.inner.expect("inner result") {
+            InnerResult::Fusion { panel, content, .. } => {
+                // Only survivors are in the panel; the failed model is excluded.
+                assert_eq!(panel, vec!["model-a", "model-c"]);
+                assert_eq!(content, "response-from::judge-model");
+            }
+            other => panic!("expected Fusion inner result, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fusion_default_panel_has_at_least_two_distinct_models() {
+        let executor = Arc::new(FusionMockExecutor::new());
+        // Empty fusion_panel -> derive default from per-tier defaults.
+        let queen = Queen::new(SwarmConfig::default(), Arc::clone(&executor));
+
+        let panel = queen.resolve_fusion_panel(&fusion_objective());
+        assert!(
+            panel.len() >= 2,
+            "default panel must have >= 2 distinct models, got {panel:?}"
+        );
+        // Distinctness: no duplicates.
+        let unique: std::collections::HashSet<_> = panel.iter().collect();
+        assert_eq!(unique.len(), panel.len(), "panel must be deduped: {panel:?}");
+    }
+
+    #[test]
+    fn fusion_mode_round_trips_from_str() {
+        assert_eq!(
+            OrchestrationMode::from_str_loose("fusion"),
+            OrchestrationMode::Fusion
+        );
     }
 }

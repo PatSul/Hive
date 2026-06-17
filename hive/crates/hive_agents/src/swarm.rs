@@ -25,6 +25,10 @@ pub enum OrchestrationMode {
     NativeProvider,
     /// A single AI call -- simplest and cheapest.
     SingleShot,
+    /// Run a task on a panel of models in parallel, then have a separate judge
+    /// model synthesize their outputs (consensus / contradictions / blind spots
+    /// / unique insights) into a single final answer. Mirrors OpenRouter "Fusion".
+    Fusion,
 }
 
 impl OrchestrationMode {
@@ -34,6 +38,7 @@ impl OrchestrationMode {
             "coordinator" => Self::Coordinator,
             "native_provider" | "native" => Self::NativeProvider,
             "single_shot" | "singleshot" | "single" => Self::SingleShot,
+            "fusion" | "panel" => Self::Fusion,
             _ => Self::SingleShot,
         }
     }
@@ -94,6 +99,14 @@ pub struct SwarmConfig {
     /// policy-aware router (request the `"auto"` model). Propagated into each
     /// team's [`HiveMindConfig`]. Mirrors `HiveConfig::auto_routing`.
     pub auto_routing: bool,
+    /// Panel of model IDs used by the [`OrchestrationMode::Fusion`] mode. When
+    /// empty, the panel is derived at runtime from the per-tier defaults.
+    #[serde(default)]
+    pub fusion_panel: Vec<String>,
+    /// Judge model used to synthesize the Fusion panel's outputs. When `None`,
+    /// the [`SwarmConfig::queen_model`] is used as the judge.
+    #[serde(default)]
+    pub fusion_judge: Option<String>,
 }
 
 impl Default for SwarmConfig {
@@ -106,6 +119,8 @@ impl Default for SwarmConfig {
             per_team_cost_limit_usd: 5.0,
             per_team_time_limit_secs: 300,
             auto_routing: true,
+            fusion_panel: Vec::new(),
+            fusion_judge: None,
         }
     }
 }
@@ -194,6 +209,16 @@ pub enum InnerResult {
     Coordinator { result: CoordinatorResult },
     Native { content: String, model: String },
     SingleShot { content: String, model: String },
+    /// Output of a Fusion run: the judge's synthesized answer plus the panel of
+    /// models that contributed and the judge model that synthesized them.
+    Fusion {
+        /// The judge's final synthesized answer.
+        content: String,
+        /// Panel model IDs that produced responses (survivors only).
+        panel: Vec<String>,
+        /// The judge model that synthesized the panel outputs.
+        judge: String,
+    },
 }
 
 /// Status of a team's execution.
@@ -436,6 +461,10 @@ mod tests {
         assert_eq!(
             OrchestrationMode::from_str_loose("singleshot"),
             OrchestrationMode::SingleShot
+        );
+        assert_eq!(
+            OrchestrationMode::from_str_loose("fusion"),
+            OrchestrationMode::Fusion
         );
         assert_eq!(
             OrchestrationMode::from_str_loose("unknown"),
