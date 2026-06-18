@@ -57,7 +57,7 @@ What makes Hive different: it **learns from every interaction** (locally, privat
 - Cost tracking & budget enforcement
 - Code review & testing automation
 - **Universal Skills** — one set of TOML-based skills shared across all AI models
-- Skills Marketplace (15 built-in + user-created skills)
+- Skills Marketplace (16 built-in + user-created skills)
 - Autonomous skill acquisition (self-teaching)
 - Automation workflows (cron, event, webhook triggers)
 - Docker & Kubernetes orchestration
@@ -374,7 +374,7 @@ optional = ["search_files"]
 
 The **SkillExecutor** validates that the active model satisfies the skill's requirements, then enhances the prompt based on available capabilities (e.g., prepends thinking instructions for models with `ExtendedThinking`, requests JSON for models with `StructuredOutput`). Incompatible models get a clear error message suggesting alternatives.
 
-15 built-in skills ship as embedded TOML and are written to `~/.hive/skills/` on first run. Users can edit, disable, or create new skills — all changes persist to disk with SHA-256 integrity verification and injection scanning.
+16 built-in skills ship as embedded TOML and are written to `~/.hive/skills/` on first run. Users can edit, disable, or create new skills — all changes persist to disk with SHA-256 integrity verification and injection scanning.
 
 ---
 
@@ -459,7 +459,7 @@ All learning data stored locally in SQLite (`~/.hive/learning.db`). Every prefer
 |---|---|
 | **Automation Workflows** | Multi-step workflows with triggers (manual, cron schedule, event, webhook) and 6 action types (run command, send message, call API, create task, send notification, execute skill). YAML-based definitions in `~/.hive/workflows/`. Visual drag-and-drop workflow builder in the UI. |
 | **Universal Skills** | Cross-model skill system with TOML-based definitions in `~/.hive/skills/`. Capability tags declare requirements (`tool_use`, `extended_thinking`, etc.) and the `SkillExecutor` adapts prompts per model. One skill definition works across all 27 providers. |
-| **Skills Marketplace** | Browse, install, remove, and toggle skills from 5 sources (ClawdHub, Anthropic, OpenAI, Google, Community). Create custom skills. Add remote skill sources. 15 built-in skills including 9 integration skills (/slack, /jira, /notion, /db, /docker, /k8s, /deploy, /browse, /index-docs). Security scanning on install. |
+| **Skills Marketplace** | Browse, install, remove, and toggle skills from 5 sources (ClawdHub, Anthropic, OpenAI, Google, Community). Create custom skills. Add remote skill sources. 16 built-in skills including 9 integration skills (/slack, /jira, /notion, /db, /docker, /k8s, /deploy, /browse, /index-docs) and a `/ponytail` minimalist-code discipline. Security scanning on install. |
 | **Autonomous Skill Creation** | When Hive encounters an unfamiliar domain, it searches existing skill sources first, then researches documentation and authors a new skill if nothing sufficient exists. See [Autonomous Skill Acquisition](#autonomous-skill-acquisition). |
 | **Personas** | Named agent personalities with custom system prompts, prompt overrides per task type, and configurable model preferences. |
 | **Auto-Commit** | Watches for staged changes and generates AI-powered commit messages. |
@@ -600,7 +600,7 @@ All state persists between sessions. Nothing is lost on restart.
 | **Session journal** | JSONL | `~/.hive/session_journal.jsonl` (remote daemon events) |
 | **Knowledge cache** | HTML/text files | `~/.hive/knowledge/` |
 | **Workflows** | YAML definitions | `~/.hive/workflows/` |
-| **Skills** | TOML with capability tags | `~/.hive/skills/{name}.toml` (15 built-in + user-created) |
+| **Skills** | TOML with capability tags | `~/.hive/skills/{name}.toml` (16 built-in + user-created) |
 
 On startup, Hive automatically backfills any JSON-only conversations into SQLite and builds FTS5 search indexes. Path traversal protection on all file operations. SQLite databases use WAL mode with `NORMAL` synchronous and foreign key enforcement.
 
@@ -1052,7 +1052,7 @@ A2A lets Hive participate in multi-agent ecosystems — receiving tasks from and
 **Universal Skills — Cross-Model Skill Sharing**
 
 - **Universal Skills System** — One set of TOML-based skills shared across all 27 AI providers. Each skill declares capability requirements (`tool_use`, `extended_thinking`, `structured_output`, etc.) and the `SkillExecutor` adapts prompts per model at runtime.
-- **SkillLoader** — File-backed skill persistence in `~/.hive/skills/*.toml`. Loads, saves, deletes, toggles skills with SHA-256 integrity verification. 15 built-in skills embedded and written on first run.
+- **SkillLoader** — File-backed skill persistence in `~/.hive/skills/*.toml`. Loads, saves, deletes, toggles skills with SHA-256 integrity verification. 16 built-in skills embedded and written on first run.
 - **SkillExecutor** — Capability-aware execution pipeline: gates on required capabilities, enhances prompts for preferred capabilities, injects required tools, validates model tier.
 - **SkillsRegistry Refactor** — Dual-mode registry: `new()` for in-memory tests, `with_loader()` for file-backed production. Backward-compatible `dispatch()` API preserved.
 - **15 Built-in TOML Skills** — help, web-search, code-review, git-commit, generate-docs, test-gen, slack, jira, notion, db, docker, k8s, deploy, browse, index-docs.

@@ -613,7 +613,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
     info!("ApprovalGate initialized with default rules");
 
     // Skills registry — file-backed, loads from ~/.hive/skills/*.toml.
-    // Ensures all 15 built-in skills exist on disk on first run.
+    // Ensures all 16 built-in skills exist on disk on first run.
     {
         let skills_dir = HiveConfig::base_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from(".hive"))

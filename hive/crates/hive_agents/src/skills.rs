@@ -713,7 +713,7 @@ mod tests {
             .filter(|s| s.source == SkillSource::BuiltIn)
             .cloned()
             .collect();
-        // 6 original + 9 integration = 15
-        assert_eq!(builtins.len(), 15, "Should have 15 built-in skills total");
+        // 6 original + 9 integration + 1 discipline (ponytail) = 16
+        assert_eq!(builtins.len(), 16, "Should have 16 built-in skills total");
     }
 }

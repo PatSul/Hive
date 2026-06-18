@@ -141,7 +141,7 @@ fn default_tier() -> ModelTier {
 // Built-in skills (embedded at compile time)
 // ---------------------------------------------------------------------------
 
-/// All 15 built-in skill definitions, compiled from TOML files.
+/// All 16 built-in skill definitions, compiled from TOML files.
 pub fn builtin_skills() -> Vec<SkillFile> {
     let sources: &[&str] = &[
         include_str!("builtin_skills/help.toml"),
@@ -159,6 +159,7 @@ pub fn builtin_skills() -> Vec<SkillFile> {
         include_str!("builtin_skills/deploy.toml"),
         include_str!("builtin_skills/browse.toml"),
         include_str!("builtin_skills/index-docs.toml"),
+        include_str!("builtin_skills/ponytail.toml"),
     ];
 
     sources
@@ -475,9 +476,9 @@ mod tests {
     }
 
     #[test]
-    fn builtin_skills_load_all_15() {
+    fn builtin_skills_load_all_16() {
         let builtins = super::builtin_skills();
-        assert_eq!(builtins.len(), 15, "Should load all 15 built-in skills");
+        assert_eq!(builtins.len(), 16, "Should load all 16 built-in skills");
 
         let names: Vec<&str> = builtins.iter().map(|s| s.skill.name.as_str()).collect();
         assert!(names.contains(&"help"));
@@ -485,6 +486,7 @@ mod tests {
         assert!(names.contains(&"slack"));
         assert!(names.contains(&"k8s"));
         assert!(names.contains(&"index-docs"));
+        assert!(names.contains(&"ponytail"));
     }
 
     #[test]
@@ -506,6 +508,6 @@ mod tests {
 
         loader.ensure_builtins(&builtins).unwrap();
         let loaded = loader.load_all().unwrap();
-        assert_eq!(loaded.len(), 15);
+        assert_eq!(loaded.len(), 16);
     }
 }
