@@ -153,13 +153,19 @@ pub(super) fn render_sidebar(
                                 .child(active_destination.description()),
                         ),
                 )
-                .child(render_sidebar_section(
-                    "Inside This Space",
-                    active_destination.panels(),
-                    active_panel,
-                    theme,
-                    cx,
-                )),
+                // Only show the panel sub-list when the space has more than one
+                // panel. Home (and Assist) have a single panel that shares the
+                // space's name, so the sub-list would just duplicate the
+                // destination button above it.
+                .when(active_destination.panels().len() > 1, |el| {
+                    el.child(render_sidebar_section(
+                        "Inside This Space",
+                        active_destination.panels(),
+                        active_panel,
+                        theme,
+                        cx,
+                    ))
+                }),
         )
         .child(
             div()
@@ -205,6 +211,8 @@ pub(super) fn render_sidebar(
                                 .flex_row()
                                 .items_center()
                                 .gap(theme.space_2)
+                                .flex_1()
+                                .min_w(px(0.0))
                                 .child(
                                     Icon::new(IconName::Settings)
                                         .size_4()
@@ -215,6 +223,7 @@ pub(super) fn render_sidebar(
                                         .flex()
                                         .flex_col()
                                         .gap(px(2.0))
+                                        .min_w(px(0.0))
                                         .child(
                                             div()
                                                 .text_size(theme.font_size_sm)
@@ -370,6 +379,7 @@ fn render_shell_destination_item(
                 .flex_col()
                 .gap(px(2.0))
                 .flex_1()
+                .min_w(px(0.0))
                 .child(
                     div()
                         .text_size(theme.font_size_sm)

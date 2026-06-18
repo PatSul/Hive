@@ -293,37 +293,36 @@ fn build_context_sections(
 
     if workspace.review_data.is_repo {
         git_section = git_section
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .gap(theme.space_2)
-                    .child(context_metric(
+            .child(metric_grid(
+                vec![
+                    context_metric(
                         "Branch",
                         &workspace.review_data.branch,
                         theme.accent_aqua,
                         theme,
-                    ))
-                    .child(context_metric(
+                    ),
+                    context_metric(
                         "Staged",
                         workspace.review_data.staged_count.to_string(),
                         theme.accent_green,
                         theme,
-                    ))
-                    .child(context_metric(
+                    ),
+                    context_metric(
                         "Modified",
                         workspace.review_data.modified_count.to_string(),
                         theme.accent_yellow,
                         theme,
-                    ))
-                    .child(context_metric(
+                    ),
+                    context_metric(
                         "Untracked",
                         workspace.review_data.untracked_count.to_string(),
                         theme.accent_red,
                         theme,
-                    )),
-            )
+                    ),
+                ],
+                2,
+                theme,
+            ))
             .child(context_fact_row(
                 "Last commit",
                 &quick_start_actions::text_excerpt(&workspace.review_data.last_commit_msg, 120),
@@ -497,13 +496,9 @@ fn observe_context_sections(
         "Live system and agent activity stay next to the inbox instead of disappearing inside Monitor.",
         theme,
     )
-    .child(
-        div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap(theme.space_2)
-            .child(context_metric(
+    .child(metric_grid(
+        vec![
+            context_metric(
                 "System",
                 workspace.monitor_data.status.label(),
                 match workspace.monitor_data.status {
@@ -519,26 +514,29 @@ fn observe_context_sections(
                     }
                 },
                 theme,
-            ))
-            .child(context_metric(
+            ),
+            context_metric(
                 "Agents",
                 workspace.monitor_data.active_agents.len().to_string(),
                 theme.accent_aqua,
                 theme,
-            ))
-            .child(context_metric(
+            ),
+            context_metric(
                 "Streams",
                 workspace.monitor_data.active_streams.to_string(),
                 theme.accent_cyan,
                 theme,
-            ))
-            .child(context_metric(
+            ),
+            context_metric(
                 "Providers",
                 online_providers.to_string(),
                 theme.accent_green,
                 theme,
-            )),
-    );
+            ),
+        ],
+        2,
+        theme,
+    ));
 
     if let Some(run_id) = workspace.monitor_data.current_run_id.as_ref() {
         runtime_section = runtime_section.child(context_fact_row(
@@ -969,6 +967,33 @@ fn context_section_card(title: &str, detail: &str, theme: &HiveTheme) -> Div {
                         .child(detail.to_string()),
                 ),
         )
+}
+
+/// Lay metrics out in fixed-column rows WITHOUT `flex_wrap`. GPUI (0.2.2)
+/// under-reports the height of a wrapped flex row, so a fact row rendered below
+/// a wrapped metric row would overlap it. Explicit rows measure correctly. Each
+/// metric is placed in a `flex_1` cell so they share the row width evenly.
+fn metric_grid(metrics: Vec<AnyElement>, columns: usize, theme: &HiveTheme) -> AnyElement {
+    let columns = columns.max(1);
+    let total = metrics.len();
+    let mut col = div().flex().flex_col().gap(theme.space_2);
+    let mut row = div().flex().flex_row().w_full().gap(theme.space_2);
+    let mut in_row = 0usize;
+
+    for (i, metric) in metrics.into_iter().enumerate() {
+        row = row.child(div().flex_1().min_w(px(0.0)).child(metric));
+        in_row += 1;
+        if in_row == columns || i + 1 == total {
+            for _ in in_row..columns {
+                row = row.child(div().flex_1().min_w(px(0.0)));
+            }
+            col = col.child(row);
+            row = div().flex().flex_row().w_full().gap(theme.space_2);
+            in_row = 0;
+        }
+    }
+
+    col.into_any_element()
 }
 
 fn context_metric(

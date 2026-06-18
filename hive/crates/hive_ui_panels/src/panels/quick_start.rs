@@ -249,14 +249,13 @@ fn render_start_card(
         "Finish Setup First"
     };
 
-    let mut missions = div().flex().flex_row().flex_wrap().gap(theme.space_3);
-    for template in &data.templates {
-        missions = missions.child(render_template_card(
-            template,
-            template.id == data.selected_template,
-            theme,
-        ));
-    }
+    let mission_cards: Vec<AnyElement> = data
+        .templates
+        .iter()
+        .map(|template| {
+            render_template_card(template, template.id == data.selected_template, theme)
+        })
+        .collect();
 
     let mut section = card(theme)
         .bg(theme.bg_secondary)
@@ -266,7 +265,7 @@ fn render_start_card(
             "Pick a mission, describe the outcome, and Hive launches a guided run on this project.",
             theme,
         ))
-        .child(missions)
+        .child(card_grid(mission_cards, 2, theme))
         .child(
             div()
                 .text_size(theme.font_size_xs)
@@ -334,10 +333,11 @@ fn render_start_card(
 }
 
 fn render_priority_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
-    let mut grid = div().flex().flex_row().flex_wrap().gap(theme.space_3);
-    for item in &data.priorities {
-        grid = grid.child(render_priority_card(item, theme));
-    }
+    let cards: Vec<AnyElement> = data
+        .priorities
+        .iter()
+        .map(|item| render_priority_card(item, theme))
+        .collect();
 
     div()
         .flex()
@@ -348,15 +348,16 @@ fn render_priority_section(data: &QuickStartPanelData, theme: &HiveTheme) -> Any
             "Resume work, clear blockers, and see what Hive recommends next.",
             theme,
         ))
-        .child(grid)
+        .child(card_grid(cards, 2, theme))
         .into_any_element()
 }
 
 fn render_status_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
-    let mut grid = div().flex().flex_row().flex_wrap().gap(theme.space_3);
-    for card in &data.status_cards {
-        grid = grid.child(render_status_card(card, theme));
-    }
+    let cards: Vec<AnyElement> = data
+        .status_cards
+        .iter()
+        .map(|card| render_status_card(card, theme))
+        .collect();
 
     div()
         .flex()
@@ -367,7 +368,7 @@ fn render_status_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyEl
             "Models, spend, and safety signals at a glance.",
             theme,
         ))
-        .child(grid)
+        .child(card_grid(cards, 2, theme))
         .into_any_element()
 }
 
@@ -380,9 +381,9 @@ fn render_priority_card(item: &QuickStartPriorityDisplay, theme: &HiveTheme) -> 
     let panel = item.action_panel.clone();
 
     card(theme)
-        .min_w(px(220.0))
-        .max_w(px(340.0))
-        .flex_grow()
+        .flex_1()
+        .min_w(px(0.0))
+        .max_w(px(560.0))
         .border_color(accent)
         .child(
             div()
@@ -525,10 +526,11 @@ fn render_new_project_card(theme: &HiveTheme) -> AnyElement {
 }
 
 fn render_next_steps_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyElement {
-    let mut grid = div().flex().flex_row().flex_wrap().gap(theme.space_3);
-    for step in &data.next_steps {
-        grid = grid.child(render_next_step_card(step, theme));
-    }
+    let cards: Vec<AnyElement> = data
+        .next_steps
+        .iter()
+        .map(|step| render_next_step_card(step, theme))
+        .collect();
 
     div()
         .flex()
@@ -539,7 +541,7 @@ fn render_next_steps_section(data: &QuickStartPanelData, theme: &HiveTheme) -> A
             "Fast handoff points once a run is underway.",
             theme,
         ))
-        .child(grid)
+        .child(card_grid(cards, 2, theme))
         .into_any_element()
 }
 
@@ -619,9 +621,9 @@ fn render_status_card(item: &QuickStartStatusDisplay, theme: &HiveTheme) -> AnyE
     };
 
     let mut card = card(theme)
-        .min_w(px(220.0))
-        .max_w(px(320.0))
-        .flex_grow()
+        .flex_1()
+        .min_w(px(0.0))
+        .max_w(px(560.0))
         .border_color(accent)
         .child(
             div()
@@ -684,9 +686,9 @@ fn render_template_card(
         .flex()
         .flex_col()
         .gap(theme.space_2)
-        .min_w(px(220.0))
-        .max_w(px(320.0))
-        .flex_grow()
+        .flex_1()
+        .min_w(px(0.0))
+        .max_w(px(560.0))
         .p(theme.space_4)
         .rounded(theme.radius_md)
         .bg(if selected {
@@ -757,9 +759,9 @@ fn render_template_card(
 fn render_next_step_card(step: &QuickStartNextStepDisplay, theme: &HiveTheme) -> AnyElement {
     let panel = step.panel.clone();
     card(theme)
-        .min_w(px(220.0))
-        .max_w(px(320.0))
-        .flex_grow()
+        .flex_1()
+        .min_w(px(0.0))
+        .max_w(px(560.0))
         .child(
             div()
                 .text_size(theme.font_size_base)
@@ -851,6 +853,34 @@ fn render_workspace_card(workspace: &QuickStartWorkspaceDisplay, theme: &HiveThe
                 )),
         )
         .into_any_element()
+}
+
+/// Lay out cards in fixed-column rows WITHOUT `flex_wrap`. GPUI (0.2.2)
+/// under-reports the height of a wrapped flex row, so any sibling rendered
+/// below a wrapped grid overlaps it. Explicit `flex_row` lines measure
+/// correctly. Cards are `flex_1` so they share each row's width; the last row
+/// is padded with empty flex spacers to keep column widths consistent.
+fn card_grid(cards: Vec<AnyElement>, columns: usize, theme: &HiveTheme) -> AnyElement {
+    let columns = columns.max(1);
+    let total = cards.len();
+    let mut col = div().flex().flex_col().gap(theme.space_3);
+    let mut row = div().flex().flex_row().w_full().gap(theme.space_3);
+    let mut in_row = 0usize;
+
+    for (i, card) in cards.into_iter().enumerate() {
+        row = row.child(card);
+        in_row += 1;
+        if in_row == columns || i + 1 == total {
+            for _ in in_row..columns {
+                row = row.child(div().flex_1().min_w(px(0.0)));
+            }
+            col = col.child(row);
+            row = div().flex().flex_row().w_full().gap(theme.space_3);
+            in_row = 0;
+        }
+    }
+
+    col.into_any_element()
 }
 
 fn section_header(title: &str, description: &str, theme: &HiveTheme) -> AnyElement {
