@@ -1,12 +1,26 @@
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 use tracing::{info, warn};
 
-use super::{AppDatabase, HiveWorkspace, LogsClear, LogsSetFilter, LogsToggleAutoScroll};
+use super::{
+    AppDatabase, HiveWorkspace, LogsClear, LogsSetFilter, LogsSetSearchQuery, LogsToggleAutoScroll,
+    destructive_actions,
+};
 
 pub(super) fn handle_logs_clear(
     workspace: &mut HiveWorkspace,
     _action: &LogsClear,
-    _window: &mut Window,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let confirmation = DestructiveConfirmation::for_action(DestructiveActionKind::LogsClear {
+        entries: workspace.logs_data.entries.len(),
+    });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_logs_clear(
+    workspace: &mut HiveWorkspace,
     cx: &mut Context<HiveWorkspace>,
 ) {
     info!("Logs: clear");
@@ -35,6 +49,21 @@ pub(super) fn handle_logs_set_filter(
         "info" => LogLevel::Info,
         _ => LogLevel::Debug,
     };
+    cx.notify();
+}
+
+pub(super) fn handle_logs_set_search_query(
+    workspace: &mut HiveWorkspace,
+    action: &LogsSetSearchQuery,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    workspace.logs_data.set_search(action.query.clone());
+    if workspace.logs_search_input.read(cx).value() != action.query {
+        workspace.logs_search_input.update(cx, |input, cx| {
+            input.set_value(action.query.clone(), window, cx);
+        });
+    }
     cx.notify();
 }
 

@@ -3,7 +3,7 @@ use gpui_component::switch::Switch;
 use gpui_component::{Icon, IconName};
 
 use hive_shield::UserRule;
-use hive_ui_core::HiveTheme;
+use hive_ui_core::{HiveTheme, ShieldDeleteRule};
 
 // ---------------------------------------------------------------------------
 // Actions
@@ -16,7 +16,6 @@ actions!(
         ShieldToggleSecretScan,
         ShieldToggleVulnCheck,
         ShieldTogglePii,
-        ShieldAddRule,
     ]
 );
 
@@ -286,11 +285,6 @@ impl Render for ShieldView {
                 cx.emit(ShieldConfigChanged);
                 cx.notify();
             }))
-            .on_action(cx.listener(|this: &mut Self, _: &ShieldAddRule, _, cx| {
-                this.user_rules.push(UserRule::new("New Rule", r"pattern"));
-                cx.emit(ShieldConfigChanged);
-                cx.notify();
-            }))
             // Children
             .child(render_header(self.shield_enabled, &theme))
             .child(self.render_controls(&theme, cx))
@@ -475,24 +469,7 @@ impl ShieldView {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .child(div().flex_1().child(section_title("Custom Rules", theme)))
-                    .child(
-                        div()
-                            .px(theme.space_3)
-                            .py(theme.space_1)
-                            .rounded(theme.radius_md)
-                            .bg(theme.accent_green.opacity(0.1))
-                            .border_1()
-                            .border_color(theme.accent_green.opacity(0.2))
-                            .text_size(theme.font_size_xs)
-                            .text_color(theme.accent_green)
-                            .font_weight(FontWeight::MEDIUM)
-                            .cursor_pointer()
-                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                                window.dispatch_action(Box::new(ShieldAddRule), cx);
-                            })
-                            .child("+ Add Rule"),
-                    ),
+                    .child(div().flex_1().child(section_title("Custom Rules", theme))),
             )
             .child(section_desc(
                 "Block messages matching custom regex patterns.",
@@ -511,7 +488,7 @@ impl ShieldView {
                         div()
                             .text_size(theme.font_size_sm)
                             .text_color(theme.text_muted)
-                            .child("No custom rules yet. Add patterns to block specific content."),
+                            .child("No custom rules configured."),
                     ),
             );
         } else {
@@ -530,10 +507,8 @@ impl ShieldView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let rule_id_toggle = rule.id.clone();
-        let rule_id_delete = rule.id.clone();
         let rule_id_delete2 = rule.id.clone();
         let entity = cx.entity().clone();
-        let entity2 = entity.clone();
         let active = rule.active;
         let name_color = if active {
             theme.text_primary
@@ -599,12 +574,13 @@ impl ShieldView {
                     .hover(|s| s.bg(theme.accent_red.opacity(0.1)))
                     .text_size(theme.font_size_xs)
                     .text_color(theme.accent_red)
-                    .on_click(move |_, _window, cx| {
-                        entity2.update(cx, |this, cx| {
-                            this.user_rules.retain(|r| r.id != rule_id_delete);
-                            cx.emit(ShieldConfigChanged);
-                            cx.notify();
-                        });
+                    .on_click(move |_, window, cx| {
+                        window.dispatch_action(
+                            Box::new(ShieldDeleteRule {
+                                rule_id: rule_id_delete2.clone(),
+                            }),
+                            cx,
+                        );
                     })
                     .child("\u{2715}"),
             )

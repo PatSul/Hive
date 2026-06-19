@@ -376,20 +376,28 @@ pub(super) fn handle_skills_set_tab(
 pub(super) fn handle_skills_set_search(
     workspace: &mut HiveWorkspace,
     action: &SkillsSetSearch,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
     workspace.skills_data.search_query = action.query.clone();
+    if workspace.skills_search_input.read(cx).value() != action.query {
+        workspace.skills_search_input.update(cx, |input, cx| {
+            input.set_value(action.query.clone(), window, cx);
+        });
+    }
     cx.notify();
 }
 
 pub(super) fn handle_skills_clear_search(
     workspace: &mut HiveWorkspace,
     _action: &SkillsClearSearch,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
     workspace.skills_data.search_query.clear();
+    workspace.skills_search_input.update(cx, |input, cx| {
+        input.set_value(String::new(), window, cx);
+    });
     cx.notify();
 }
 

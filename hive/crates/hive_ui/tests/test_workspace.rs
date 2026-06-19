@@ -24,25 +24,25 @@ fn test_set_active_panel_all_panels() {
     }
 }
 
-/// Verify ctrl-1..ctrl-9,ctrl-0 keyboard mapping matches the current panel
-/// order used by `Panel::from_index`.
+/// Verify ctrl-1..ctrl-9,ctrl-0 keyboard mapping matches the visible shell
+/// order used by `Panel::from_shortcut_index`.
 #[test]
 fn test_keyboard_panel_mapping() {
     let expected: [(usize, Panel); 10] = [
-        (1, Panel::Chat),
-        (2, Panel::History),
+        (1, Panel::QuickStart),
+        (2, Panel::Chat),
         (3, Panel::Files),
-        (4, Panel::CodeMap),
-        (5, Panel::PromptLibrary),
-        (6, Panel::Specs),
-        (7, Panel::Agents),
-        (8, Panel::Workflows),
-        (9, Panel::Channels),
-        (0, Panel::Kanban),
+        (4, Panel::History),
+        (5, Panel::Specs),
+        (6, Panel::Agents),
+        (7, Panel::Workflows),
+        (8, Panel::Kanban),
+        (9, Panel::Activity),
+        (0, Panel::Settings),
     ];
     for (key, expected_panel) in expected {
         let idx = if key == 0 { 9 } else { key - 1 };
-        let panel = Panel::from_index(idx).expect("panel should exist");
+        let panel = Panel::from_shortcut_index(idx).expect("panel should exist");
         assert_eq!(panel, expected_panel, "ctrl-{key} mismatch");
     }
 }

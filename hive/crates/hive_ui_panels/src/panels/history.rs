@@ -1,6 +1,7 @@
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, Utc};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
 use hive_core::ConversationSummary;
@@ -169,7 +170,11 @@ pub struct HistoryPanel;
 
 impl HistoryPanel {
     /// Renders the full history panel from pre-loaded `HistoryData`.
-    pub fn render(data: &HistoryData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &HistoryData,
+        search_input: &Entity<InputState>,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         let filtered = data.filtered();
         let filtered_count = filtered.len();
         let total = data.total_count();
@@ -195,7 +200,7 @@ impl HistoryPanel {
                     .border_1()
                     .border_color(theme.border)
                     .child(render_header(
-                        &data.search_query,
+                        search_input,
                         data.confirming_clear,
                         !data.conversations.is_empty(),
                         theme,
@@ -215,7 +220,7 @@ impl HistoryPanel {
 // ---------------------------------------------------------------------------
 
 fn render_header(
-    search_query: &str,
+    search_input: &Entity<InputState>,
     confirming_clear: bool,
     has_conversations: bool,
     theme: &HiveTheme,
@@ -277,7 +282,7 @@ fn render_header(
                 ),
         )
         // Search input
-        .child(render_search_field(search_query, theme));
+        .child(render_search_field(search_input, theme));
 
     // Confirmation bar
     if confirming_clear {
@@ -344,19 +349,7 @@ fn render_clear_confirmation(theme: &HiveTheme) -> impl IntoElement {
         )
 }
 
-fn render_search_field(search_query: &str, theme: &HiveTheme) -> impl IntoElement {
-    let placeholder = if search_query.is_empty() {
-        "Search conversations..."
-    } else {
-        search_query
-    };
-
-    let text_color = if search_query.is_empty() {
-        theme.text_muted
-    } else {
-        theme.text_primary
-    };
-
+fn render_search_field(search_input: &Entity<InputState>, theme: &HiveTheme) -> impl IntoElement {
     div()
         .flex()
         .items_center()
@@ -374,10 +367,12 @@ fn render_search_field(search_query: &str, theme: &HiveTheme) -> impl IntoElemen
                 .child(Icon::new(IconName::Search).size_3p5()),
         )
         .child(
-            div()
-                .text_size(theme.font_size_sm)
-                .text_color(text_color)
-                .child(placeholder.to_string()),
+            div().flex_1().child(
+                Input::new(search_input)
+                    .appearance(false)
+                    .cleanable(true)
+                    .text_size(theme.font_size_sm),
+            ),
         )
 }
 

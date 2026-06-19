@@ -1,5 +1,6 @@
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::HiveTheme;
@@ -437,7 +438,11 @@ impl SkillsData {
 pub struct SkillsPanel;
 
 impl SkillsPanel {
-    pub fn render(data: &SkillsData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &SkillsData,
+        search_input: &Entity<InputState>,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         let enabled_count = data.installed.iter().filter(|s| s.enabled).count();
 
         let mut panel = div()
@@ -453,7 +458,7 @@ impl SkillsPanel {
         } else {
             panel = panel
                 .child(render_tab_bar(&data.active_tab, theme))
-                .child(render_search_field(&data.search_query, theme))
+                .child(render_search_field(&data.search_query, search_input, theme))
                 .child(render_tab_content(data, theme));
         }
 
@@ -656,19 +661,11 @@ fn tab_pill(label: &str, active: bool, theme: &HiveTheme) -> AnyElement {
 // Search field (shows current query or placeholder)
 // ---------------------------------------------------------------------------
 
-fn render_search_field(search_query: &str, theme: &HiveTheme) -> AnyElement {
-    let display_text = if search_query.is_empty() {
-        "Search skills...".to_string()
-    } else {
-        search_query.to_string()
-    };
-
-    let text_color = if search_query.is_empty() {
-        theme.text_muted
-    } else {
-        theme.text_primary
-    };
-
+fn render_search_field(
+    search_query: &str,
+    search_input: &Entity<InputState>,
+    theme: &HiveTheme,
+) -> AnyElement {
     let has_query = !search_query.is_empty();
 
     div()
@@ -691,11 +688,12 @@ fn render_search_field(search_query: &str, theme: &HiveTheme) -> AnyElement {
                         .child(Icon::new(IconName::Search).size_3p5()),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .text_size(theme.font_size_sm)
-                        .text_color(text_color)
-                        .child(display_text),
+                    div().flex_1().child(
+                        Input::new(search_input)
+                            .appearance(false)
+                            .cleanable(true)
+                            .text_size(theme.font_size_sm),
+                    ),
                 )
                 .when(has_query, |el: Div| {
                     el.child(

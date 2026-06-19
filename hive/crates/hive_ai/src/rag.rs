@@ -87,6 +87,7 @@ fn term_frequency(tokens: &[String]) -> HashMap<String, f32> {
 }
 
 /// Compute inverse document frequency (IDF) for terms across documents.
+#[cfg(test)]
 fn inverse_document_frequency(term: &str, document_token_sets: &[HashSet<String>]) -> f32 {
     let n = document_token_sets.len() as f32;
     if n == 0.0 {
@@ -145,8 +146,6 @@ pub struct RagService {
     overlap: usize,
     /// Cached IDF values for all terms across indexed documents.
     cached_idf: HashMap<String, f32>,
-    /// Cached token sets per document chunk (parallel to `index`).
-    cached_doc_tokens: Vec<HashSet<String>>,
     /// Cached TF-IDF vectors per document chunk (parallel to `index`).
     cached_tfidf_vectors: Vec<HashMap<String, f32>>,
 }
@@ -162,7 +161,6 @@ impl RagService {
             chunk_size: chunk_size.max(1),
             overlap: overlap.min(chunk_size.saturating_sub(1)),
             cached_idf: HashMap::new(),
-            cached_doc_tokens: Vec::new(),
             cached_tfidf_vectors: Vec::new(),
         }
     }
@@ -173,16 +171,36 @@ impl RagService {
         self.rebuild_cache();
     }
 
+    /// Split multiple files into chunks and rebuild the search cache once.
+    ///
+    /// Use this for full-project or other batch indexing jobs. Calling
+    /// `index_file` in a loop rebuilds the global TF-IDF cache after every
+    /// file, which becomes increasingly expensive as the index grows.
+    pub fn index_files<'a, I>(&mut self, files: I) -> usize
+    where
+        I: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let mut indexed_files = 0;
+        for (path, content) in files {
+            if self.add_file_chunks(path, content) > 0 {
+                indexed_files += 1;
+            }
+        }
+        self.rebuild_cache();
+        indexed_files
+    }
+
     /// Add chunks for a file without rebuilding the cache.
     /// Use `rebuild_cache()` after batch additions.
-    fn add_file_chunks(&mut self, path: &str, content: &str) {
+    fn add_file_chunks(&mut self, path: &str, content: &str) -> usize {
         let lines: Vec<&str> = content.lines().collect();
         if lines.is_empty() {
-            return;
+            return 0;
         }
 
         let step = self.chunk_size.saturating_sub(self.overlap).max(1);
         let mut start = 0;
+        let start_chunks = self.index.len();
 
         while start < lines.len() {
             let end = (start + self.chunk_size).min(lines.len());
@@ -207,45 +225,45 @@ impl RagService {
             "Indexed file '{}': {} lines, {} chunks",
             path,
             lines.len(),
-            self.index.iter().filter(|c| c.source_file == path).count()
+            self.index.len() - start_chunks
         );
+
+        self.index.len() - start_chunks
     }
 
     /// Rebuild cached IDF map, document token sets, and TF-IDF vectors.
     fn rebuild_cache(&mut self) {
-        // Build token sets for all chunks.
-        self.cached_doc_tokens = self
+        let mut document_frequency: HashMap<String, usize> = HashMap::new();
+        let tokenized_chunks: Vec<Vec<String>> = self
             .index
             .iter()
-            .map(|chunk| tokenize(&chunk.content).into_iter().collect())
+            .map(|chunk| {
+                let tokens = tokenize(&chunk.content);
+                let unique_terms: HashSet<String> = tokens.iter().cloned().collect();
+                for term in unique_terms {
+                    *document_frequency.entry(term).or_insert(0) += 1;
+                }
+                tokens
+            })
             .collect();
 
-        // Collect all unique terms.
-        let all_terms: HashSet<String> = self
-            .cached_doc_tokens
-            .iter()
-            .flat_map(|s| s.iter().cloned())
-            .collect();
-
-        // Compute IDF for all terms.
-        self.cached_idf = all_terms
-            .iter()
-            .map(|term| {
-                (
-                    term.clone(),
-                    inverse_document_frequency(term, &self.cached_doc_tokens),
-                )
+        let total_docs = tokenized_chunks.len() as f32;
+        self.cached_idf = document_frequency
+            .into_iter()
+            .map(|(term, df)| {
+                let idf = if total_docs == 0.0 || df == 0 {
+                    0.0
+                } else {
+                    (total_docs / df as f32).ln() + 1.0
+                };
+                (term, idf)
             })
             .collect();
 
         // Compute TF-IDF vector for each chunk.
-        self.cached_tfidf_vectors = self
-            .cached_doc_tokens
+        self.cached_tfidf_vectors = tokenized_chunks
             .iter()
-            .map(|token_set| {
-                let tokens: Vec<String> = token_set.iter().cloned().collect();
-                tfidf_vector(&tokens, &self.cached_idf)
-            })
+            .map(|tokens| tfidf_vector(tokens, &self.cached_idf))
             .collect();
     }
 
@@ -389,7 +407,6 @@ impl RagService {
     pub fn clear_index(&mut self) {
         self.index.clear();
         self.cached_idf.clear();
-        self.cached_doc_tokens.clear();
         self.cached_tfidf_vectors.clear();
     }
 
@@ -503,6 +520,33 @@ mod tests {
         let mut service = RagService::default();
         service.index_file("empty.rs", "");
         assert_eq!(service.index.len(), 0);
+    }
+
+    #[test]
+    fn test_index_files_batches_cache_rebuild() {
+        let mut service = RagService::new(5, 0);
+        let indexed = service.index_files([
+            ("math.rs", "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}"),
+            (
+                "greet.rs",
+                "fn greet(name: &str) {\n    println!(\"Hello {}\", name);\n}",
+            ),
+        ]);
+
+        assert_eq!(indexed, 2);
+        assert_eq!(service.stats().total_files, 2);
+        assert_eq!(service.cached_tfidf_vectors.len(), service.chunks().len());
+        assert!(!service.cached_idf.is_empty());
+
+        let result = service
+            .query(&RagQuery {
+                query: "add numbers".to_string(),
+                max_results: 5,
+                min_similarity: 0.0,
+            })
+            .unwrap();
+        assert!(!result.chunks.is_empty());
+        assert_eq!(result.chunks[0].chunk.source_file, "math.rs");
     }
 
     #[test]

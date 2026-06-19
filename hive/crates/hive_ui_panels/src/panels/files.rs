@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -453,7 +454,11 @@ pub struct FilesPanel;
 
 impl FilesPanel {
     /// Top-level render. Accepts `FilesData` (real filesystem data) and the theme.
-    pub fn render(data: &FilesData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &FilesData,
+        search_input: &Entity<InputState>,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         let entries = data.filtered_sorted_entries();
         let dir_count = entries.iter().filter(|e| e.is_directory).count();
         let file_count = entries.len() - dir_count;
@@ -473,7 +478,7 @@ impl FilesPanel {
             // 1. Header (title + breadcrumb)
             .child(Self::header(data, theme))
             // 2. Search bar
-            .child(Self::search_bar(&data.search_query, theme))
+            .child(Self::search_bar(search_input, theme))
             // 3. File tree (scrollable)
             .child(Self::file_tree(
                 &entries,
@@ -776,18 +781,7 @@ impl FilesPanel {
     // 2. Search bar
     // ------------------------------------------------------------------
 
-    fn search_bar(query: &str, theme: &HiveTheme) -> impl IntoElement {
-        let placeholder = if query.is_empty() {
-            "Search files...".to_string()
-        } else {
-            query.to_string()
-        };
-        let text_color = if query.is_empty() {
-            theme.text_muted
-        } else {
-            theme.text_primary
-        };
-
+    fn search_bar(search_input: &Entity<InputState>, theme: &HiveTheme) -> impl IntoElement {
         div()
             .px(theme.space_3)
             .py(theme.space_2)
@@ -812,11 +806,12 @@ impl FilesPanel {
                             .text_color(theme.text_muted),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .text_size(theme.font_size_sm)
-                            .text_color(text_color)
-                            .child(placeholder),
+                        div().flex_1().child(
+                            Input::new(search_input)
+                                .appearance(false)
+                                .cleanable(true)
+                                .text_size(theme.font_size_sm),
+                        ),
                     ),
             )
     }

@@ -9,9 +9,7 @@ use hive_core::session::SessionState;
 use hive_core::theme_manager::ThemeManager;
 use hive_ui_core::{AppHiveMemory, AppKnowledgeFiles, AppQuickIndex, AppRagService, HiveTheme};
 
-use super::{
-    quick_start_actions, HiveWorkspace, MAX_PINNED_WORKSPACES, MAX_RECENT_WORKSPACES,
-};
+use super::{HiveWorkspace, MAX_PINNED_WORKSPACES, MAX_RECENT_WORKSPACES, quick_start_actions};
 
 /// Resolve a `HiveTheme` from a theme name string.
 ///
@@ -179,6 +177,10 @@ pub(super) fn project_label(workspace: &HiveWorkspace) -> String {
     )
 }
 
+const MAX_BACKGROUND_INDEX_FILES: usize = 400;
+const MAX_BACKGROUND_INDEX_FILE_BYTES: u64 = 256 * 1024;
+const MAX_BACKGROUND_INDEX_TOTAL_BYTES: u64 = 24 * 1024 * 1024;
+
 pub(super) fn start_background_project_indexing(
     workspace: &HiveWorkspace,
     cx: &mut Context<HiveWorkspace>,
@@ -198,34 +200,56 @@ pub(super) fn start_background_project_indexing(
     std::thread::Builder::new()
         .name("hive-indexer".into())
         .spawn(move || {
-            let entries = hive_ai::memory::BackgroundIndexer::collect_indexable_files(&project_root);
+            let entries =
+                hive_ai::memory::BackgroundIndexer::collect_indexable_files(&project_root);
             let path_str = project_root.to_string_lossy().to_string();
+            let mut total_bytes = 0u64;
+            let mut skipped_large = 0usize;
+            let mut skipped_budget = 0usize;
             let indexed_files: Vec<(String, String)> = entries
                 .iter()
+                .take(MAX_BACKGROUND_INDEX_FILES)
                 .filter_map(|entry_path| {
-                    std::fs::read_to_string(entry_path).ok().map(|content| {
-                        let rel = entry_path
-                            .strip_prefix(&project_root)
-                            .unwrap_or(entry_path)
-                            .to_string_lossy()
-                            .to_string();
-                        (rel, content)
-                    })
+                    let file_len = entry_path.metadata().ok()?.len();
+                    if file_len > MAX_BACKGROUND_INDEX_FILE_BYTES {
+                        skipped_large += 1;
+                        return None;
+                    }
+                    if total_bytes.saturating_add(file_len) > MAX_BACKGROUND_INDEX_TOTAL_BYTES {
+                        skipped_budget += 1;
+                        return None;
+                    }
+                    let content = std::fs::read_to_string(entry_path).ok()?;
+                    total_bytes = total_bytes.saturating_add(content.len() as u64);
+                    let rel = entry_path
+                        .strip_prefix(&project_root)
+                        .unwrap_or(entry_path)
+                        .to_string_lossy()
+                        .to_string();
+                    Some((rel, content))
                 })
                 .collect();
+            let skipped_count = entries
+                .len()
+                .saturating_sub(MAX_BACKGROUND_INDEX_FILES.min(entries.len()));
 
             if let Some(rag_service) = rag_service
                 && let Ok(mut rag) = rag_service.lock()
             {
                 rag.clear_index();
-                for (rel, content) in &indexed_files {
-                    rag.index_file(rel, content);
-                }
+                let indexed_count = rag.index_files(
+                    indexed_files
+                        .iter()
+                        .map(|(rel, content)| (rel.as_str(), content.as_str())),
+                );
                 info!(
-                    "RAG indexer: indexed {}/{} files from {}",
-                    indexed_files.len(),
+                    "RAG indexer: indexed {}/{} files from {} ({} skipped by count, {} large, {} over memory budget)",
+                    indexed_count,
                     entries.len(),
-                    path_str
+                    path_str,
+                    skipped_count,
+                    skipped_large,
+                    skipped_budget
                 );
             }
 
@@ -243,9 +267,12 @@ pub(super) fn start_background_project_indexing(
                             }
                         }
                         info!(
-                            "Background indexer: indexed {count}/{} files from {}",
+                            "Background indexer: indexed {count}/{} files from {} ({} skipped by count, {} large, {} over memory budget)",
                             entries.len(),
-                            path_str
+                            path_str,
+                            skipped_count,
+                            skipped_large,
+                            skipped_budget
                         );
                     });
                 }
@@ -255,15 +282,17 @@ pub(super) fn start_background_project_indexing(
 }
 
 pub(super) fn schedule_background_project_indexing(cx: &mut Context<HiveWorkspace>) {
-    cx.spawn(async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
-        app.background_executor()
-            .timer(std::time::Duration::from_millis(1500))
-            .await;
+    cx.spawn(
+        async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+            app.background_executor()
+                .timer(std::time::Duration::from_millis(1500))
+                .await;
 
-        let _ = this.update(app, |this, cx| {
-            start_background_project_indexing(this, cx);
-        });
-    })
+            let _ = this.update(app, |this, cx| {
+                start_background_project_indexing(this, cx);
+            });
+        },
+    )
     .detach();
 }
 
@@ -281,7 +310,8 @@ pub(super) fn apply_project_context(
         workspace.save_session(cx);
 
         // Re-scan knowledge files for the new project root.
-        let knowledge_sources = hive_ai::KnowledgeFileScanner::scan(&workspace.current_project_root);
+        let knowledge_sources =
+            hive_ai::KnowledgeFileScanner::scan(&workspace.current_project_root);
         if !knowledge_sources.is_empty() {
             info!(
                 "Re-scanned {} project knowledge file(s) for {}",
@@ -315,7 +345,10 @@ pub(super) fn apply_project_context(
         workspace._quick_index_task = Some(cx.spawn(
             async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
                 loop {
-                    if let Some(qi) = slot_for_poll.lock().unwrap_or_else(|e| e.into_inner()).take()
+                    if let Some(qi) = slot_for_poll
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .take()
                     {
                         let _ = this.update(app, |this, cx| {
                             this.quick_index = Some(qi.clone());
@@ -372,7 +405,14 @@ pub(super) fn apply_project_context(
                             | "yml"
                             | "json"
                     );
-                    if indexable && let Ok(content) = std::fs::read_to_string(&path) {
+                    let within_size_budget = path
+                        .metadata()
+                        .map(|meta| meta.len() <= MAX_BACKGROUND_INDEX_FILE_BYTES)
+                        .unwrap_or(false);
+                    if indexable
+                        && within_size_budget
+                        && let Ok(content) = std::fs::read_to_string(&path)
+                    {
                         let rel = path
                             .strip_prefix(&project_root)
                             .unwrap_or(&path)

@@ -3,7 +3,10 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use gpui_component::{Icon, IconName};
+use gpui_component::{
+    Icon, IconName,
+    input::{Input, InputState},
+};
 use tracing::warn;
 
 use hive_fs::git::{FileStatusType, GitService};
@@ -296,6 +299,16 @@ pub struct GitflowData {
     pub active_releases: Vec<String>,
     pub active_hotfixes: Vec<String>,
     pub new_name: String,
+}
+
+pub struct ReviewPanelInputs {
+    pub commit_message: Entity<InputState>,
+    pub pr_title: Entity<InputState>,
+    pub pr_body: Entity<InputState>,
+    pub pr_base: Entity<InputState>,
+    pub branch_name: Entity<InputState>,
+    pub lfs_pattern: Entity<InputState>,
+    pub gitflow_name: Entity<InputState>,
 }
 
 impl Default for GitflowData {
@@ -725,7 +738,11 @@ impl ReviewData {
 pub struct ReviewPanel;
 
 impl ReviewPanel {
-    pub fn render(data: &ReviewData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &ReviewData,
+        inputs: &ReviewPanelInputs,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         if !data.is_repo {
             return Self::empty_state(theme).into_any_element();
         }
@@ -747,22 +764,22 @@ impl ReviewPanel {
                     .child(Self::comments_card(data, theme))
                     .child(Self::recent_commits_card(data, theme))
                     .child(Self::review_actions(data, theme))
-                    .child(Self::git_actions(data, theme))
+                    .child(Self::git_actions(data, inputs, theme))
             })
             .when(data.active_tab == GitOpsTab::Push, |el| {
                 el.child(Self::render_push_tab(data, theme))
             })
             .when(data.active_tab == GitOpsTab::PullRequests, |el| {
-                el.child(Self::render_pr_tab(data, theme))
+                el.child(Self::render_pr_tab(data, inputs, theme))
             })
             .when(data.active_tab == GitOpsTab::Branches, |el| {
-                el.child(Self::render_branches_tab(data, theme))
+                el.child(Self::render_branches_tab(data, inputs, theme))
             })
             .when(data.active_tab == GitOpsTab::Lfs, |el| {
-                el.child(Self::render_lfs_tab(data, theme))
+                el.child(Self::render_lfs_tab(data, inputs, theme))
             })
             .when(data.active_tab == GitOpsTab::Gitflow, |el| {
-                el.child(Self::render_gitflow_tab(data, theme))
+                el.child(Self::render_gitflow_tab(data, inputs, theme))
             })
             .into_any_element()
     }
@@ -1610,7 +1627,11 @@ impl ReviewPanel {
     // Git action buttons (Stage / Unstage / Commit / Discard)
     // ------------------------------------------------------------------
 
-    fn git_actions(data: &ReviewData, theme: &HiveTheme) -> impl IntoElement {
+    fn git_actions(
+        data: &ReviewData,
+        inputs: &ReviewPanelInputs,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -1660,27 +1681,7 @@ impl ReviewPanel {
                                     }),
                             ),
                     )
-                    .child(
-                        div()
-                            .px(theme.space_3)
-                            .py(theme.space_2)
-                            .rounded(theme.radius_sm)
-                            .bg(theme.bg_primary)
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_size(theme.font_size_sm)
-                            .text_color(if data.ai_commit.user_edited_message.is_empty() {
-                                theme.text_muted
-                            } else {
-                                theme.text_primary
-                            })
-                            .min_h(px(60.0))
-                            .child(if data.ai_commit.user_edited_message.is_empty() {
-                                "(type or AI-generate a commit message)".to_string()
-                            } else {
-                                data.ai_commit.user_edited_message.clone()
-                            }),
-                    ),
+                    .child(Self::form_input(&inputs.commit_message, px(60.0), theme)),
             )
             // Action buttons row
             .child(
@@ -1931,7 +1932,7 @@ impl ReviewPanel {
     // Pull Requests tab
     // ------------------------------------------------------------------
 
-    fn render_pr_tab(data: &ReviewData, theme: &HiveTheme) -> Div {
+    fn render_pr_tab(data: &ReviewData, inputs: &ReviewPanelInputs, theme: &HiveTheme) -> Div {
         let pr = &data.pr_data;
         let mut content = div().flex().flex_col().gap_4();
 
@@ -2005,22 +2006,7 @@ impl ReviewPanel {
                                 .text_color(theme.text_muted)
                                 .child("Title"),
                         )
-                        .child(
-                            div()
-                                .px_3()
-                                .py_2()
-                                .rounded_md()
-                                .bg(theme.bg_primary)
-                                .border_1()
-                                .border_color(theme.border)
-                                .text_size(rems(0.8125))
-                                .text_color(theme.text_primary)
-                                .child(if pr.pr_form.title.is_empty() {
-                                    "(click AI Generate to fill)".to_string()
-                                } else {
-                                    pr.pr_form.title.clone()
-                                }),
-                        ),
+                        .child(Self::form_input(&inputs.pr_title, px(36.0), theme)),
                 )
                 // Body
                 .child(
@@ -2034,23 +2020,7 @@ impl ReviewPanel {
                                 .text_color(theme.text_muted)
                                 .child("Body / Release Notes"),
                         )
-                        .child(
-                            div()
-                                .px_3()
-                                .py_2()
-                                .rounded_md()
-                                .bg(theme.bg_primary)
-                                .border_1()
-                                .border_color(theme.border)
-                                .text_size(rems(0.75))
-                                .text_color(theme.text_secondary)
-                                .min_h(px(80.))
-                                .child(if pr.pr_form.body.is_empty() {
-                                    "(AI will generate release notes here)".to_string()
-                                } else {
-                                    pr.pr_form.body.clone()
-                                }),
-                        ),
+                        .child(Self::form_input(&inputs.pr_body, px(80.0), theme)),
                 )
                 // Base branch + Create button
                 .child(
@@ -2063,8 +2033,13 @@ impl ReviewPanel {
                             div()
                                 .text_size(rems(0.75))
                                 .text_color(theme.text_muted)
-                                .child(format!("Base: {}", pr.pr_form.base_branch)),
+                                .child("Base"),
                         )
+                        .child(div().w(px(180.0)).child(Self::form_input(
+                            &inputs.pr_base,
+                            px(36.0),
+                            theme,
+                        )))
                         .child(
                             div()
                                 .text_size(rems(0.75))
@@ -2152,7 +2127,11 @@ impl ReviewPanel {
     // Branches tab
     // ------------------------------------------------------------------
 
-    fn render_branches_tab(data: &ReviewData, theme: &HiveTheme) -> Div {
+    fn render_branches_tab(
+        data: &ReviewData,
+        inputs: &ReviewPanelInputs,
+        theme: &HiveTheme,
+    ) -> Div {
         let bd = &data.branches_data;
         let mut content = div().flex().flex_col().gap_4();
 
@@ -2280,23 +2259,11 @@ impl ReviewPanel {
                         .text_color(theme.text_muted)
                         .child("New branch:"),
                 )
-                .child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .rounded_md()
-                        .bg(theme.bg_primary)
-                        .border_1()
-                        .border_color(theme.border)
-                        .text_size(rems(0.8125))
-                        .text_color(theme.text_primary)
-                        .min_w(px(200.))
-                        .child(if bd.new_branch_name.is_empty() {
-                            "(type branch name)".to_string()
-                        } else {
-                            bd.new_branch_name.clone()
-                        }),
-                )
+                .child(div().min_w(px(200.0)).child(Self::form_input(
+                    &inputs.branch_name,
+                    px(36.0),
+                    theme,
+                )))
                 .child(
                     div()
                         .id("create-branch-btn")
@@ -2321,7 +2288,7 @@ impl ReviewPanel {
     // LFS tab
     // ------------------------------------------------------------------
 
-    fn render_lfs_tab(data: &ReviewData, theme: &HiveTheme) -> Div {
+    fn render_lfs_tab(data: &ReviewData, inputs: &ReviewPanelInputs, theme: &HiveTheme) -> Div {
         let lfs = &data.lfs_data;
         let mut content = div().flex().flex_col().gap_4();
 
@@ -2390,23 +2357,11 @@ impl ReviewPanel {
                 .gap_2()
                 .mt_2()
                 .items_center()
-                .child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .rounded_md()
-                        .bg(theme.bg_primary)
-                        .border_1()
-                        .border_color(theme.border)
-                        .text_size(rems(0.8125))
-                        .text_color(theme.text_primary)
-                        .min_w(px(200.))
-                        .child(if lfs.new_pattern.is_empty() {
-                            "*.ext".to_string()
-                        } else {
-                            lfs.new_pattern.clone()
-                        }),
-                )
+                .child(div().min_w(px(200.0)).child(Self::form_input(
+                    &inputs.lfs_pattern,
+                    px(36.0),
+                    theme,
+                )))
                 .child(
                     div()
                         .id("lfs-track-btn")
@@ -2523,7 +2478,7 @@ impl ReviewPanel {
     // Gitflow tab
     // ------------------------------------------------------------------
 
-    fn render_gitflow_tab(data: &ReviewData, theme: &HiveTheme) -> Div {
+    fn render_gitflow_tab(data: &ReviewData, inputs: &ReviewPanelInputs, theme: &HiveTheme) -> Div {
         let gf = &data.gitflow_data;
         let mut content = div().flex().flex_col().gap_4();
 
@@ -2716,23 +2671,11 @@ impl ReviewPanel {
                                 .text_color(theme.text_muted)
                                 .child("Name:"),
                         )
-                        .child(
-                            div()
-                                .px_3()
-                                .py_2()
-                                .rounded_md()
-                                .bg(theme.bg_primary)
-                                .border_1()
-                                .border_color(theme.border)
-                                .text_size(rems(0.8125))
-                                .text_color(theme.text_primary)
-                                .min_w(px(200.))
-                                .child(if gf.new_name.is_empty() {
-                                    "(enter name)".to_string()
-                                } else {
-                                    gf.new_name.clone()
-                                }),
-                        ),
+                        .child(div().min_w(px(200.0)).child(Self::form_input(
+                            &inputs.gitflow_name,
+                            px(36.0),
+                            theme,
+                        ))),
                 )
                 .child(
                     div()
@@ -2835,5 +2778,14 @@ impl ReviewPanel {
             .cursor_pointer()
             .hover(|style: StyleRefinement| style.bg(theme.bg_tertiary))
             .child(label.to_string())
+    }
+
+    fn form_input(input: &Entity<InputState>, min_height: Pixels, theme: &HiveTheme) -> Div {
+        div().min_h(min_height).w_full().child(
+            Input::new(input)
+                .appearance(true)
+                .cleanable(true)
+                .text_size(theme.font_size_sm),
+        )
     }
 }

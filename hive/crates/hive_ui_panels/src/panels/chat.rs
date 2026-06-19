@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use gpui::*;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
@@ -54,7 +54,10 @@ enum InlineSegment {
 /// time the content changes.
 pub struct MarkdownCache {
     entries: HashMap<u64, MarkdownIR>,
+    order: VecDeque<u64>,
 }
+
+const MAX_MARKDOWN_CACHE_ENTRIES: usize = 200;
 
 impl Default for MarkdownCache {
     fn default() -> Self {
@@ -66,20 +69,34 @@ impl MarkdownCache {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            order: VecDeque::new(),
         }
     }
 
     /// Clear the entire cache (e.g. when switching conversations).
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.order.clear();
     }
 
     /// Get or parse the markdown IR for the given source content.
     fn get_or_parse(&mut self, source: &str) -> &MarkdownIR {
         let hash = Self::hash_content(source);
+        if !self.entries.contains_key(&hash) {
+            while self.entries.len() >= MAX_MARKDOWN_CACHE_ENTRIES {
+                if let Some(old_hash) = self.order.pop_front() {
+                    self.entries.remove(&old_hash);
+                } else {
+                    self.entries.clear();
+                    break;
+                }
+            }
+            self.entries.insert(hash, Self::parse_to_ir(source));
+            self.order.push_back(hash);
+        }
         self.entries
-            .entry(hash)
-            .or_insert_with(|| Self::parse_to_ir(source))
+            .get(&hash)
+            .expect("markdown cache entry should exist after insert")
     }
 
     fn hash_content(source: &str) -> u64 {
@@ -530,12 +547,13 @@ impl ChatPanel {
                 } else {
                     ThinkingPhase::Planning
                 };
-                content = content.child(render_thinking_indicator(phase, theme));
+                content = content.child(render_thinking_indicator(phase, 0, theme));
             }
             content = content.child(render_streaming_bubble(
                 &self.streaming_content,
                 self.streaming_thinking.as_deref(),
                 &self.current_model,
+                0,
                 theme,
             ));
         }
@@ -563,6 +581,7 @@ impl ChatPanel {
         streaming_content: &str,
         is_streaming: bool,
         current_model: &str,
+        animation_tick: u64,
         theme: &HiveTheme,
     ) -> AnyElement {
         if cached.display_messages.is_empty() && !is_streaming {
@@ -597,12 +616,17 @@ impl ChatPanel {
         if is_streaming {
             // Show thinking indicator when waiting for content
             if streaming_content.is_empty() {
-                content = content.child(render_thinking_indicator(ThinkingPhase::Thinking, theme));
+                content = content.child(render_thinking_indicator(
+                    ThinkingPhase::Thinking,
+                    animation_tick,
+                    theme,
+                ));
             }
             content = content.child(render_streaming_bubble_cached(
                 streaming_content,
                 None,
                 current_model,
+                animation_tick,
                 &mut cached.markdown_cache,
                 theme,
             ));
@@ -1017,6 +1041,7 @@ fn render_streaming_bubble_cached(
     content: &str,
     thinking: Option<&str>,
     model: &str,
+    animation_tick: u64,
     md_cache: &mut MarkdownCache,
     theme: &HiveTheme,
 ) -> AnyElement {
@@ -1061,7 +1086,7 @@ fn render_streaming_bubble_cached(
             div()
                 .text_size(theme.font_size_base)
                 .text_color(theme.text_muted)
-                .child("..."),
+                .child(waiting_placeholder(animation_tick)),
         );
     }
 
@@ -1072,6 +1097,7 @@ fn render_streaming_bubble(
     content: &str,
     thinking: Option<&str>,
     model: &str,
+    animation_tick: u64,
     theme: &HiveTheme,
 ) -> AnyElement {
     let mut bubble = div()
@@ -1119,11 +1145,21 @@ fn render_streaming_bubble(
             div()
                 .text_size(theme.font_size_base)
                 .text_color(theme.text_muted)
-                .child("..."),
+                .child(waiting_placeholder(animation_tick)),
         );
     }
 
     div().flex().w_full().child(bubble).into_any_element()
+}
+
+fn waiting_placeholder(animation_tick: u64) -> String {
+    let dots = match animation_tick % 4 {
+        0 => ".",
+        1 => "..",
+        2 => "...",
+        _ => "....",
+    };
+    format!("Waiting for model response{dots}")
 }
 
 // ---------------------------------------------------------------------------

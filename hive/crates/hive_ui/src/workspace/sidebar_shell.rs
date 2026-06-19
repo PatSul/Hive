@@ -4,8 +4,8 @@ use gpui_component::scroll::ScrollableElement;
 use gpui_component::{Icon, IconName};
 
 use super::{
-    navigation, project_context, HiveTheme, HiveWorkspace, OpenWorkspaceDirectory, Panel,
-    ShellDestination,
+    HiveTheme, HiveWorkspace, OpenWorkspaceDirectory, Panel, ShellDestination, navigation,
+    project_context,
 };
 
 pub(super) fn render_sidebar(
@@ -15,16 +15,13 @@ pub(super) fn render_sidebar(
     let theme = &workspace.theme;
     let active_panel = workspace.sidebar.active_panel;
     let active_destination = workspace.sidebar.active_destination;
+    let visible_panels: Vec<Panel> = active_destination
+        .panels()
+        .iter()
+        .copied()
+        .filter(|panel| panel.is_visible())
+        .collect();
     let project = project_context::project_label(workspace);
-    let utility_panels = [
-        Panel::Skills,
-        Panel::Routing,
-        Panel::RoutingMatrix,
-        Panel::Models,
-        Panel::TokenLaunch,
-        Panel::Settings,
-        Panel::Help,
-    ];
 
     div()
         .relative()
@@ -99,219 +96,22 @@ pub(super) fn render_sidebar(
                 .px(theme.space_2)
                 .py(theme.space_2)
                 .gap(theme.space_3)
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(theme.space_1)
-                        .child(
-                            div()
-                                .px(theme.space_2)
-                                .pb(px(2.0))
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.text_muted)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("Destinations"),
-                        )
-                        .children(ShellDestination::ALL.iter().copied().map(|destination| {
-                            render_shell_destination_item(
-                                destination,
-                                active_destination,
-                                theme,
-                                cx,
-                            )
-                        })),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(theme.space_1)
-                        .p(theme.space_2)
-                        .rounded(theme.radius_lg)
-                        .bg(theme.bg_tertiary)
-                        .border_1()
-                        .border_color(theme.border)
-                        .child(
-                            div()
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.text_muted)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("Current Space"),
-                        )
-                        .child(
-                            div()
-                                .text_size(theme.font_size_sm)
-                                .text_color(theme.text_primary)
-                                .font_weight(FontWeight::BOLD)
-                                .child(active_destination.label()),
-                        )
-                        .child(
-                            div()
-                                .text_size(theme.font_size_xs)
-                                .text_color(theme.text_secondary)
-                                .child(active_destination.description()),
-                        ),
-                )
-                // Only show the panel sub-list when the space has more than one
-                // panel. Home (and Assist) have a single panel that shares the
-                // space's name, so the sub-list would just duplicate the
-                // destination button above it.
-                .when(active_destination.panels().len() > 1, |el| {
+                .child(div().flex().flex_col().gap(theme.space_1).children(
+                    ShellDestination::ALL.iter().copied().map(|destination| {
+                        render_shell_destination_item(destination, active_destination, theme, cx)
+                    }),
+                ))
+                // Only show the panel sub-list when the area has more than one
+                // visible panel.
+                .when(visible_panels.len() > 1, |el| {
                     el.child(render_sidebar_section(
-                        "Inside This Space",
-                        active_destination.panels(),
+                        "Panels",
+                        &visible_panels,
                         active_panel,
                         theme,
                         cx,
                     ))
                 }),
-        )
-        .child(
-            div()
-                .px(theme.space_2)
-                .py(theme.space_2)
-                .border_t_1()
-                .border_color(theme.border)
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .justify_between()
-                        .gap(theme.space_2)
-                        .px(theme.space_2)
-                        .py(theme.space_2)
-                        .rounded(theme.radius_lg)
-                        .bg(if workspace.show_utility_drawer {
-                            theme.bg_tertiary
-                        } else {
-                            theme.bg_primary
-                        })
-                        .border_1()
-                        .border_color(if workspace.show_utility_drawer {
-                            theme.accent_aqua
-                        } else {
-                            theme.border
-                        })
-                        .cursor_pointer()
-                        .hover(|style| style.bg(theme.bg_tertiary))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
-                                this.show_utility_drawer = !this.show_utility_drawer;
-                                this.show_project_dropdown = false;
-                                this.show_command_palette = false;
-                                cx.notify();
-                            }),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(theme.space_2)
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .child(
-                                    Icon::new(IconName::Settings)
-                                        .size_4()
-                                        .text_color(theme.accent_aqua),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(2.0))
-                                        .min_w(px(0.0))
-                                        .child(
-                                            div()
-                                                .text_size(theme.font_size_sm)
-                                                .text_color(theme.text_primary)
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .child("Utilities"),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_size(theme.font_size_xs)
-                                                .text_color(theme.text_muted)
-                                                .child("Models, routing, skills, settings, and help."),
-                                        ),
-                                ),
-                        )
-                        .child(
-                            Icon::new(if workspace.show_utility_drawer {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .size_3p5()
-                            .text_color(theme.text_muted),
-                        ),
-                ),
-        )
-        .when(workspace.show_utility_drawer, |el| {
-            el.child(render_utility_drawer(
-                &utility_panels,
-                active_panel,
-                theme,
-                cx,
-            ))
-        })
-}
-
-fn render_utility_drawer(
-    utility_panels: &[Panel],
-    active_panel: Panel,
-    theme: &HiveTheme,
-    cx: &mut Context<HiveWorkspace>,
-) -> impl IntoElement {
-    div()
-        .absolute()
-        .left(theme.space_2)
-        .right(theme.space_2)
-        .bottom(px(76.0))
-        .rounded(theme.radius_lg)
-        .bg(theme.bg_secondary)
-        .border_1()
-        .border_color(theme.border)
-        .shadow_lg()
-        .on_mouse_down(MouseButton::Left, |_, _window, cx| {
-            cx.stop_propagation();
-        })
-        .child(
-            div()
-                .px(theme.space_3)
-                .py(theme.space_3)
-                .border_b_1()
-                .border_color(theme.border)
-                .child(
-                    div()
-                        .text_size(theme.font_size_sm)
-                        .text_color(theme.text_primary)
-                        .font_weight(FontWeight::BOLD)
-                        .child("Configure & Extend"),
-                )
-                .child(
-                    div()
-                        .text_size(theme.font_size_xs)
-                        .text_color(theme.text_muted)
-                        .child("Low-frequency tools stay here so the main rail can stay focused."),
-                ),
-        )
-        .child(
-            div()
-                .px(theme.space_2)
-                .py(theme.space_2)
-                .flex()
-                .flex_col()
-                .gap(theme.space_1)
-                .children(
-                    utility_panels
-                        .iter()
-                        .copied()
-                        .map(|panel| render_sidebar_item(panel, active_panel, theme, cx)),
-                ),
         )
 }
 

@@ -11,9 +11,9 @@ use hive_agents::automation::{
 };
 
 use super::{
-    agents_actions, AiProvider, AppAiService, AppAutomation, AppChannels, AppNotification,
-    AppNotifications, AppPersonas, ChannelMessageSent, ChatRequest, HiveWorkspace,
-    NotificationType, WorkflowBuilderLoadWorkflow,
+    AiProvider, AppAiService, AppAutomation, AppChannels, AppNotification, AppNotifications,
+    AppPersonas, ChannelMessageSent, ChatRequest, HiveWorkspace, NotificationType,
+    WorkflowBuilderLoadWorkflow, agents_actions,
 };
 use hive_ui_panels::panels::workflow_builder::{WorkflowCanvasState, WorkflowListEntry};
 
@@ -47,7 +47,10 @@ pub(super) fn handle_workflow_saved(
 ) {
     info!("Workflow saved: {}", canvas_workflow_id);
 
-    let workflow = workspace.workflow_builder_view.read(cx).to_executable_workflow();
+    let workflow = workspace
+        .workflow_builder_view
+        .read(cx)
+        .to_executable_workflow();
     if workflow.steps.is_empty() {
         push_workflow_notification(
             cx,
@@ -175,7 +178,10 @@ pub(super) fn handle_workflow_run_requested(
 ) {
     info!("Workflow run requested: {}", workflow_id);
 
-    let workflow = workspace.workflow_builder_view.read(cx).to_executable_workflow();
+    let workflow = workspace
+        .workflow_builder_view
+        .read(cx)
+        .to_executable_workflow();
 
     if workflow.steps.is_empty() {
         warn!(
@@ -202,6 +208,11 @@ pub(super) fn handle_workflow_run_requested(
         workflow.name,
         workflow.steps.len()
     );
+    let run_id = workspace
+        .run_store
+        .start_workflow(&workflow, "Workflow Builder");
+    workspace.agents_data.active_runs = workspace.run_store.active_displays();
+    cx.notify();
 
     if cx.has_global::<AppNotifications>() {
         cx.global_mut::<AppNotifications>().0.push(
@@ -238,6 +249,7 @@ pub(super) fn handle_workflow_run_requested(
 
     let run_result_for_ui = std::sync::Arc::clone(&run_result);
     let workflow_name = workflow.name.clone();
+    let run_id_for_ui = run_id.clone();
 
     cx.spawn(async move |this, app: &mut AsyncApp| {
         loop {
@@ -257,6 +269,7 @@ pub(super) fn handle_workflow_run_requested(
                                     run.error.clone(),
                                 );
                             }
+                            workspace.run_store.complete_workflow(&run_id_for_ui, &run);
 
                             if cx.has_global::<AppNotifications>() {
                                 let (notif_type, title) = if run.success {
@@ -277,13 +290,14 @@ pub(super) fn handle_workflow_run_requested(
                                         run.error.as_deref().unwrap_or("unknown error")
                                     )
                                 };
-                                cx.global_mut::<AppNotifications>().0.push(
-                                    AppNotification::new(notif_type, msg).with_title(title),
-                                );
+                                cx.global_mut::<AppNotifications>()
+                                    .0
+                                    .push(AppNotification::new(notif_type, msg).with_title(title));
                             }
                         }
                         Err(e) => {
                             warn!("WorkflowBuilder: run error: {e}");
+                            workspace.run_store.fail_workflow(&run_id_for_ui);
                             if cx.has_global::<AppNotifications>() {
                                 cx.global_mut::<AppNotifications>().0.push(
                                     AppNotification::new(
@@ -365,7 +379,10 @@ fn workflow_canvas_for_id(
     ))
 }
 
-fn persist_workflow_template(workspace_root: &Path, workflow: &Workflow) -> anyhow::Result<PathBuf> {
+fn persist_workflow_template(
+    workspace_root: &Path,
+    workflow: &Workflow,
+) -> anyhow::Result<PathBuf> {
     let workflow_dir = workspace_root.join(USER_WORKFLOW_DIR);
     std::fs::create_dir_all(&workflow_dir).with_context(|| {
         format!(
@@ -410,8 +427,7 @@ fn workflow_to_template(workflow: &Workflow) -> WorkflowTemplate {
 /// Strip path separators and traversal sequences from a workflow ID so it
 /// cannot escape its target directory when used in a filename.
 fn sanitize_workflow_id(id: &str) -> String {
-    id.replace(['/', '\\', ':', '\0'], "_")
-        .replace("..", "_")
+    id.replace(['/', '\\', ':', '\0'], "_").replace("..", "_")
 }
 
 fn workflow_file_stem(workflow_id: &str) -> Option<&str> {
@@ -587,9 +603,12 @@ fn handle_channel_agent_responses(
 
         let stream_setup: Option<(Arc<dyn AiProvider>, ChatRequest)> =
             if cx.has_global::<AppAiService>() {
-                cx.global::<AppAiService>()
-                    .0
-                    .prepare_stream(context_messages.clone(), &model, system_prompt, None)
+                cx.global::<AppAiService>().0.prepare_stream(
+                    context_messages.clone(),
+                    &model,
+                    system_prompt,
+                    None,
+                )
             } else {
                 None
             };
@@ -640,7 +659,9 @@ fn handle_channel_agent_responses(
                                 model: Some(model_str),
                                 cost: None,
                             };
-                            cx.global_mut::<AppChannels>().0.add_message(&ch_id, msg.clone());
+                            cx.global_mut::<AppChannels>()
+                                .0
+                                .add_message(&ch_id, msg.clone());
 
                             let _ = channels_view.update(cx, |view, cx| {
                                 view.finish_streaming(cx);
@@ -650,7 +671,10 @@ fn handle_channel_agent_responses(
                     });
                 }
                 Err(e) => {
-                    error!("Channels: stream error for agent '{}': {e}", agent_name_clone);
+                    error!(
+                        "Channels: stream error for agent '{}': {e}",
+                        agent_name_clone
+                    );
                     let _ = channels_view.update(app, |view, cx| {
                         view.finish_streaming(cx);
                     });

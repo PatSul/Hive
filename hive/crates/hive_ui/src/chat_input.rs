@@ -83,16 +83,18 @@ impl ChatInputView {
     /// Clear the input field.
     pub fn clear(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.input_state.update(cx, |state, cx| {
-            state.replace("", window, cx);
+            state.set_value(String::new(), window, cx);
         });
+        cx.notify();
     }
 
     /// Set the input field text.
     pub fn set_text(&self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         let text = text.to_string();
         self.input_state.update(cx, |state, cx| {
-            state.replace(&text, window, cx);
+            state.set_value(text, window, cx);
         });
+        cx.notify();
     }
 
     /// Toggle the sending/disabled state and update the placeholder text.

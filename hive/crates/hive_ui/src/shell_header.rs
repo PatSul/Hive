@@ -27,14 +27,6 @@ enum PipelineStage {
 }
 
 impl PipelineStage {
-    const ALL: [PipelineStage; 5] = [
-        PipelineStage::Context,
-        PipelineStage::Plan,
-        PipelineStage::Execute,
-        PipelineStage::Validate,
-        PipelineStage::Apply,
-    ];
-
     fn label(self) -> &'static str {
         match self {
             Self::Context => "Context",
@@ -118,12 +110,12 @@ impl ShellHeaderData {
                 "Workflows, channels, and peers stay grouped here for repeatable execution."
                     .into()
             }
-            ShellDestination::Assist => {
-                "Briefings, reminders, and assistant actions stay separate from coding flow."
-                    .into()
-            }
             ShellDestination::Observe => {
                 "Approvals, spend, safety, and failures stay visible here so validation is never buried."
+                    .into()
+            }
+            ShellDestination::Settings => {
+                "Models, routing, skills, integrations, and advanced tools stay out of the daily work path."
                     .into()
             }
         }
@@ -173,7 +165,13 @@ impl ShellHeaderData {
 
 impl ShellHeader {
     pub fn render(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
-        let destination_panels = data.destination.panels();
+        let destination_panels = data
+            .destination
+            .panels()
+            .iter()
+            .copied()
+            .filter(|panel| panel.is_visible())
+            .collect::<Vec<_>>();
 
         div()
             .id("shell-header")
@@ -188,7 +186,7 @@ impl ShellHeader {
             .bg(theme.bg_secondary)
             .child(render_mission_row(data, theme))
             .when(destination_panels.len() > 1, |el| {
-                el.child(render_local_tabs(data, destination_panels, theme))
+                el.child(render_local_tabs(data, &destination_panels, theme))
             })
             .child(render_pipeline_strip(data, theme))
             .into_any_element()
@@ -218,14 +216,11 @@ fn render_mission_row(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
                         .w_full()
                         .items_center()
                         .gap(theme.space_2)
-                        .child(header_badge(data.destination.label(), theme.accent_aqua, theme))
-                        .when(data.active_panel.is_utility(), |el| {
-                            el.child(header_badge(
-                                &format!("Utility · {}", data.active_panel.label()),
-                                theme.accent_yellow,
-                                theme,
-                            ))
-                        }),
+                        .child(header_badge(
+                            data.destination.label(),
+                            theme.accent_aqua,
+                            theme,
+                        )),
                 )
                 .child(
                     div()
@@ -251,8 +246,7 @@ fn render_mission_row(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
                 .gap(theme.space_2)
                 .child(header_badge(
                     &data.model_label(),
-                    if data.current_model.trim().is_empty()
-                        || data.current_model == "Select Model"
+                    if data.current_model.trim().is_empty() || data.current_model == "Select Model"
                     {
                         theme.accent_yellow
                     } else {
@@ -289,11 +283,7 @@ fn render_mission_row(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
         .into_any_element()
 }
 
-fn render_local_tabs(
-    data: &ShellHeaderData,
-    panels: &[Panel],
-    theme: &HiveTheme,
-) -> AnyElement {
+fn render_local_tabs(data: &ShellHeaderData, panels: &[Panel], theme: &HiveTheme) -> AnyElement {
     div()
         .flex()
         .flex_row()
@@ -332,7 +322,9 @@ fn render_local_tab(panel: Panel, active_panel: Panel, theme: &HiveTheme) -> Any
     };
 
     div()
-        .id(ElementId::Name(format!("shell-tab-{}", panel.to_stored()).into()))
+        .id(ElementId::Name(
+            format!("shell-tab-{}", panel.to_stored()).into(),
+        ))
         .flex()
         .flex_row()
         .items_center()
@@ -371,91 +363,43 @@ fn render_local_tab(panel: Panel, active_panel: Panel, theme: &HiveTheme) -> Any
 
 fn render_pipeline_strip(data: &ShellHeaderData, theme: &HiveTheme) -> AnyElement {
     let active_stage = data.pipeline_stage();
+    let label = if data.is_streaming {
+        format!("Active run stage: {}", active_stage.label())
+    } else {
+        format!("Panel stage: {}", active_stage.label())
+    };
 
     div()
         .flex()
         .flex_row()
-        .flex_wrap()
         .items_center()
         .gap(theme.space_2)
         .child(
             div()
+                .px(theme.space_3)
+                .py(px(5.0))
+                .rounded(theme.radius_full)
+                .bg(if data.is_streaming {
+                    theme.accent_cyan
+                } else {
+                    theme.bg_tertiary
+                })
+                .border_1()
+                .border_color(if data.is_streaming {
+                    theme.accent_cyan
+                } else {
+                    theme.border
+                })
                 .text_size(theme.font_size_xs)
-                .text_color(theme.text_muted)
+                .text_color(if data.is_streaming {
+                    theme.text_on_accent
+                } else {
+                    theme.text_secondary
+                })
                 .font_weight(FontWeight::SEMIBOLD)
-                .child("Pipeline"),
+                .child(label),
         )
-        .children(PipelineStage::ALL.iter().copied().enumerate().map(
-            |(index, stage)| {
-                let mut row = div()
-                    .flex()
-                    .flex_row()
-                    .gap(theme.space_2)
-                    .items_center()
-                    .child(pipeline_chip(stage, active_stage, theme));
-
-                if index + 1 < PipelineStage::ALL.len() {
-                    row = row.child(
-                        div()
-                            .w(px(18.0))
-                            .h(px(1.0))
-                            .bg(theme.border),
-                    );
-                }
-
-                row.into_any_element()
-            },
-        ))
         .into_any_element()
-}
-
-fn pipeline_chip(stage: PipelineStage, active_stage: PipelineStage, theme: &HiveTheme) -> AnyElement {
-    let is_active = stage == active_stage;
-    let is_past = pipeline_index(stage) < pipeline_index(active_stage);
-    let bg = if is_active {
-        theme.accent_cyan
-    } else if is_past {
-        theme.bg_tertiary
-    } else {
-        theme.bg_primary
-    };
-    let border = if is_active {
-        theme.accent_cyan
-    } else if is_past {
-        theme.accent_aqua
-    } else {
-        theme.border
-    };
-    let text = if is_active {
-        theme.bg_primary
-    } else if is_past {
-        theme.text_primary
-    } else {
-        theme.text_secondary
-    };
-
-    div()
-        .px(theme.space_3)
-        .py(px(5.0))
-        .rounded(theme.radius_full)
-        .bg(bg)
-        .border_1()
-        .border_color(border)
-        .text_size(theme.font_size_xs)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(text)
-        .child(stage.label())
-        .into_any_element()
-}
-
-fn pipeline_index(stage: PipelineStage) -> usize {
-    match stage {
-        PipelineStage::Context => 0,
-        PipelineStage::Plan => 1,
-        PipelineStage::Execute => 2,
-        PipelineStage::Validate => 3,
-        PipelineStage::Apply => 4,
-    }
 }
 
 fn header_badge(label: &str, color: Hsla, theme: &HiveTheme) -> AnyElement {

@@ -2,18 +2,16 @@ use gpui::*;
 use std::path::PathBuf;
 
 use super::{
-    agents_actions, assistant_refresh, data_refresh, network_actions, plugin_actions,
-    project_context, quick_start_actions, skills_actions, terminal_host, workflow_actions,
     AppNotification, AppNotifications, FilesData, HiveWorkspace, MAX_PINNED_WORKSPACES,
-    NotificationType, Panel, RemoveRecentWorkspace, ReviewData, SwitchToActivity,
-    SwitchToAgents, SwitchToAssistant, SwitchToChannels, SwitchToChat, SwitchToCodeMap,
-    SwitchToCosts, SwitchToFiles, SwitchToHelp, SwitchToHistory, SwitchToKanban,
-    SwitchToLearning, SwitchToLogs, SwitchToModels, SwitchToMonitor, SwitchToNetwork,
-    SwitchToPromptLibrary, SwitchToQuickStart, SwitchToReview, SwitchToRouting,
-    SwitchToRoutingMatrix, SwitchToSettings, SwitchToShield, SwitchToSkills, SwitchToSpecs,
-    SwitchToTerminal,
-    SwitchToTokenLaunch, SwitchToWorkflows, SwitchToWorkspace, TogglePinWorkspace,
-    ToggleProjectDropdown,
+    NotificationType, Panel, RemoveRecentWorkspace, ReviewData, SwitchToActivity, SwitchToAgents,
+    SwitchToAssistant, SwitchToChannels, SwitchToChat, SwitchToCodeMap, SwitchToCosts,
+    SwitchToFiles, SwitchToHelp, SwitchToHistory, SwitchToKanban, SwitchToLearning, SwitchToLogs,
+    SwitchToModels, SwitchToMonitor, SwitchToNetwork, SwitchToPromptLibrary, SwitchToQuickStart,
+    SwitchToReview, SwitchToRouting, SwitchToRoutingMatrix, SwitchToSettings, SwitchToShield,
+    SwitchToSkills, SwitchToSpecs, SwitchToTerminal, SwitchToTokenLaunch, SwitchToWorkflows,
+    SwitchToWorkspace, TogglePinWorkspace, ToggleProjectDropdown, agents_actions,
+    assistant_refresh, data_refresh, network_actions, plugin_actions, project_context,
+    quick_start_actions, skills_actions, terminal_host, workflow_actions,
 };
 
 pub(super) fn switch_to_workspace(
@@ -36,6 +34,27 @@ pub(super) fn switch_to_panel(
     cx: &mut Context<HiveWorkspace>,
 ) {
     tracing::info!("SwitchToPanel action: {:?}", panel);
+    if !panel.is_visible() {
+        workspace.push_notification(
+            cx,
+            NotificationType::Warning,
+            "Labs",
+            format!(
+                "{} is hidden until HIVE_ENABLE_LABS=1 is set.",
+                panel.label()
+            ),
+        );
+        if workspace.sidebar.active_panel == panel {
+            workspace.sidebar.active_panel = Panel::Settings;
+            workspace.sidebar.active_destination = Panel::Settings
+                .shell_destination()
+                .expect("Settings must have a shell destination");
+            workspace.save_session(cx);
+            cx.notify();
+        }
+        return;
+    }
+
     workspace.show_utility_drawer = false;
     workspace.sidebar.active_panel = panel;
     if let Some(destination) = panel.shell_destination() {
@@ -208,7 +227,11 @@ pub(super) fn handle_toggle_pin_workspace(
     cx: &mut Context<HiveWorkspace>,
 ) {
     let path = PathBuf::from(&action.path);
-    if let Some(idx) = workspace.pinned_workspace_roots.iter().position(|p| p == &path) {
+    if let Some(idx) = workspace
+        .pinned_workspace_roots
+        .iter()
+        .position(|p| p == &path)
+    {
         workspace.pinned_workspace_roots.remove(idx);
     } else {
         workspace.pinned_workspace_roots.push(path);

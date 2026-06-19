@@ -24,6 +24,7 @@ use hive_ui_core::{
     AppActivityService,
     AppAgentNotifications,
     AppAiService,
+    AppAirweave,
     AppApprovalGate,
     AppAssistant,
     AppAutomation,
@@ -43,7 +44,6 @@ use hive_ui_core::{
     AppGcp,
     AppGitLab,
     AppHiveMemory,
-    AppAirweave,
     AppHueClient,
     AppIntegrationDb,
     AppKnowledge,
@@ -74,6 +74,7 @@ use hive_ui_core::{
     AppWallets,
     ContextSelectionState,
     // Types
+    DestructiveConfirmation,
     HiveTheme,
     Panel,
     ShellDestination,
@@ -84,52 +85,53 @@ use crate::statusbar::{ConnectivityDisplay, StatusBar};
 use crate::titlebar::Titlebar;
 pub use hive_ui_core::{
     AccountConnectPlatform, AccountDisconnectPlatform, ActivityApprove, ActivityDeny,
-    ActivityExpandEvent, ActivityExportCsv, ActivityRefresh, ActivitySetFilter,
-    ActivitySetView,
+    ActivityExpandEvent, ActivityExportCsv, ActivityRefresh, ActivitySetFilter, ActivitySetView,
     AgentsDiscoverRemoteAgent, AgentsRefreshRemoteAgents, AgentsReloadWorkflows,
     AgentsRunRemoteAgent, AgentsRunWorkflow, AgentsSelectRemoteAgent, AgentsSelectRemoteSkill,
-    AppPluginManager, ApplyAllEdits, ApplyCodeBlock, ChannelSelect, CheckCalendar, CheckEmail,
-    ChatReadAloud, ClearChat,
-    ContextFormatChanged, CopyFullPrompt, CopyToClipboard, CostsClearHistory, CostsExportCsv,
-    CostsResetToday, DailyBriefing, ExportConfig, ExportPrompt, FilesClearChecked, FilesCloseViewer,
+    AppPluginManager, ApplyAllEdits, ApplyCodeBlock, ChannelSelect, ChatReadAloud, CheckCalendar,
+    CheckEmail, ClearChat, ContextFormatChanged, CopyFullPrompt, CopyToClipboard,
+    CostsClearHistory, CostsExportCsv, CostsResetToday, DailyBriefing, DestructiveCancel,
+    DestructiveConfirm, ExportConfig, ExportPrompt, FilesClearChecked, FilesCloseViewer,
     FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile, FilesNewFolder,
     FilesOpenEntry, FilesRefresh, FilesSetSearchQuery, FilesToggleCheck, HistoryClearAll,
     HistoryClearAllCancel, HistoryClearAllConfirm, HistoryDeleteConversation,
-    HistoryLoadConversation, HistoryRefresh, ImportConfig, KanbanAddTask, LogsClear, LogsSetFilter,
-    LogsToggleAutoScroll, MonitorRefresh, NetworkRefresh, NewConversation, OllamaDeleteModel,
-    OllamaPullModel, OpenWorkspaceDirectory, PluginImportCancel, PluginImportConfirm,
-    PluginImportFromGitHub, PluginImportFromLocal, PluginImportFromUrl, PluginImportOpen,
-    PluginImportToggleSkill, PluginRemove, PluginToggleExpand, PluginToggleSkill, PluginUpdate,
-    PromptLibraryDelete, PromptLibraryLoad, PromptLibraryRefresh, PromptLibrarySaveCurrent,
-    QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate, RemoveRecentWorkspace,
-    ReviewAiCommitMessage, ReviewBranchCreate, ReviewBranchDeleteNamed, ReviewBranchRefresh,
-    ReviewBranchSetName, ReviewBranchSwitch, ReviewCommit, ReviewCommitWithMessage,
-    ReviewDiscardAll, ReviewGitflowFinishNamed, ReviewGitflowInit, ReviewGitflowSetName,
-    ReviewGitflowStart, ReviewLfsPull, ReviewLfsPush, ReviewLfsRefresh, ReviewLfsSetPattern,
-    ReviewLfsTrack, ReviewLfsUntrack, ReviewPrAiGenerate, ReviewPrCreate, ReviewPrRefresh,
-    ReviewPrSetBase, ReviewPrSetBody, ReviewPrSetTitle, ReviewPush, ReviewPushSetUpstream,
-    ReviewSetCommitMessage, ReviewStageAll, ReviewSwitchTab, ReviewUnstageAll, RoutingAddRule,
-    SettingsSave, SkillsAddSource, SkillsClearSearch, SkillsCreate, SkillsInstall, SkillsRefresh,
-    SkillsRemove, SkillsRemoveSource, SkillsSetCategory, SkillsSetSearch, SkillsSetTab,
-    SkillsToggle, SwitchToActivity, SwitchToAgents, SwitchToAssistant, SwitchToChannels,
-    SwitchToChat, SwitchToCodeMap, SwitchToCosts, SwitchToFiles, SwitchToHelp, SwitchToHistory,
-    SwitchToKanban, SwitchToLearning, SwitchToLogs, SwitchToModels, SwitchToMonitor,
-    SwitchToNetwork, SwitchToPromptLibrary, SwitchToQuickStart, SwitchToReview, SwitchToRouting,
+    HistoryLoadConversation, HistoryRefresh, HistorySetSearchQuery, ImportConfig, KanbanAddTask,
+    LogsClear, LogsSetFilter, LogsSetSearchQuery, LogsToggleAutoScroll, MonitorRefresh,
+    NetworkRefresh, NewConversation, OllamaDeleteModel, OllamaPullModel, OpenWorkspaceDirectory,
+    PluginImportCancel, PluginImportConfirm, PluginImportFromGitHub, PluginImportFromLocal,
+    PluginImportFromUrl, PluginImportOpen, PluginImportToggleSkill, PluginRemove,
+    PluginToggleExpand, PluginToggleSkill, PluginUpdate, PromptLibraryDelete, PromptLibraryLoad,
+    PromptLibraryRefresh, PromptLibrarySaveCurrent, QuickStartOpenPanel, QuickStartRunProject,
+    QuickStartSelectTemplate, RemoveRecentWorkspace, ReviewAiCommitMessage, ReviewBranchCreate,
+    ReviewBranchDeleteNamed, ReviewBranchRefresh, ReviewBranchSetName, ReviewBranchSwitch,
+    ReviewCommit, ReviewCommitWithMessage, ReviewDiscardAll, ReviewGitflowFinishNamed,
+    ReviewGitflowInit, ReviewGitflowSetName, ReviewGitflowStart, ReviewLfsPull, ReviewLfsPush,
+    ReviewLfsRefresh, ReviewLfsSetPattern, ReviewLfsTrack, ReviewLfsUntrack, ReviewPrAiGenerate,
+    ReviewPrCreate, ReviewPrRefresh, ReviewPrSetBase, ReviewPrSetBody, ReviewPrSetTitle,
+    ReviewPush, ReviewPushSetUpstream, ReviewSetCommitMessage, ReviewStageAll, ReviewSwitchTab,
+    ReviewUnstageAll, RoutingAddRule, SettingsSave, ShieldDeleteRule, SkillsAddSource,
+    SkillsClearSearch, SkillsCreate, SkillsInstall, SkillsRefresh, SkillsRemove,
+    SkillsRemoveSource, SkillsSetCategory, SkillsSetSearch, SkillsSetTab, SkillsToggle,
+    SwitchToActivity, SwitchToAgents, SwitchToAssistant, SwitchToChannels, SwitchToChat,
+    SwitchToCodeMap, SwitchToCosts, SwitchToFiles, SwitchToHelp, SwitchToHistory, SwitchToKanban,
+    SwitchToLearning, SwitchToLogs, SwitchToModels, SwitchToMonitor, SwitchToNetwork,
+    SwitchToPromptLibrary, SwitchToQuickStart, SwitchToReview, SwitchToRouting,
     SwitchToRoutingMatrix, SwitchToSettings, SwitchToShield, SwitchToSkills, SwitchToSpecs,
-    SwitchToTerminal,
-    SwitchToTokenLaunch, SwitchToWorkflows, SwitchToWorkspace, TerminalClear, TerminalKill,
-    TerminalRestart, TerminalSubmitCommand, ThemeChanged, ToggleCommandPalette,
+    SwitchToTerminal, SwitchToTokenLaunch, SwitchToWorkflows, SwitchToWorkspace, TerminalClear,
+    TerminalKill, TerminalRestart, TerminalSubmitCommand, ThemeChanged, ToggleCommandPalette,
     ToggleDisclosure, TogglePinWorkspace, ToggleProjectDropdown, TokenLaunchCreateWallet,
-    TokenLaunchDeploy, TokenLaunchImportWallet,
-    TokenLaunchResetRpcConfig, TokenLaunchSaveRpcConfig, TokenLaunchSelectChain,
-    TokenLaunchSelectWallet, TokenLaunchSetStep, ToolApprove, ToolReject, TriggerAppUpdate,
-    VoiceProcessText, WorkflowBuilderDeleteNode, WorkflowBuilderLoadWorkflow, WorkflowBuilderRun,
-    WorkflowBuilderSave,
+    TokenLaunchDeploy, TokenLaunchImportWallet, TokenLaunchResetRpcConfig,
+    TokenLaunchSaveRpcConfig, TokenLaunchSelectChain, TokenLaunchSelectWallet, TokenLaunchSetStep,
+    ToolApprove, ToolReject, TriggerAppUpdate, VoiceProcessText, WorkflowBuilderDeleteNode,
+    WorkflowBuilderLoadWorkflow, WorkflowBuilderRun, WorkflowBuilderSave,
 };
 use hive_ui_panels::panels::chat::{DisplayMessage, ToolCallDisplay};
 use hive_ui_panels::panels::{
+    activity::{
+        ActivityData, ActivityPanel, ObserveAgentRow, ObserveRunRow, ObserveRuntimeData,
+        ObserveSafetyData, ObserveSafetyEvent, ObserveSpendData, ObserveView,
+    },
     agents::{AgentsPanel, AgentsPanelData},
-    activity::{ActivityData, ActivityPanel, ObserveView, ObserveRuntimeData, ObserveAgentRow, ObserveRunRow, ObserveSafetyData, ObserveSafetyEvent, ObserveSpendData},
     assistant::{AssistantPanel, AssistantPanelData},
     channels::{ChannelCreated, ChannelMessageSent, ChannelsView},
     chat::{CachedChatData, ChatPanel},
@@ -146,7 +148,7 @@ use hive_ui_panels::panels::{
     quick_start::{QuickStartPanel, QuickStartPanelData, QuickStartTone},
     review::{
         AiCommitState, BranchEntry, GitOpsTab, LfsFileEntry, PrForm, PrSummary, ReviewData,
-        ReviewPanel,
+        ReviewPanel, ReviewPanelInputs,
     },
     routing::{RoutingData, RoutingPanel},
     routing_matrix::{RoutingMatrixSaved, RoutingMatrixView},
@@ -159,17 +161,18 @@ use hive_ui_panels::panels::{
     workflow_builder::{WorkflowBuilderView, WorkflowRunRequested, WorkflowSaved},
 };
 
-mod activity_actions;
 mod account_actions;
+mod activity_actions;
 mod agents_actions;
-mod assistant_actions;
 mod approval_actions;
+mod assistant_actions;
 mod assistant_refresh;
 mod chat_actions;
 mod chrome;
 mod context_rail;
 mod costs_actions;
 mod data_refresh;
+mod destructive_actions;
 mod file_actions;
 mod history_actions;
 mod kanban_actions;
@@ -180,15 +183,16 @@ mod network_actions;
 mod overlays;
 mod panel_router;
 mod plugin_actions;
-mod prompt_library_actions;
 mod project_context;
+mod prompt_library_actions;
 mod quick_start_actions;
 mod review_actions;
 mod routing_actions;
+mod run_store;
+mod settings_actions;
 mod shield_actions;
 mod sidebar_shell;
 mod skills_actions;
-mod settings_actions;
 mod status_sync;
 mod terminal_host;
 mod token_launch_actions;
@@ -290,6 +294,18 @@ pub struct HiveWorkspace {
     chat_input: Entity<ChatInputView>,
     quick_start_goal_input: Entity<InputState>,
     command_palette_input: Entity<InputState>,
+    destructive_confirmation_input: Entity<InputState>,
+    files_search_input: Entity<InputState>,
+    history_search_input: Entity<InputState>,
+    logs_search_input: Entity<InputState>,
+    skills_search_input: Entity<InputState>,
+    review_commit_message_input: Entity<InputState>,
+    review_pr_title_input: Entity<InputState>,
+    review_pr_body_input: Entity<InputState>,
+    review_pr_base_input: Entity<InputState>,
+    review_branch_name_input: Entity<InputState>,
+    review_lfs_pattern_input: Entity<InputState>,
+    review_gitflow_name_input: Entity<InputState>,
     agents_remote_prompt_input: Entity<InputState>,
     chat_service: Entity<ChatService>,
     settings_view: Entity<SettingsView>,
@@ -318,6 +334,7 @@ pub struct HiveWorkspace {
     token_launch_inputs: TokenLaunchInputs,
     specs_data: SpecPanelData,
     agents_data: AgentsPanelData,
+    run_store: run_store::RunStore,
     activity_data: ActivityData,
     shield_data: ShieldPanelData,
     learning_data: LearningPanelData,
@@ -331,6 +348,9 @@ pub struct HiveWorkspace {
     _terminal_task: Option<Task<()>>,
     /// In-flight stream spawn task (kept alive to prevent cancellation).
     _stream_task: Option<Task<()>>,
+    /// Lightweight repaint ticker for streaming chat affordances.
+    _chat_animation_task: Option<Task<()>>,
+    streaming_animation_tick: u64,
     /// Tracks whether session state needs to be persisted. Avoids writing
     /// `session.json` on every render frame -- only writes when state actually
     /// changed (panel switch, conversation load, stream finalization).
@@ -356,6 +376,7 @@ pub struct HiveWorkspace {
     show_project_dropdown: bool,
     show_command_palette: bool,
     show_utility_drawer: bool,
+    pending_destructive_confirmation: Option<DestructiveConfirmation>,
     /// Last observed window size (width, height) in logical pixels.
     /// Updated on each render frame so `save_session` can persist it without
     /// needing a `&Window` reference.
@@ -586,7 +607,9 @@ impl HiveWorkspace {
                     if report.decayed > 0 || report.pruned > 0 || report.deduplicated > 0 {
                         tracing::info!(
                             "Memory maintenance: {} decayed, {} pruned, {} deduplicated",
-                            report.decayed, report.pruned, report.deduplicated
+                            report.decayed,
+                            report.pruned,
+                            report.deduplicated
                         );
                     }
                 }
@@ -640,6 +663,9 @@ impl HiveWorkspace {
             // No conversation to restore, but the user may have been on a
             // non-Chat panel (e.g. Settings, Files).
             restored_panel = Panel::from_stored(&session.active_panel);
+        }
+        if !restored_panel.is_visible() {
+            restored_panel = Panel::Settings;
         }
 
         let mut sidebar = Sidebar::new();
@@ -724,6 +750,250 @@ impl HiveWorkspace {
         )
         .detach();
 
+        let files_search_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Search files...", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &files_search_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    file_actions::handle_files_set_search_query(
+                        this,
+                        &FilesSetSearchQuery {
+                            query: state.read(cx).value().to_string(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
+
+        let history_search_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Search conversations...", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &history_search_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    history_actions::handle_history_set_search_query(
+                        this,
+                        &HistorySetSearchQuery {
+                            query: state.read(cx).value().to_string(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
+
+        let logs_search_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Search logs by message or source...", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &logs_search_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    logs_actions::handle_logs_set_search_query(
+                        this,
+                        &LogsSetSearchQuery {
+                            query: state.read(cx).value().to_string(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
+
+        let skills_search_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Search skills...", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &skills_search_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    skills_actions::handle_skills_set_search(
+                        this,
+                        &SkillsSetSearch {
+                            query: state.read(cx).value().to_string(),
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
+
+        let review_commit_message_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Type or AI-generate a commit message", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_commit_message_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let message = state.read(cx).value().to_string();
+                    this.handle_review_set_commit_message(
+                        &ReviewSetCommitMessage { message },
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
+
+        let review_pr_title_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("PR title", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_pr_title_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let title = state.read(cx).value().to_string();
+                    this.handle_review_pr_set_title(&ReviewPrSetTitle { title }, window, cx);
+                }
+            },
+        )
+        .detach();
+
+        let review_pr_body_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("PR body / release notes", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_pr_body_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let body = state.read(cx).value().to_string();
+                    this.handle_review_pr_set_body(&ReviewPrSetBody { body }, window, cx);
+                }
+            },
+        )
+        .detach();
+
+        let review_pr_base_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Base branch", window, cx);
+            state.set_value("main".to_string(), window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_pr_base_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let base = state.read(cx).value().to_string();
+                    this.handle_review_pr_set_base(&ReviewPrSetBase { base }, window, cx);
+                }
+            },
+        )
+        .detach();
+
+        let review_branch_name_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("New branch name", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_branch_name_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let name = state.read(cx).value().to_string();
+                    this.handle_review_branch_set_name(&ReviewBranchSetName { name }, window, cx);
+                }
+            },
+        )
+        .detach();
+
+        let review_lfs_pattern_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("*.ext", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_lfs_pattern_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let pattern = state.read(cx).value().to_string();
+                    this.handle_review_lfs_set_pattern(
+                        &ReviewLfsSetPattern { pattern },
+                        window,
+                        cx,
+                    );
+                }
+            },
+        )
+        .detach();
+
+        let review_gitflow_name_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Branch short name", window, cx);
+            state
+        });
+        cx.subscribe_in(
+            &review_gitflow_name_input,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let name = state.read(cx).value().to_string();
+                    this.handle_review_gitflow_set_name(&ReviewGitflowSetName { name }, window, cx);
+                }
+            },
+        )
+        .detach();
+
+        let destructive_confirmation_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_placeholder("Type the confirmation phrase", window, cx);
+            state
+        });
+
+        cx.subscribe_in(
+            &destructive_confirmation_input,
+            window,
+            |this, _view, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => {
+                    destructive_actions::handle_destructive_confirm(
+                        this,
+                        &DestructiveConfirm,
+                        window,
+                        cx,
+                    );
+                }
+                InputEvent::Change => cx.notify(),
+                _ => {}
+            },
+        )
+        .detach();
+
         let agents_remote_prompt_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
             state.set_placeholder(
@@ -745,12 +1015,7 @@ impl HiveWorkspace {
             window,
             |this, _view, event: &InputEvent, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    terminal_host::handle_terminal_submit(
-                        this,
-                        &TerminalSubmitCommand,
-                        window,
-                        cx,
-                    );
+                    terminal_host::handle_terminal_submit(this, &TerminalSubmitCommand, window, cx);
                 }
             },
         )
@@ -1014,6 +1279,7 @@ impl HiveWorkspace {
         let token_launch_data = TokenLaunchData::new();
         let specs_data = SpecPanelData::empty();
         let agents_data = AgentsPanelData::empty();
+        let run_store = run_store::RunStore::default();
         let shield_data = ShieldPanelData::empty();
         let learning_data = LearningPanelData::empty();
         let assistant_data = AssistantPanelData::empty();
@@ -1028,11 +1294,24 @@ impl HiveWorkspace {
             show_project_dropdown: false,
             show_command_palette: false,
             show_utility_drawer: false,
+            pending_destructive_confirmation: None,
             current_project_root: project_root,
             current_project_name: project_name,
             chat_input,
             quick_start_goal_input,
             command_palette_input,
+            destructive_confirmation_input,
+            files_search_input,
+            history_search_input,
+            logs_search_input,
+            skills_search_input,
+            review_commit_message_input,
+            review_pr_title_input,
+            review_pr_body_input,
+            review_pr_base_input,
+            review_branch_name_input,
+            review_lfs_pattern_input,
+            review_gitflow_name_input,
             agents_remote_prompt_input,
             chat_service,
             settings_view,
@@ -1058,6 +1337,7 @@ impl HiveWorkspace {
             token_launch_inputs,
             specs_data,
             agents_data,
+            run_store,
             activity_data: Default::default(),
             shield_data,
             learning_data,
@@ -1068,6 +1348,8 @@ impl HiveWorkspace {
             terminal_cmd_tx: None,
             _terminal_task: None,
             _stream_task: None,
+            _chat_animation_task: None,
+            streaming_animation_tick: 0,
             session_dirty: false,
             last_saved_conversation_id: session.active_conversation_id.clone(),
             cached_chat_data: CachedChatData::new(),
@@ -1087,7 +1369,36 @@ impl HiveWorkspace {
         };
 
         workspace.bootstrap_startup_snapshot(cx);
+        workspace.start_chat_animation_tick(cx);
         workspace
+    }
+
+    fn start_chat_animation_tick(&mut self, cx: &mut Context<Self>) {
+        if self._chat_animation_task.is_some() {
+            return;
+        }
+
+        self._chat_animation_task = Some(cx.spawn(
+            async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| loop {
+                app.background_executor()
+                    .timer(std::time::Duration::from_millis(280))
+                    .await;
+
+                let updated = this.update(app, |workspace, cx| {
+                    if workspace.sidebar.active_panel == Panel::Chat
+                        && workspace.chat_service.read(cx).is_streaming()
+                    {
+                        workspace.streaming_animation_tick =
+                            workspace.streaming_animation_tick.wrapping_add(1);
+                        cx.notify();
+                    }
+                });
+
+                if updated.is_err() {
+                    break;
+                }
+            },
+        ));
     }
 
     fn bootstrap_startup_snapshot(&mut self, cx: &mut Context<Self>) {
@@ -1161,9 +1472,8 @@ impl HiveWorkspace {
 
                 *quick_index_slot_for_thread
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = Some(
-                    result.map_err(|_| "quick-index thread panicked".to_string()),
-                );
+                    .unwrap_or_else(|e| e.into_inner()) =
+                    Some(result.map_err(|_| "quick-index thread panicked".to_string()));
             })
         {
             error!("Failed to spawn quick-index thread: {e}");
@@ -1349,7 +1659,6 @@ impl HiveWorkspace {
 
     // -- Send flow -----------------------------------------------------------
 
-
     // -- Rendering -----------------------------------------------------------
 
     fn render_active_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -1439,9 +1748,7 @@ impl HiveWorkspace {
 
     // -- Routing panel handlers ----------------------------------------------
 
-
     // -- Monitor panel handlers ----------------------------------------------
-
 }
 
 fn network_peer_status_label(state: &hive_network::PeerState) -> String {
@@ -1543,6 +1850,18 @@ impl Render for HiveWorkspace {
                     return;
                 }
 
+                if event.keystroke.key == "escape"
+                    && this.pending_destructive_confirmation.is_some()
+                {
+                    destructive_actions::handle_destructive_cancel(
+                        this,
+                        &DestructiveCancel,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
+
                 if event.keystroke.key == "escape" && this.show_command_palette {
                     overlays::close_command_palette(this, window, cx);
                     return;
@@ -1583,6 +1902,7 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(navigation::handle_switch_to_channels))
             .on_action(cx.listener(navigation::handle_switch_to_learning))
             .on_action(cx.listener(navigation::handle_switch_to_shield))
+            .on_action(cx.listener(shield_actions::handle_shield_delete_rule))
             .on_action(cx.listener(navigation::handle_switch_to_assistant))
             .on_action(cx.listener(navigation::handle_switch_to_settings))
             .on_action(cx.listener(navigation::handle_switch_to_help))
@@ -1597,9 +1917,13 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(network_actions::handle_network_refresh))
             .on_action(cx.listener(navigation::handle_open_workspace_directory))
             .on_action(cx.listener(navigation::handle_toggle_project_dropdown))
-            .on_action(cx.listener(|this, _action: &ToggleCommandPalette, window, cx| {
-                overlays::handle_toggle_command_palette(this, window, cx);
-            }))
+            .on_action(
+                cx.listener(|this, _action: &ToggleCommandPalette, window, cx| {
+                    overlays::handle_toggle_command_palette(this, window, cx);
+                }),
+            )
+            .on_action(cx.listener(destructive_actions::handle_destructive_confirm))
+            .on_action(cx.listener(destructive_actions::handle_destructive_cancel))
             .on_action(cx.listener(navigation::handle_switch_to_workspace_action))
             .on_action(cx.listener(navigation::handle_toggle_pin_workspace))
             .on_action(cx.listener(navigation::handle_remove_recent_workspace))
@@ -1630,11 +1954,13 @@ impl Render for HiveWorkspace {
             .on_action(cx.listener(history_actions::handle_history_clear_all))
             .on_action(cx.listener(history_actions::handle_history_clear_all_confirm))
             .on_action(cx.listener(history_actions::handle_history_clear_all_cancel))
+            .on_action(cx.listener(history_actions::handle_history_set_search_query))
             // Kanban
             .on_action(cx.listener(kanban_actions::handle_kanban_add_task))
             // Logs
             .on_action(cx.listener(logs_actions::handle_logs_clear))
             .on_action(cx.listener(logs_actions::handle_logs_set_filter))
+            .on_action(cx.listener(logs_actions::handle_logs_set_search_query))
             .on_action(cx.listener(logs_actions::handle_logs_toggle_auto_scroll))
             // Activity
             .on_action(cx.listener(activity_actions::handle_activity_refresh))
@@ -1788,6 +2114,11 @@ impl Render for HiveWorkspace {
             ))
             // Status bar
             .child(self.status_bar.render(theme))
+            .when(self.pending_destructive_confirmation.is_some(), |el| {
+                el.child(destructive_actions::render_destructive_confirmation(
+                    self, cx,
+                ))
+            })
             // Toast notification overlay (top-right corner)
             .when(!self.toast_messages.is_empty(), |el| {
                 let toast_els: Vec<_> = self

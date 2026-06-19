@@ -3,8 +3,8 @@ use std::sync::Arc;
 use gpui::*;
 use tracing::{error, info, warn};
 
-use hive_ai::speculative::{self, SpeculativeConfig};
-use hive_ai::types::{ChatRequest, ToolDefinition as AiToolDefinition};
+use hive_ai::speculative::SpeculativeConfig;
+use hive_ai::types::{ChatRequest, StreamChunk, ToolDefinition as AiToolDefinition};
 use hive_ui_core::{AppCollectiveMemory, AppCortexInteractionTracker};
 
 use super::{
@@ -14,6 +14,119 @@ use super::{
     AppShield, AppSkillManager, AppTts, ApplyAllEdits, ApplyCodeBlock, ChatReadAloud, ClearChat,
     HiveWorkspace, MessageRole, NewConversation, Panel, data_refresh,
 };
+
+fn stream_error_chunk(message: impl Into<String>) -> StreamChunk {
+    StreamChunk {
+        content: message.into(),
+        done: true,
+        thinking: None,
+        usage: None,
+        tool_calls: None,
+        stop_reason: None,
+    }
+}
+
+fn spawn_enriched_provider_stream(
+    provider: Arc<dyn AiProvider>,
+    mut request: ChatRequest,
+    hive_mem: Option<Arc<tokio::sync::Mutex<hive_ai::memory::HiveMemory>>>,
+    knowledge_hub: Option<Arc<hive_integrations::knowledge::KnowledgeHub>>,
+    query_text: String,
+) -> tokio::sync::mpsc::Receiver<StreamChunk> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<StreamChunk>(256);
+    let tx_for_thread = tx.clone();
+
+    let spawn_result = std::thread::Builder::new()
+        .name("hive-chat-stream".into())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            let Ok(runtime) = runtime else {
+                let _ = tx_for_thread.blocking_send(stream_error_chunk(
+                    "AI request failed: could not start async runtime",
+                ));
+                return;
+            };
+
+            runtime.block_on(async move {
+                super::enrich_request_with_memory(
+                    &mut request,
+                    &hive_mem,
+                    &knowledge_hub,
+                    &query_text,
+                )
+                .await;
+
+                let provider_name = provider.name().to_string();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    provider.stream_chat(&request),
+                )
+                .await
+                {
+                    Ok(Ok(mut provider_rx)) => {
+                        let mut saw_chunk = false;
+                        loop {
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(60),
+                                provider_rx.recv(),
+                            )
+                            .await
+                            {
+                                Ok(Some(chunk)) => {
+                                    saw_chunk = true;
+                                    if tx_for_thread.send(chunk).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Ok(None) => {
+                                    if !saw_chunk {
+                                        let _ = tx_for_thread
+                                            .send(stream_error_chunk(format!(
+                                                "AI request failed: {provider_name} closed the stream before returning a response."
+                                            )))
+                                            .await;
+                                    }
+                                    break;
+                                }
+                                Err(_) => {
+                                    let _ = tx_for_thread
+                                        .send(stream_error_chunk(format!(
+                                            "AI request failed: no response from {provider_name} for 60 seconds (model {}). Check the selected provider or switch models.",
+                                            request.model
+                                        )))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx_for_thread
+                            .send(stream_error_chunk(format!("AI request failed: {e}")))
+                            .await;
+                    }
+                    Err(_) => {
+                        let _ = tx_for_thread
+                            .send(stream_error_chunk(format!(
+                                "AI request failed: {provider_name} did not open a stream within 30 seconds (model {}). Check the selected provider or switch models.",
+                                request.model
+                            )))
+                            .await;
+                    }
+                }
+            });
+        });
+
+    if let Err(e) = spawn_result {
+        let _ = tx.blocking_send(stream_error_chunk(format!(
+            "AI request failed: could not start stream thread: {e}"
+        )));
+    }
+
+    rx
+}
 
 pub(super) fn handle_new_conversation(
     workspace: &mut HiveWorkspace,
@@ -781,185 +894,30 @@ pub(super) fn handle_send_text(
     };
     let query_for_memory = user_query_text.clone();
 
-    let task = if use_speculative {
-        // Speculative decoding path: dual-stream from draft + primary.
-        let speculative_setup = cx.global::<AppAiService>().0.prepare_speculative_stream(
-            ai_messages,
-            &model,
-            system_prompt,
-            Some(tool_defs),
-            &spec_config,
+    if use_speculative {
+        warn!(
+            "Speculative decoding is enabled, but chat stream setup is using the foreground-safe primary stream"
         );
+    }
 
-        if let Some((draft_provider, mut draft_request, primary_provider, mut primary_request)) =
-            speculative_setup
-        {
-            let spec_config_clone = spec_config.clone();
-            let hm = hive_mem_for_async.clone();
-            let kb = knowledge_hub_for_async.clone();
-            let qm = query_for_memory.clone();
-            cx.spawn(async move |_this, app: &mut AsyncApp| {
-                // Enrich both draft and primary requests with memory/knowledge.
-                super::enrich_request_with_memory(&mut draft_request, &hm, &kb, &qm).await;
-                super::enrich_request_with_memory(&mut primary_request, &hm, &kb, &qm).await;
-
-                match speculative::speculative_stream(
-                    draft_provider,
-                    draft_request,
-                    primary_provider.clone(),
-                    primary_request.clone(),
-                    spec_config_clone,
-                )
-                .await
-                {
-                    Ok(mut spec_rx) => {
-                        // Convert speculative chunks into regular StreamChunk stream.
-                        // Draft chunks get a "[speculating] " visual prefix.
-                        // When primary starts, we send a reset-content signal.
-                        let (tx, rx) = tokio::sync::mpsc::channel(256);
-                        let _model_for_metrics = model_for_attach.clone();
-
-                        tokio::spawn(async move {
-                            let mut in_draft_phase = true;
-                            while let Some(spec_chunk) = spec_rx.recv().await {
-                                if spec_chunk.is_draft {
-                                    // Forward draft content as-is (UI can style it)
-                                    let _ = tx.send(spec_chunk.chunk).await;
-                                } else {
-                                    if in_draft_phase {
-                                        // Transition: send a special "reset" chunk
-                                        // The content field carries a marker the UI can detect
-                                        let _ = tx
-                                            .send(hive_ai::types::StreamChunk {
-                                                content: "\n\n---\n\n".to_string(),
-                                                done: false,
-                                                thinking: None,
-                                                usage: None,
-                                                tool_calls: None,
-                                                stop_reason: None,
-                                            })
-                                            .await;
-                                        in_draft_phase = false;
-                                    }
-
-                                    // Append metrics info to the final chunk if available
-                                    let mut chunk = spec_chunk.chunk;
-                                    if let Some(metrics) = spec_chunk.metrics {
-                                        if chunk.done {
-                                            let metrics_text = format!(
-                                                "\n\n> Speculative decoding saved ~{}ms | Draft: {} ({}ms) | Primary: {} ({}ms)",
-                                                metrics.time_saved_ms,
-                                                metrics.draft_model,
-                                                metrics.draft_first_token_ms,
-                                                metrics.primary_model,
-                                                metrics.primary_first_token_ms,
-                                            );
-                                            chunk.content.push_str(&metrics_text);
-                                        }
-                                    }
-                                    let _ = tx.send(chunk).await;
-                                }
-                            }
-                        });
-
-                        let _ = chat_svc.update(app, |svc, cx| {
-                            svc.attach_tool_stream(
-                                rx,
-                                model_for_attach,
-                                primary_provider,
-                                primary_request,
-                                cx,
-                            );
-                        });
-                    }
-                    Err(e) => {
-                        error!("Speculative stream error: {e}");
-                        // Fall back to normal stream (already enriched via
-                        // the same hm/kb/qm captured by this spawn block).
-                        let mut fallback_req = request.clone();
-                        super::enrich_request_with_memory(&mut fallback_req, &hm, &kb, &qm).await;
-                        match provider.stream_chat(&fallback_req).await {
-                            Ok(rx) => {
-                                let _ = chat_svc.update(app, |svc, cx| {
-                                    svc.attach_tool_stream(
-                                        rx,
-                                        model_for_attach,
-                                        provider_for_loop,
-                                        request_for_loop,
-                                        cx,
-                                    );
-                                });
-                            }
-                            Err(e2) => {
-                                let _ = chat_svc.update(app, |svc, cx| {
-                                    svc.set_error(format!("AI request failed: {e2}"), cx);
-                                });
-                            }
-                        }
-                    }
-                }
-            })
-        } else {
-            // Speculative setup failed, fall back to normal
-            let hm = hive_mem_for_async.clone();
-            let kb = knowledge_hub_for_async.clone();
-            let qm = query_for_memory.clone();
-            cx.spawn(async move |_this, app: &mut AsyncApp| {
-                let mut enriched_request = request.clone();
-                super::enrich_request_with_memory(&mut enriched_request, &hm, &kb, &qm).await;
-                match provider.stream_chat(&enriched_request).await {
-                    Ok(rx) => {
-                        let _ = chat_svc.update(app, |svc, cx| {
-                            svc.attach_tool_stream(
-                                rx,
-                                model_for_attach,
-                                provider_for_loop,
-                                request_for_loop,
-                                cx,
-                            );
-                        });
-                    }
-                    Err(e) => {
-                        error!("Stream error: {e}");
-                        let _ = chat_svc.update(app, |svc, cx| {
-                            svc.set_error(format!("AI request failed: {e}"), cx);
-                        });
-                    }
-                }
-            })
-        }
-    } else {
-        // Normal (non-speculative) path
-        cx.spawn(async move |_this, app: &mut AsyncApp| {
-            let mut enriched_request = request.clone();
-            super::enrich_request_with_memory(
-                &mut enriched_request,
-                &hive_mem_for_async,
-                &knowledge_hub_for_async,
-                &query_for_memory,
-            )
-            .await;
-            match provider.stream_chat(&enriched_request).await {
-                Ok(rx) => {
-                    let _ = chat_svc.update(app, |svc, cx| {
-                        svc.attach_tool_stream(
-                            rx,
-                            model_for_attach,
-                            provider_for_loop,
-                            request_for_loop,
-                            cx,
-                        );
-                    });
-                }
-                Err(e) => {
-                    error!("Stream error: {e}");
-                    let _ = chat_svc.update(app, |svc, cx| {
-                        svc.set_error(format!("AI request failed: {e}"), cx);
-                    });
-                }
-            }
-        })
-    };
+    let rx = spawn_enriched_provider_stream(
+        provider.clone(),
+        request.clone(),
+        hive_mem_for_async,
+        knowledge_hub_for_async,
+        query_for_memory,
+    );
+    let task = cx.spawn(async move |_this, app: &mut AsyncApp| {
+        let _ = chat_svc.update(app, |svc, cx| {
+            svc.attach_tool_stream(
+                rx,
+                model_for_attach,
+                provider_for_loop,
+                request_for_loop,
+                cx,
+            );
+        });
+    });
 
     workspace._stream_task = Some(task);
     workspace.chat_input.update(cx, |input, cx| {

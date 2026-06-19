@@ -1,9 +1,11 @@
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 use tracing::{info, warn};
 
 use super::{
-    data_refresh, HiveWorkspace, HistoryClearAll, HistoryClearAllCancel, HistoryClearAllConfirm,
-    HistoryData, HistoryDeleteConversation, HistoryLoadConversation, HistoryRefresh, Panel,
+    HistoryClearAll, HistoryClearAllCancel, HistoryClearAllConfirm, HistoryData,
+    HistoryDeleteConversation, HistoryLoadConversation, HistoryRefresh, HistorySetSearchQuery,
+    HiveWorkspace, Panel, data_refresh, destructive_actions,
 };
 
 pub(super) fn handle_history_load(
@@ -30,12 +32,24 @@ pub(super) fn handle_history_load(
 pub(super) fn handle_history_delete(
     workspace: &mut HiveWorkspace,
     action: &HistoryDeleteConversation,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
-    info!("History: delete conversation {}", action.conversation_id);
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::HistoryDeleteConversation {
+            conversation_id: action.conversation_id.clone(),
+        });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_history_delete(
+    workspace: &mut HiveWorkspace,
+    conversation_id: &str,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    info!("History: delete conversation {conversation_id}");
     if let Ok(store) = hive_core::ConversationStore::new()
-        && let Err(e) = store.delete(&action.conversation_id)
+        && let Err(e) = store.delete(conversation_id)
     {
         warn!("History: failed to delete conversation: {e}");
     }
@@ -53,21 +67,46 @@ pub(super) fn handle_history_refresh(
     cx.notify();
 }
 
+pub(super) fn handle_history_set_search_query(
+    workspace: &mut HiveWorkspace,
+    action: &HistorySetSearchQuery,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    workspace.history_data.search_query = action.query.clone();
+    if workspace.history_search_input.read(cx).value() != action.query {
+        workspace.history_search_input.update(cx, |input, cx| {
+            input.set_value(action.query.clone(), window, cx);
+        });
+    }
+    cx.notify();
+}
+
 pub(super) fn handle_history_clear_all(
     workspace: &mut HiveWorkspace,
     _action: &HistoryClearAll,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
-    info!("History: clear all requested - showing confirmation");
-    workspace.history_data.confirming_clear = true;
-    cx.notify();
+    info!("History: clear all requested");
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::HistoryClearAll {
+            conversation_count: workspace.history_data.conversations.len(),
+        });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
 }
 
 pub(super) fn handle_history_clear_all_confirm(
     workspace: &mut HiveWorkspace,
     _action: &HistoryClearAllConfirm,
-    _window: &mut Window,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    handle_history_clear_all(workspace, &HistoryClearAll, window, cx);
+}
+
+pub(super) fn execute_confirmed_history_clear_all(
+    workspace: &mut HiveWorkspace,
     cx: &mut Context<HiveWorkspace>,
 ) {
     info!("History: clear all confirmed - deleting all conversations");

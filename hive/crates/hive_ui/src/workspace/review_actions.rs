@@ -1,6 +1,20 @@
 use super::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 
 impl HiveWorkspace {
+    fn sync_review_input(
+        input: &Entity<InputState>,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if input.read(cx).value().to_string() != value {
+            input.update(cx, |state, cx| {
+                state.set_value(value.to_string(), window, cx);
+            });
+        }
+    }
+
     pub(super) fn run_checked_git_command(
         &self,
         cx: &Context<Self>,
@@ -136,9 +150,17 @@ impl HiveWorkspace {
     pub(super) fn handle_review_discard_all(
         &mut self,
         _action: &ReviewDiscardAll,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let confirmation =
+            DestructiveConfirmation::for_action(DestructiveActionKind::ReviewDiscardAll {
+                changed_files: self.review_data.files.len(),
+            });
+        destructive_actions::request_confirmation(self, confirmation, window, cx);
+    }
+
+    pub(super) fn execute_confirmed_review_discard_all(&mut self, cx: &mut Context<Self>) {
         info!("Review: discard all");
         match self.run_checked_git_command(cx, &["checkout", "--", "."], "git checkout -- .") {
             Ok(output) if output.status.success() => {
@@ -239,9 +261,12 @@ impl HiveWorkspace {
         let model = self.status_bar.current_model.clone();
 
         let stream_setup = if cx.has_global::<AppAiService>() {
-            cx.global::<AppAiService>()
-                .0
-                .prepare_stream(messages, &model, Some(system_prompt), None)
+            cx.global::<AppAiService>().0.prepare_stream(
+                messages,
+                &model,
+                Some(system_prompt),
+                None,
+            )
         } else {
             None
         };
@@ -314,10 +339,16 @@ impl HiveWorkspace {
     pub(super) fn handle_review_set_commit_message(
         &mut self,
         action: &ReviewSetCommitMessage,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.ai_commit.user_edited_message = action.message.clone();
+        Self::sync_review_input(
+            &self.review_commit_message_input,
+            &action.message,
+            window,
+            cx,
+        );
         cx.notify();
     }
 
@@ -508,7 +539,7 @@ impl HiveWorkspace {
     pub(super) fn handle_review_branch_create(
         &mut self,
         _action: &ReviewBranchCreate,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let name = self.review_data.branches_data.new_branch_name.clone();
@@ -530,6 +561,7 @@ impl HiveWorkspace {
                     format!("Created and switched to branch: {name}"),
                 );
                 self.review_data.branches_data.new_branch_name.clear();
+                Self::sync_review_input(&self.review_branch_name_input, "", window, cx);
                 self.review_data = ReviewData::from_git(&self.current_project_root);
                 self.refresh_branches_data(cx);
             }
@@ -582,10 +614,22 @@ impl HiveWorkspace {
     pub(super) fn handle_review_branch_delete_named(
         &mut self,
         action: &ReviewBranchDeleteNamed,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name = &action.branch_name;
+        let confirmation =
+            DestructiveConfirmation::for_action(DestructiveActionKind::ReviewBranchDelete {
+                branch_name: action.branch_name.clone(),
+            });
+        destructive_actions::request_confirmation(self, confirmation, window, cx);
+    }
+
+    pub(super) fn execute_confirmed_review_branch_delete_named(
+        &mut self,
+        branch_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let name = branch_name;
         match self.run_checked_git_command(cx, &["branch", "-d", name], "git branch -d") {
             Ok(output) if output.status.success() => {
                 self.push_notification(
@@ -613,10 +657,11 @@ impl HiveWorkspace {
     pub(super) fn handle_review_branch_set_name(
         &mut self,
         action: &ReviewBranchSetName,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.branches_data.new_branch_name = action.name.clone();
+        Self::sync_review_input(&self.review_branch_name_input, &action.name, window, cx);
         cx.notify();
     }
 
@@ -686,9 +731,12 @@ impl HiveWorkspace {
 
         let model = self.status_bar.current_model.clone();
         let stream_setup = if cx.has_global::<AppAiService>() {
-            cx.global::<AppAiService>()
-                .0
-                .prepare_stream(messages, &model, Some(system_prompt), None)
+            cx.global::<AppAiService>().0.prepare_stream(
+                messages,
+                &model,
+                Some(system_prompt),
+                None,
+            )
         } else {
             None
         };
@@ -827,8 +875,8 @@ impl HiveWorkspace {
         let task = cx.spawn(
             async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
                 let result = std::thread::spawn(move || {
-                    let rt =
-                        tokio::runtime::Runtime::new().map_err(|e| format!("Runtime error: {e}"))?;
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|e| format!("Runtime error: {e}"))?;
                     rt.block_on(async {
                         let client = hive_integrations::GitHubClient::new(&token)
                             .map_err(|e| format!("GitHub client error: {e}"))?;
@@ -873,30 +921,33 @@ impl HiveWorkspace {
     pub(super) fn handle_review_pr_set_title(
         &mut self,
         action: &ReviewPrSetTitle,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.pr_data.pr_form.title = action.title.clone();
+        Self::sync_review_input(&self.review_pr_title_input, &action.title, window, cx);
         cx.notify();
     }
 
     pub(super) fn handle_review_pr_set_body(
         &mut self,
         action: &ReviewPrSetBody,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.pr_data.pr_form.body = action.body.clone();
+        Self::sync_review_input(&self.review_pr_body_input, &action.body, window, cx);
         cx.notify();
     }
 
     pub(super) fn handle_review_pr_set_base(
         &mut self,
         action: &ReviewPrSetBase,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.pr_data.pr_form.base_branch = action.base.clone();
+        Self::sync_review_input(&self.review_pr_base_input, &action.base, window, cx);
         cx.notify();
     }
 
@@ -913,7 +964,7 @@ impl HiveWorkspace {
     pub(super) fn handle_review_lfs_track(
         &mut self,
         _action: &ReviewLfsTrack,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let pattern = self.review_data.lfs_data.new_pattern.clone();
@@ -940,6 +991,7 @@ impl HiveWorkspace {
                     format!("Now tracking: {pattern}"),
                 );
                 self.review_data.lfs_data.new_pattern.clear();
+                Self::sync_review_input(&self.review_lfs_pattern_input, "", window, cx);
                 self.refresh_lfs_data(cx);
             }
             Ok(output) => {
@@ -959,7 +1011,7 @@ impl HiveWorkspace {
     pub(super) fn handle_review_lfs_untrack(
         &mut self,
         _action: &ReviewLfsUntrack,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let pattern = self.review_data.lfs_data.new_pattern.clone();
@@ -981,6 +1033,7 @@ impl HiveWorkspace {
                     format!("Untracked: {pattern}"),
                 );
                 self.review_data.lfs_data.new_pattern.clear();
+                Self::sync_review_input(&self.review_lfs_pattern_input, "", window, cx);
                 self.refresh_lfs_data(cx);
             }
             Ok(output) => {
@@ -1000,10 +1053,11 @@ impl HiveWorkspace {
     pub(super) fn handle_review_lfs_set_pattern(
         &mut self,
         action: &ReviewLfsSetPattern,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.lfs_data.new_pattern = action.pattern.clone();
+        Self::sync_review_input(&self.review_lfs_pattern_input, &action.pattern, window, cx);
         cx.notify();
     }
 
@@ -1161,7 +1215,7 @@ impl HiveWorkspace {
     pub(super) fn handle_review_gitflow_start(
         &mut self,
         action: &ReviewGitflowStart,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let name = &action.name;
@@ -1208,6 +1262,7 @@ impl HiveWorkspace {
                     format!("Started {} {}", action.kind, name),
                 );
                 self.review_data.gitflow_data.new_name.clear();
+                Self::sync_review_input(&self.review_gitflow_name_input, "", window, cx);
                 self.review_data = ReviewData::from_git(&self.current_project_root);
                 self.refresh_gitflow_data(cx);
             }
@@ -1228,14 +1283,31 @@ impl HiveWorkspace {
     pub(super) fn handle_review_gitflow_finish_named(
         &mut self,
         action: &ReviewGitflowFinishNamed,
-        _window: &mut Window,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(action.kind.as_str(), "feature" | "release" | "hotfix") {
+            return;
+        }
+        let confirmation =
+            DestructiveConfirmation::for_action(DestructiveActionKind::ReviewGitflowFinish {
+                kind: action.kind.clone(),
+                name: action.name.clone(),
+            });
+        destructive_actions::request_confirmation(self, confirmation, window, cx);
+    }
+
+    pub(super) fn execute_confirmed_review_gitflow_finish_named(
+        &mut self,
+        kind: &str,
+        name: &str,
         cx: &mut Context<Self>,
     ) {
         let gf = &self.review_data.gitflow_data;
-        let branch_name = match action.kind.as_str() {
-            "feature" => format!("{}{}", gf.feature_prefix, action.name),
-            "release" => format!("{}{}", gf.release_prefix, action.name),
-            "hotfix" => format!("{}{}", gf.hotfix_prefix, action.name),
+        let branch_name = match kind {
+            "feature" => format!("{}{}", gf.feature_prefix, name),
+            "release" => format!("{}{}", gf.release_prefix, name),
+            "hotfix" => format!("{}{}", gf.hotfix_prefix, name),
             _ => return,
         };
 
@@ -1262,7 +1334,7 @@ impl HiveWorkspace {
             }
         };
 
-        match action.kind.as_str() {
+        match kind {
             "feature" => {
                 if !run(self, cx, &["checkout", &develop]) {
                     return;
@@ -1282,13 +1354,7 @@ impl HiveWorkspace {
                 run(
                     self,
                     cx,
-                    &[
-                        "tag",
-                        "-a",
-                        &action.name,
-                        "-m",
-                        &format!("Release {}", action.name),
-                    ],
+                    &["tag", "-a", name, "-m", &format!("Release {name}")],
                 );
                 if !run(self, cx, &["checkout", &develop]) {
                     return;
@@ -1308,13 +1374,7 @@ impl HiveWorkspace {
                 run(
                     self,
                     cx,
-                    &[
-                        "tag",
-                        "-a",
-                        &action.name,
-                        "-m",
-                        &format!("Hotfix {}", action.name),
-                    ],
+                    &["tag", "-a", name, "-m", &format!("Hotfix {name}")],
                 );
                 if !run(self, cx, &["checkout", &develop]) {
                     return;
@@ -1331,7 +1391,7 @@ impl HiveWorkspace {
             cx,
             NotificationType::Success,
             "Git Ops",
-            format!("Finished {} {}", action.kind, action.name),
+            format!("Finished {kind} {name}"),
         );
         self.review_data = ReviewData::from_git(&self.current_project_root);
         self.refresh_gitflow_data(cx);
@@ -1341,10 +1401,11 @@ impl HiveWorkspace {
     pub(super) fn handle_review_gitflow_set_name(
         &mut self,
         action: &ReviewGitflowSetName,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.review_data.gitflow_data.new_name = action.name.clone();
+        Self::sync_review_input(&self.review_gitflow_name_input, &action.name, window, cx);
         cx.notify();
     }
 
@@ -1375,11 +1436,9 @@ impl HiveWorkspace {
     }
 
     fn refresh_push_data(&mut self, cx: &Context<Self>) {
-        if let Ok(output) = self.run_checked_git_command(
-            cx,
-            &["remote", "get-url", "origin"],
-            "git remote get-url",
-        ) && output.status.success()
+        if let Ok(output) =
+            self.run_checked_git_command(cx, &["remote", "get-url", "origin"], "git remote get-url")
+            && output.status.success()
         {
             self.review_data.push_data.remote_url =
                 String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -1497,11 +1556,9 @@ impl HiveWorkspace {
         self.review_data.lfs_data.tracked_patterns = patterns;
 
         let mut lfs_files = Vec::new();
-        if let Ok(output) = self.run_checked_git_command(
-            cx,
-            &["lfs", "ls-files", "--long"],
-            "git lfs ls-files",
-        ) && output.status.success()
+        if let Ok(output) =
+            self.run_checked_git_command(cx, &["lfs", "ls-files", "--long"], "git lfs ls-files")
+            && output.status.success()
         {
             let text = String::from_utf8_lossy(&output.stdout);
             for line in text.lines() {
@@ -1600,88 +1657,87 @@ impl HiveWorkspace {
         if let (Some(token), Some((owner, repo))) = (github_token, github_remote) {
             self.review_data.pr_data.github_connected = true;
 
-            let task =
-                cx.spawn(
-                    async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
-                        let result = std::thread::spawn(move || {
-                            let rt = tokio::runtime::Runtime::new()
-                                .map_err(|e| format!("Runtime error: {e}"))?;
-                            rt.block_on(async {
-                                let client = hive_integrations::GitHubClient::new(&token)
-                                    .map_err(|e| format!("GitHub client error: {e}"))?;
-                                let pulls = client
-                                    .list_pulls(&owner, &repo)
-                                    .await
-                                    .map_err(|e| format!("GitHub API error: {e}"))?;
+            let task = cx.spawn(
+                async move |this: WeakEntity<HiveWorkspace>, app: &mut AsyncApp| {
+                    let result = std::thread::spawn(move || {
+                        let rt = tokio::runtime::Runtime::new()
+                            .map_err(|e| format!("Runtime error: {e}"))?;
+                        rt.block_on(async {
+                            let client = hive_integrations::GitHubClient::new(&token)
+                                .map_err(|e| format!("GitHub client error: {e}"))?;
+                            let pulls = client
+                                .list_pulls(&owner, &repo)
+                                .await
+                                .map_err(|e| format!("GitHub API error: {e}"))?;
 
-                                let summaries: Vec<PrSummary> = pulls
-                                    .as_array()
-                                    .unwrap_or(&Vec::new())
-                                    .iter()
-                                    .filter_map(|pr| {
-                                        Some(PrSummary {
-                                            number: pr.get("number")?.as_u64()?,
-                                            title: pr.get("title")?.as_str()?.to_string(),
-                                            author: pr
-                                                .get("user")
-                                                .and_then(|u| u.get("login"))
-                                                .and_then(|l| l.as_str())
-                                                .unwrap_or("unknown")
-                                                .to_string(),
-                                            head: pr
-                                                .get("head")
-                                                .and_then(|h| h.get("ref"))
-                                                .and_then(|r| r.as_str())
-                                                .unwrap_or("")
-                                                .to_string(),
-                                            base: pr
-                                                .get("base")
-                                                .and_then(|b| b.get("ref"))
-                                                .and_then(|r| r.as_str())
-                                                .unwrap_or("")
-                                                .to_string(),
-                                            state: pr
-                                                .get("state")
-                                                .and_then(|s| s.as_str())
-                                                .unwrap_or("open")
-                                                .to_string(),
-                                            created_at: pr
-                                                .get("created_at")
-                                                .and_then(|c| c.as_str())
-                                                .unwrap_or("")
-                                                .to_string(),
-                                            url: pr
-                                                .get("html_url")
-                                                .and_then(|u| u.as_str())
-                                                .unwrap_or("")
-                                                .to_string(),
-                                        })
+                            let summaries: Vec<PrSummary> = pulls
+                                .as_array()
+                                .unwrap_or(&Vec::new())
+                                .iter()
+                                .filter_map(|pr| {
+                                    Some(PrSummary {
+                                        number: pr.get("number")?.as_u64()?,
+                                        title: pr.get("title")?.as_str()?.to_string(),
+                                        author: pr
+                                            .get("user")
+                                            .and_then(|u| u.get("login"))
+                                            .and_then(|l| l.as_str())
+                                            .unwrap_or("unknown")
+                                            .to_string(),
+                                        head: pr
+                                            .get("head")
+                                            .and_then(|h| h.get("ref"))
+                                            .and_then(|r| r.as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        base: pr
+                                            .get("base")
+                                            .and_then(|b| b.get("ref"))
+                                            .and_then(|r| r.as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        state: pr
+                                            .get("state")
+                                            .and_then(|s| s.as_str())
+                                            .unwrap_or("open")
+                                            .to_string(),
+                                        created_at: pr
+                                            .get("created_at")
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        url: pr
+                                            .get("html_url")
+                                            .and_then(|u| u.as_str())
+                                            .unwrap_or("")
+                                            .to_string(),
                                     })
-                                    .collect();
-                                Ok(summaries)
-                            })
+                                })
+                                .collect();
+                            Ok(summaries)
                         })
-                        .join()
-                        .unwrap_or(Err("Thread panicked".to_string()));
+                    })
+                    .join()
+                    .unwrap_or(Err("Thread panicked".to_string()));
 
-                        let _ = this.update(app, |workspace, cx| {
-                            workspace.review_data.pr_data.loading = false;
-                            match result {
-                                Ok(prs) => {
-                                    info!("PR refresh: fetched {} open PRs from GitHub", prs.len());
-                                    workspace.review_data.pr_data.open_prs = prs;
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "PR refresh GitHub fetch failed, falling back to git log: {e}"
-                                    );
-                                    workspace.populate_pr_data_from_git_log();
-                                }
+                    let _ = this.update(app, |workspace, cx| {
+                        workspace.review_data.pr_data.loading = false;
+                        match result {
+                            Ok(prs) => {
+                                info!("PR refresh: fetched {} open PRs from GitHub", prs.len());
+                                workspace.review_data.pr_data.open_prs = prs;
                             }
-                            cx.notify();
-                        });
-                    },
-                );
+                            Err(e) => {
+                                warn!(
+                                    "PR refresh GitHub fetch failed, falling back to git log: {e}"
+                                );
+                                workspace.populate_pr_data_from_git_log();
+                            }
+                        }
+                        cx.notify();
+                    });
+                },
+            );
             self._stream_task = Some(task);
         } else {
             self.review_data.pr_data.github_connected = false;

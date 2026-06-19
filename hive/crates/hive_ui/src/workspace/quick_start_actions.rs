@@ -2,13 +2,13 @@ use std::path::{Path, PathBuf};
 
 use gpui::*;
 
-use crate::chat_service::{ChatService, MessageRole};
 use super::{
-    chat_actions, data_refresh, navigation, project_context, AppA2aClient, AppAiService,
-    AppApprovalGate, AppKnowledgeFiles, AppQuickIndex, HiveWorkspace, NotificationType, Panel,
-    QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate, QuickStartTone,
-    ReviewData, SpecPanelData,
+    AppA2aClient, AppAiService, AppApprovalGate, AppKnowledgeFiles, AppQuickIndex, HiveWorkspace,
+    NotificationType, Panel, QuickStartOpenPanel, QuickStartRunProject, QuickStartSelectTemplate,
+    QuickStartTone, ReviewData, SpecPanelData, chat_actions, data_refresh, navigation,
+    project_context,
 };
+use crate::chat_service::{ChatService, MessageRole};
 use hive_ui_panels::panels::quick_start::{
     QuickStartNextStepDisplay, QuickStartPanelData, QuickStartPriorityDisplay,
     QuickStartSetupDisplay, QuickStartStatusDisplay, QuickStartTemplateDisplay,
@@ -203,7 +203,10 @@ pub(super) fn build_quick_start_data(
         if cx.has_global::<AppQuickIndex>() {
             let quick_index = cx.global::<AppQuickIndex>().0.clone();
             let summary = if quick_index.file_tree.summary.trim().is_empty() {
-                format!("Using {} as the active project root.", project_root.display())
+                format!(
+                    "Using {} as the active project root.",
+                    project_root.display()
+                )
             } else {
                 quick_index.file_tree.summary.clone()
             };
@@ -215,7 +218,10 @@ pub(super) fn build_quick_start_data(
             )
         } else {
             (
-                format!("Using {} as the active project root.", project_root.display()),
+                format!(
+                    "Using {} as the active project root.",
+                    project_root.display()
+                ),
                 0,
                 0,
                 0,
@@ -227,8 +233,7 @@ pub(super) fn build_quick_start_data(
         "Connect at least one cloud or local model runtime in Settings before starting a guided run."
             .into()
     } else if !has_selected_model {
-        "Choose a default model in Settings so Home knows where to launch the project run."
-            .into()
+        "Choose a default model in Settings so Home knows where to launch the project run.".into()
     } else {
         format!(
             "Ready to launch a fresh project run in Chat with {}.",
@@ -238,7 +243,7 @@ pub(super) fn build_quick_start_data(
 
     let setup = vec![
         QuickStartSetupDisplay {
-            title: "Project context".into(),
+            title: "Open project".into(),
             detail: format!(
                 "Workspace root: {}. Knowledge files loaded: {}.",
                 project_root.display(),
@@ -250,7 +255,7 @@ pub(super) fn build_quick_start_data(
             action_panel: Some(Panel::Files.to_stored().into()),
         },
         QuickStartSetupDisplay {
-            title: "AI runtime".into(),
+            title: "Connect model runtime".into(),
             detail: if has_ai_runtime {
                 format!(
                     "Cloud runtime: {}. Local runtime: {}.",
@@ -286,7 +291,7 @@ pub(super) fn build_quick_start_data(
             action_panel: Some(Panel::Settings.to_stored().into()),
         },
         QuickStartSetupDisplay {
-            title: "Default model".into(),
+            title: "Choose launch model".into(),
             detail: if has_selected_model {
                 format!("Current launch model: {}.", current_model)
             } else {
@@ -390,8 +395,9 @@ pub(super) fn build_quick_start_data(
             QuickStartPriorityDisplay {
                 eyebrow: "No active run".into(),
                 title: "Start the next project run".into(),
-                detail: "Choose a mission, describe the outcome, and let Home launch a clean Chat run."
-                    .into(),
+                detail:
+                    "Choose a mission, describe the outcome, and let Home launch a clean Chat run."
+                        .into(),
                 action_label: "Open Launch".into(),
                 action_panel: Panel::QuickStart.to_stored().into(),
                 tone: if launch_ready {
@@ -507,9 +513,8 @@ pub(super) fn build_quick_start_data(
             QuickStartPriorityDisplay {
                 eyebrow: "Recommended next".into(),
                 title: "Launch a fresh guided run".into(),
-                detail:
-                    "Home is ready to start the next mission in a clean project-scoped chat."
-                        .into(),
+                detail: "Home is ready to start the next mission in a clean project-scoped chat."
+                    .into(),
                 action_label: "Open Launch".into(),
                 action_panel: Panel::QuickStart.to_stored().into(),
                 tone: QuickStartTone::Ready,
@@ -726,11 +731,7 @@ pub(super) fn quick_start_template_instruction(template_id: &str) -> &'static st
     }
 }
 
-fn build_quick_start_prompt(
-    workspace: &HiveWorkspace,
-    template_id: &str,
-    detail: &str,
-) -> String {
+fn build_quick_start_prompt(workspace: &HiveWorkspace, template_id: &str, detail: &str) -> String {
     let mission = quick_start_template_instruction(template_id);
     let user_focus = if detail.trim().is_empty() {
         "Use your judgment from the current repository state and start with the highest-impact opportunity.".to_string()

@@ -141,6 +141,9 @@ impl QuickStartPanel {
             .gap(theme.space_4)
             // Primary zone: where you are + the one thing to do.
             .child(render_hero(data, theme))
+            .when(!data.launch_ready, |el| {
+                el.child(render_setup_section(data, theme))
+            })
             .child(render_start_card(data, detail_input, theme))
             .child(render_priority_section(data, theme))
             // Open or switch project.
@@ -149,7 +152,9 @@ impl QuickStartPanel {
             .child(more_divider(theme))
             .child(render_next_steps_section(data, theme))
             .child(render_status_section(data, theme))
-            .child(render_setup_section(data, theme))
+            .when(data.launch_ready, |el| {
+                el.child(render_setup_section(data, theme))
+            })
     }
 }
 
@@ -426,8 +431,8 @@ fn render_setup_section(data: &QuickStartPanelData, theme: &HiveTheme) -> AnyEle
         .flex_col()
         .gap(theme.space_3)
         .child(subsection_header(
-            "Recommended Setup",
-            "What Hive suggests configuring next.",
+            "Setup Checklist",
+            "Open a project, connect a model, then start a guided run.",
             theme,
         ));
 

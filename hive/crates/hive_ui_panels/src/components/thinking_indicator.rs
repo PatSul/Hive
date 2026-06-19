@@ -125,10 +125,16 @@ mod tests {
 }
 
 /// Render a thinking/progress indicator with a pulsing dot, phase label, and step dots.
-pub fn render_thinking_indicator(phase: ThinkingPhase, theme: &HiveTheme) -> impl IntoElement {
+pub fn render_thinking_indicator(
+    phase: ThinkingPhase,
+    animation_tick: u64,
+    theme: &HiveTheme,
+) -> impl IntoElement {
     let active = phase.ordinal();
     let total = 6;
     let is_done = phase == ThinkingPhase::Done;
+    let wave = (animation_tick as usize) % total;
+    let pulse_big = animation_tick % 2 == 0;
     let dot_color = if is_done {
         theme.accent_green
     } else {
@@ -148,8 +154,8 @@ pub fn render_thinking_indicator(phase: ThinkingPhase, theme: &HiveTheme) -> imp
         .child(
             // Pulsing dot
             div()
-                .w(px(8.0))
-                .h(px(8.0))
+                .w(px(if pulse_big && !is_done { 10.0 } else { 7.0 }))
+                .h(px(if pulse_big && !is_done { 10.0 } else { 7.0 }))
                 .rounded(theme.radius_full)
                 .bg(dot_color),
         )
@@ -166,19 +172,27 @@ pub fn render_thinking_indicator(phase: ThinkingPhase, theme: &HiveTheme) -> imp
                 .items_center()
                 .gap(theme.space_1)
                 .children((0..total).map(|i| {
-                    let filled = i <= active;
-                    let color = if filled {
+                    let mut bg = if is_done {
+                        theme.accent_green
+                    } else if i == wave {
+                        theme.accent_cyan
+                    } else if i <= active {
                         theme.accent_cyan
                     } else {
                         theme.text_muted
                     };
-                    let mut bg = color;
-                    if !filled {
+
+                    if !is_done && i == wave {
+                        bg.a = 1.0;
+                    } else if !is_done && i <= active {
+                        bg.a = 0.65;
+                    } else if !is_done {
                         bg.a = 0.3;
                     }
+
                     div()
-                        .w(px(6.0))
-                        .h(px(6.0))
+                        .w(px(if !is_done && i == wave { 8.0 } else { 6.0 }))
+                        .h(px(if !is_done && i == wave { 8.0 } else { 6.0 }))
                         .rounded(theme.radius_full)
                         .bg(bg)
                 })),

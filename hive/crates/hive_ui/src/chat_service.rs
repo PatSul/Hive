@@ -24,6 +24,109 @@ use hive_core::conversations::{
 };
 use hive_ui_panels::components::diff_viewer::DiffLine;
 
+fn stream_error_chunk(message: impl Into<String>) -> StreamChunk {
+    StreamChunk {
+        content: message.into(),
+        done: true,
+        thinking: None,
+        usage: None,
+        tool_calls: None,
+        stop_reason: None,
+    }
+}
+
+fn spawn_provider_stream(
+    provider: Arc<dyn AiProvider>,
+    request: ChatRequest,
+    label: &'static str,
+) -> mpsc::Receiver<StreamChunk> {
+    let (tx, rx) = mpsc::channel::<StreamChunk>(256);
+    let tx_for_thread = tx.clone();
+
+    let spawn_result = std::thread::Builder::new()
+        .name(format!("hive-{label}-stream"))
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            let Ok(runtime) = runtime else {
+                let _ = tx_for_thread.blocking_send(stream_error_chunk(format!(
+                    "{label} failed: could not start async runtime"
+                )));
+                return;
+            };
+
+            runtime.block_on(async move {
+                let provider_name = provider.name().to_string();
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    provider.stream_chat(&request),
+                )
+                .await
+                {
+                    Ok(Ok(mut provider_rx)) => {
+                        let mut saw_chunk = false;
+                        loop {
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(60),
+                                provider_rx.recv(),
+                            )
+                            .await
+                            {
+                                Ok(Some(chunk)) => {
+                                    saw_chunk = true;
+                                    if tx_for_thread.send(chunk).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Ok(None) => {
+                                    if !saw_chunk {
+                                        let _ = tx_for_thread
+                                            .send(stream_error_chunk(format!(
+                                                "{label} failed: {provider_name} closed the stream before returning a response."
+                                            )))
+                                            .await;
+                                    }
+                                    break;
+                                }
+                                Err(_) => {
+                                    let _ = tx_for_thread
+                                        .send(stream_error_chunk(format!(
+                                            "{label} failed: no response from {provider_name} for 60 seconds (model {}). Check the selected provider or switch models.",
+                                            request.model
+                                        )))
+                                        .await;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx_for_thread
+                            .send(stream_error_chunk(format!("{label} failed: {e}")))
+                            .await;
+                    }
+                    Err(_) => {
+                        let _ = tx_for_thread
+                            .send(stream_error_chunk(format!(
+                                "{label} failed: {provider_name} did not open a stream within 30 seconds (model {}). Check the selected provider or switch models.",
+                                request.model
+                            )))
+                            .await;
+                    }
+                }
+            });
+        });
+
+    if let Err(e) = spawn_result {
+        let _ = tx.blocking_send(stream_error_chunk(format!(
+            "{label} failed: could not start stream thread: {e}"
+        )));
+    }
+
+    rx
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -756,7 +859,8 @@ impl ChatService {
         // 1. Record the user message.
         let user_msg = ChatMessage::user(&content);
         self.messages.push(user_msg);
-        self.context_window.push(ContextMessage::new("user", &content));
+        self.context_window
+            .push(ContextMessage::new("user", &content));
 
         // Track in context window for token budget management.
         if let Some(ctx_msg) = self
@@ -1131,16 +1235,11 @@ impl ChatService {
                                 tools: current_request.tools.clone(),
                                 cache_system_prompt: false,
                             };
-                            match provider.stream_chat(&current_request).await {
-                                Ok(rx) => { current_rx = rx; }
-                                Err(e) => {
-                                    error!("Tool re-send failed: {e}");
-                                    let _ = this.update(app, |svc: &mut ChatService, cx| {
-                                        svc.set_error(format!("Tool re-send failed: {e}"), cx);
-                                    });
-                                    break;
-                                }
-                            }
+                            current_rx = spawn_provider_stream(
+                                provider.clone(),
+                                current_request.clone(),
+                                "tool re-send",
+                            );
                             iteration += 1;
                             continue;
                         }
@@ -1228,18 +1327,11 @@ impl ChatService {
                     };
 
                     // --- Get new stream from provider ---
-                    match provider.stream_chat(&current_request).await {
-                        Ok(rx) => {
-                            current_rx = rx;
-                        }
-                        Err(e) => {
-                            error!("Tool re-send failed: {e}");
-                            let _ = this.update(app, |svc: &mut ChatService, cx| {
-                                svc.set_error(format!("Tool re-send failed: {e}"), cx);
-                            });
-                            break;
-                        }
-                    }
+                    current_rx = spawn_provider_stream(
+                        provider.clone(),
+                        current_request.clone(),
+                        "tool re-send",
+                    );
 
                     iteration += 1;
                 }
@@ -1328,7 +1420,8 @@ impl ChatService {
         self.is_streaming = false;
         self._stream_task = None;
         self.generation += 1;
-        self.context_window.push(ContextMessage::new("assistant", content));
+        self.context_window
+            .push(ContextMessage::new("assistant", content));
 
         info!(
             "ChatService: stream finalized ({} messages, model={}, ctx_usage={:.0}%)",

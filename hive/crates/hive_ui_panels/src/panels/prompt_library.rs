@@ -3,7 +3,7 @@ use gpui::*;
 
 use hive_agents::prompt_template::{self, PromptTemplate};
 use hive_ui_core::HiveTheme;
-use hive_ui_core::actions::{PromptLibraryDelete, PromptLibraryLoad};
+use hive_ui_core::actions::{PromptLibraryDelete, PromptLibraryLoad, PromptLibrarySaveCurrent};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -93,6 +93,21 @@ pub fn render_prompt_library(data: &PromptLibraryData, theme: &HiveTheme) -> imp
                                 .child(format!("{} templates", total)),
                         ),
                 ),
+        )
+        .child(
+            div()
+                .px(theme.space_3)
+                .py(theme.space_1)
+                .rounded(theme.radius_sm)
+                .bg(theme.accent_cyan)
+                .text_size(theme.font_size_sm)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_on_accent)
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                    window.dispatch_action(Box::new(PromptLibrarySaveCurrent), cx);
+                })
+                .child("Save Current"),
         )
         .children(if filtered.is_empty() {
             vec![render_empty_state(theme).into_any_element()]

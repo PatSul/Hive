@@ -65,6 +65,21 @@ impl Panel {
         Panel::QuickStart,
     ];
 
+    /// Number-key shortcuts should follow the visible shell, not the raw
+    /// historical `Panel::ALL` order.
+    pub const SHORTCUT_ORDER: [Panel; 10] = [
+        Panel::QuickStart,
+        Panel::Chat,
+        Panel::Files,
+        Panel::History,
+        Panel::Specs,
+        Panel::Agents,
+        Panel::Workflows,
+        Panel::Kanban,
+        Panel::Activity,
+        Panel::Settings,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Chat => "Chat",
@@ -101,10 +116,14 @@ impl Panel {
     /// Return the panel at the given index in `Panel::ALL`, or `None` if out
     /// of bounds.
     ///
-    /// Keyboard shortcuts use this to map `ctrl-1` (index 0) through `ctrl-9`
-    /// (index 8) and `ctrl-0` (index 9) to panels.
+    /// Keyboard shortcuts use `from_shortcut_index` so they match the visible
+    /// shell order. This method remains the raw panel inventory lookup.
     pub fn from_index(idx: usize) -> Option<Panel> {
         Self::ALL.get(idx).copied()
+    }
+
+    pub fn from_shortcut_index(idx: usize) -> Option<Panel> {
+        Self::SHORTCUT_ORDER.get(idx).copied()
     }
 
     /// Higher-level shell grouping for the panel. Utility panels intentionally
@@ -119,12 +138,12 @@ impl Panel {
             | Self::CodeMap
             | Self::PromptLibrary
             | Self::Specs
-            | Self::Agents
-            | Self::Kanban
             | Self::Review
             | Self::Terminal => Some(ShellDestination::Build),
-            Self::Workflows | Self::Channels | Self::Network => Some(ShellDestination::Automate),
-            Self::Assistant => Some(ShellDestination::Assist),
+            Self::Agents | Self::Workflows | Self::Channels | Self::Kanban => {
+                Some(ShellDestination::Automate)
+            }
+            Self::Assistant => Some(ShellDestination::Home),
             Self::Monitor
             | Self::Activity
             | Self::Logs
@@ -135,14 +154,34 @@ impl Panel {
             | Self::Routing
             | Self::RoutingMatrix
             | Self::Models
+            | Self::Network
             | Self::TokenLaunch
             | Self::Settings
-            | Self::Help => None,
+            | Self::Help => Some(ShellDestination::Settings),
         }
     }
 
     pub fn is_utility(self) -> bool {
         self.shell_destination().is_none()
+    }
+
+    pub fn is_labs_panel(self) -> bool {
+        matches!(self, Self::TokenLaunch)
+    }
+
+    pub fn labs_enabled() -> bool {
+        std::env::var("HIVE_ENABLE_LABS")
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn is_visible(self) -> bool {
+        !self.is_labs_panel() || Self::labs_enabled()
     }
 
     /// SVG icon for each panel via gpui-component IconName.
@@ -257,8 +296,8 @@ pub enum ShellDestination {
     Home,
     Build,
     Automate,
-    Assist,
     Observe,
+    Settings,
 }
 
 impl ShellDestination {
@@ -266,17 +305,17 @@ impl ShellDestination {
         ShellDestination::Home,
         ShellDestination::Build,
         ShellDestination::Automate,
-        ShellDestination::Assist,
         ShellDestination::Observe,
+        ShellDestination::Settings,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Home => "Home",
-            Self::Build => "Build",
-            Self::Automate => "Automate",
-            Self::Assist => "Assist",
+            Self::Build => "Work",
+            Self::Automate => "Runs",
             Self::Observe => "Observe",
+            Self::Settings => "Settings",
         }
     }
 
@@ -285,8 +324,8 @@ impl ShellDestination {
             Self::Home => "Start work, clear setup blockers, and launch the next mission.",
             Self::Build => "Code, plan, review, and execute in the active workspace.",
             Self::Automate => "Run workflows, channels, and distributed execution paths.",
-            Self::Assist => "Handle daily briefings, reminders, and assistant actions.",
             Self::Observe => "Review approvals, activity, costs, and safety signals.",
+            Self::Settings => "Configure models, routing, skills, network, and advanced tools.",
         }
     }
 
@@ -295,8 +334,8 @@ impl ShellDestination {
             Self::Home => IconName::Star,
             Self::Build => IconName::Bot,
             Self::Automate => IconName::Map,
-            Self::Assist => IconName::Bell,
             Self::Observe => IconName::Inbox,
+            Self::Settings => IconName::Settings,
         }
     }
 
@@ -305,14 +344,14 @@ impl ShellDestination {
             Self::Home => Panel::QuickStart,
             Self::Build => Panel::Chat,
             Self::Automate => Panel::Workflows,
-            Self::Assist => Panel::Assistant,
             Self::Observe => Panel::Activity,
+            Self::Settings => Panel::Settings,
         }
     }
 
     pub fn panels(self) -> &'static [Panel] {
         match self {
-            Self::Home => &[Panel::QuickStart],
+            Self::Home => &[Panel::QuickStart, Panel::Assistant],
             Self::Build => &[
                 Panel::Chat,
                 Panel::Files,
@@ -320,13 +359,15 @@ impl ShellDestination {
                 Panel::Specs,
                 Panel::CodeMap,
                 Panel::PromptLibrary,
-                Panel::Agents,
-                Panel::Kanban,
                 Panel::Review,
                 Panel::Terminal,
             ],
-            Self::Automate => &[Panel::Workflows, Panel::Channels, Panel::Network],
-            Self::Assist => &[Panel::Assistant],
+            Self::Automate => &[
+                Panel::Agents,
+                Panel::Workflows,
+                Panel::Kanban,
+                Panel::Channels,
+            ],
             Self::Observe => &[
                 Panel::Activity,
                 Panel::Monitor,
@@ -334,6 +375,16 @@ impl ShellDestination {
                 Panel::Costs,
                 Panel::Learning,
                 Panel::Shield,
+            ],
+            Self::Settings => &[
+                Panel::Settings,
+                Panel::Models,
+                Panel::Routing,
+                Panel::RoutingMatrix,
+                Panel::Skills,
+                Panel::Network,
+                Panel::TokenLaunch,
+                Panel::Help,
             ],
         }
     }

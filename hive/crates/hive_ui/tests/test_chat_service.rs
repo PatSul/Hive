@@ -422,6 +422,8 @@ fn test_chat_message_from_stored_conversion() {
         cost: Some(0.01),
         tokens: Some(50),
         thinking: None,
+        is_compacted: false,
+        compacted_from: None,
     };
 
     let msg = ChatMessage::from_stored(&stored);

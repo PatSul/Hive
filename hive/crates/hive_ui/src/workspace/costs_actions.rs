@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 use tracing::{error, info};
 
-use super::{AppAiService, HiveConfig, HiveWorkspace, NotificationType};
+use super::{
+    AppAiService, HiveConfig, HiveWorkspace, NotificationType, data_refresh, destructive_actions,
+};
 
 pub(super) fn handle_costs_export_csv(
     workspace: &mut HiveWorkspace,
@@ -59,9 +62,17 @@ pub(super) fn handle_costs_export_csv(
 }
 
 pub(super) fn handle_costs_reset_today(
-    _workspace: &mut HiveWorkspace,
+    workspace: &mut HiveWorkspace,
     _action: &super::CostsResetToday,
-    _window: &mut Window,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let confirmation = DestructiveConfirmation::for_action(DestructiveActionKind::CostsResetToday);
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_costs_reset_today(
+    workspace: &mut HiveWorkspace,
     cx: &mut Context<HiveWorkspace>,
 ) {
     info!("Costs: reset today");
@@ -71,18 +82,29 @@ pub(super) fn handle_costs_reset_today(
             .cost_tracker_mut()
             .reset_today();
     }
+    data_refresh::refresh_cost_data(workspace, cx);
     cx.notify();
 }
 
 pub(super) fn handle_costs_clear_history(
-    _workspace: &mut HiveWorkspace,
+    workspace: &mut HiveWorkspace,
     _action: &super::CostsClearHistory,
-    _window: &mut Window,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::CostsClearHistory);
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_costs_clear_history(
+    workspace: &mut HiveWorkspace,
     cx: &mut Context<HiveWorkspace>,
 ) {
     info!("Costs: clear all history");
     if cx.has_global::<AppAiService>() {
         cx.global_mut::<AppAiService>().0.cost_tracker_mut().clear();
     }
+    data_refresh::refresh_cost_data(workspace, cx);
     cx.notify();
 }

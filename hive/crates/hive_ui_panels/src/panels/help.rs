@@ -327,7 +327,7 @@ fn render_quick_start(theme: &HiveTheme) -> AnyElement {
         .child(step_row(
             1,
             "Choose the mission",
-            "Open Quick Start from the Core section in the sidebar, pick a goal like Improve This Codebase, Ship A Feature, or Fix A Bug, then describe the specific outcome you want.",
+            "Open Home in the sidebar, pick a goal like Improve This Codebase, Ship A Feature, or Fix A Bug, then describe the specific outcome you want.",
             theme,
         ))
         .child(step_row(
@@ -345,7 +345,7 @@ fn render_quick_start(theme: &HiveTheme) -> AnyElement {
         .child(step_row(
             4,
             "Follow through in the other tabs",
-            "Use Review for git state, Specs for planning, Agents for delegation, and Kanban for tracking once the kickoff run identifies the real work queue.",
+            "Use Work for project context, Runs for delegation and tracking, and Review for git state once the kickoff run identifies the real work queue.",
             theme,
         ))
         .child(step_row(
@@ -374,7 +374,7 @@ fn render_workflows_section(theme: &HiveTheme) -> AnyElement {
         .child(step_row(
             1,
             "Open the Workflows panel",
-            "Click Workflows in the sidebar under Flow. The canvas shows your current workflow \
+            "Click Workflows in the sidebar under Runs. The canvas shows your current workflow \
              with a node palette on the left and properties inspector on the right.",
             theme,
         ))
@@ -840,16 +840,16 @@ fn render_keyboard_shortcuts(theme: &HiveTheme) -> AnyElement {
         .child(shortcut_row("Ctrl + P", "Toggle Privacy Mode", theme))
         .child(shortcut_row("Ctrl + N", "New conversation", theme))
         .child(shortcut_row("Ctrl + L", "Clear chat", theme))
-        .child(shortcut_row("Ctrl/Cmd + 1", "Chat", theme))
-        .child(shortcut_row("Ctrl/Cmd + 2", "History", theme))
+        .child(shortcut_row("Ctrl/Cmd + 1", "Home", theme))
+        .child(shortcut_row("Ctrl/Cmd + 2", "Chat", theme))
         .child(shortcut_row("Ctrl/Cmd + 3", "Files", theme))
-        .child(shortcut_row("Ctrl/Cmd + 4", "Specs", theme))
-        .child(shortcut_row("Ctrl/Cmd + 5", "Agents", theme))
-        .child(shortcut_row("Ctrl/Cmd + 6", "Workflows", theme))
-        .child(shortcut_row("Ctrl/Cmd + 7", "Channels", theme))
+        .child(shortcut_row("Ctrl/Cmd + 4", "History", theme))
+        .child(shortcut_row("Ctrl/Cmd + 5", "Specs", theme))
+        .child(shortcut_row("Ctrl/Cmd + 6", "Agents", theme))
+        .child(shortcut_row("Ctrl/Cmd + 7", "Workflows", theme))
         .child(shortcut_row("Ctrl/Cmd + 8", "Kanban", theme))
-        .child(shortcut_row("Ctrl/Cmd + 9", "Monitor", theme))
-        .child(shortcut_row("Ctrl/Cmd + 0", "Logs", theme))
+        .child(shortcut_row("Ctrl/Cmd + 9", "Activity", theme))
+        .child(shortcut_row("Ctrl/Cmd + 0", "Settings", theme))
         .child(separator(theme))
         .child(
             div()

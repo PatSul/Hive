@@ -320,26 +320,6 @@ impl KanbanPanel {
             )
             // Spacer
             .child(div().flex_1())
-            // Filter placeholder
-            .child(
-                div()
-                    .px(theme.space_3)
-                    .py(theme.space_1)
-                    .rounded(theme.radius_sm)
-                    .bg(theme.bg_surface)
-                    .border_1()
-                    .border_color(theme.border)
-                    .text_size(theme.font_size_sm)
-                    .text_color(theme.text_muted)
-                    .child("Filter \u{25BE}".to_string()),
-            )
-            // Bulk actions
-            .child(Self::toolbar_btn("Move Selected", theme.accent_cyan, theme))
-            .child(Self::toolbar_btn(
-                "Delete Selected",
-                theme.accent_red,
-                theme,
-            ))
             // Add task
             .child(
                 div()
@@ -357,19 +337,6 @@ impl KanbanPanel {
                     })
                     .child("+ Add Task".to_string()),
             )
-    }
-
-    fn toolbar_btn(label: &str, color: Hsla, theme: &HiveTheme) -> impl IntoElement {
-        div()
-            .px(theme.space_3)
-            .py(theme.space_1)
-            .rounded(theme.radius_sm)
-            .bg(theme.bg_surface)
-            .border_1()
-            .border_color(theme.border)
-            .text_size(theme.font_size_sm)
-            .text_color(color)
-            .child(label.to_string())
     }
 
     // ------------------------------------------------------------------

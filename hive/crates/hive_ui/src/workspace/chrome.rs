@@ -5,8 +5,8 @@ use crate::chat_input::ChatInputView;
 use crate::shell_header::{ShellHeader, ShellHeaderData};
 
 use super::{
-    context_rail, quick_start_actions, sidebar_shell, AppApprovalGate, HiveWorkspace, Panel,
-    ShellDestination, ToggleProjectDropdown,
+    AppApprovalGate, HiveWorkspace, Panel, ShellDestination, ToggleProjectDropdown, context_rail,
+    quick_start_actions, sidebar_shell,
 };
 
 pub(super) fn build_shell_header_data(
@@ -19,8 +19,10 @@ pub(super) fn build_shell_header_data(
         0
     };
     let home_focus = Some(
-        quick_start_actions::quick_start_template_title(&workspace.quick_start_data.selected_template)
-            .to_string(),
+        quick_start_actions::quick_start_template_title(
+            &workspace.quick_start_data.selected_template,
+        )
+        .to_string(),
     );
     let is_streaming = workspace.chat_service.read(cx).is_streaming();
 
@@ -72,9 +74,7 @@ pub(super) fn render_project_dropdown_backdrop() -> AnyElement {
         .into_any_element()
 }
 
-pub(super) fn render_utility_drawer_backdrop(
-    cx: &mut Context<HiveWorkspace>,
-) -> AnyElement {
+pub(super) fn render_utility_drawer_backdrop(cx: &mut Context<HiveWorkspace>) -> AnyElement {
     div()
         .absolute()
         .top_0()
@@ -114,26 +114,37 @@ pub(super) fn render_main_content(
                 .flex()
                 .flex_col()
                 .flex_1()
+                .min_w(px(0.0))
                 .overflow_hidden()
                 .child(ShellHeader::render(&shell_header_data, theme))
                 .child(
                     div()
                         .flex()
                         .flex_1()
+                        .min_w(px(0.0))
                         .overflow_hidden()
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
                                 .flex_1()
+                                .min_w(px(0.0))
+                                .min_h(px(0.0))
                                 .overflow_hidden()
-                                .child(active_panel_el),
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .min_h(px(0.0))
+                                        .overflow_hidden()
+                                        .child(active_panel_el),
+                                )
+                                .when(active_panel == Panel::Chat, |el: Div| el.child(chat_input)),
                         )
                         .when(show_context_rail, |el| {
                             el.child(context_rail::render_context_rail(workspace, cx))
                         }),
-                )
-                .when(active_panel == Panel::Chat, |el: Div| el.child(chat_input)),
+                ),
         )
         .into_any_element()
 }

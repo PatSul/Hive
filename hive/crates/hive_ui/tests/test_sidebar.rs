@@ -47,6 +47,51 @@ fn test_from_index_matches_all_array() {
 }
 
 #[test]
+fn test_shortcut_index_matches_visible_shell_order() {
+    let expected = [
+        Panel::QuickStart,
+        Panel::Chat,
+        Panel::Files,
+        Panel::History,
+        Panel::Specs,
+        Panel::Agents,
+        Panel::Workflows,
+        Panel::Kanban,
+        Panel::Activity,
+        Panel::Settings,
+    ];
+
+    for (idx, panel) in expected.iter().copied().enumerate() {
+        assert_eq!(Panel::from_shortcut_index(idx), Some(panel));
+    }
+    assert_eq!(Panel::from_shortcut_index(expected.len()), None);
+}
+
+#[test]
+fn test_assistant_is_home_panel_not_top_level_destination() {
+    assert_eq!(
+        Panel::Assistant.shell_destination(),
+        Some(ShellDestination::Home)
+    );
+    assert_eq!(
+        ShellDestination::Home.panels(),
+        &[Panel::QuickStart, Panel::Assistant]
+    );
+    assert_eq!(ShellDestination::ALL.len(), 5);
+}
+
+#[test]
+fn test_token_launch_is_labs_gated() {
+    assert!(Panel::TokenLaunch.is_labs_panel());
+    assert_eq!(Panel::TokenLaunch.is_visible(), Panel::labs_enabled());
+    assert!(
+        ShellDestination::Settings
+            .panels()
+            .contains(&Panel::TokenLaunch)
+    );
+}
+
+#[test]
 fn test_sidebar_default_panel_is_chat() {
     let sidebar = Sidebar::new();
     assert_eq!(sidebar.active_panel, Panel::Chat);

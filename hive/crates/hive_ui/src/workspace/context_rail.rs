@@ -6,9 +6,9 @@ use crate::chat_service::{MessageRole, PendingToolApproval};
 use hive_agents::activity::{ApprovalRequest, OperationType};
 
 use super::{
-    format_network_relative_time, quick_start_actions, ActivityApprove, ActivityDeny,
-    AppApprovalGate, HiveTheme, HiveWorkspace, Panel, QuickStartOpenPanel, ShellDestination,
-    ToolApprove, ToolReject,
+    ActivityApprove, ActivityDeny, AppApprovalGate, HiveTheme, HiveWorkspace, Panel,
+    QuickStartOpenPanel, ShellDestination, ToolApprove, ToolReject, format_network_relative_time,
+    quick_start_actions,
 };
 
 pub(super) fn render_context_rail(
@@ -19,7 +19,7 @@ pub(super) fn render_context_rail(
     let active_destination = workspace.sidebar.active_destination;
     let (title, detail, sections) = match active_destination {
         ShellDestination::Build => (
-            "Build Context",
+            "Work Context",
             "Keep the active plan, run state, git handoff, and approvals visible while you work.",
             build_context_sections(workspace, cx),
         ),
@@ -109,8 +109,10 @@ fn build_context_sections(
         .active_spec()
         .map(|spec| spec.title.clone())
         .unwrap_or_else(|| {
-            quick_start_actions::quick_start_template_title(&workspace.quick_start_data.selected_template)
-                .to_string()
+            quick_start_actions::quick_start_template_title(
+                &workspace.quick_start_data.selected_template,
+            )
+            .to_string()
         });
 
     let focus_section = context_section_card(
@@ -585,7 +587,11 @@ fn observe_context_sections(
             ))
             .child(context_metric(
                 "Requests",
-                workspace.activity_data.cost_summary.request_count.to_string(),
+                workspace
+                    .activity_data
+                    .cost_summary
+                    .request_count
+                    .to_string(),
                 theme.accent_cyan,
                 theme,
             ))
@@ -1026,12 +1032,7 @@ fn context_metric(
         .into_any_element()
 }
 
-fn context_fact_row(
-    title: &str,
-    detail: &str,
-    title_color: Hsla,
-    theme: &HiveTheme,
-) -> AnyElement {
+fn context_fact_row(title: &str, detail: &str, title_color: Hsla, theme: &HiveTheme) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -1076,10 +1077,16 @@ fn context_badge(label: &str, accent: Hsla, theme: &HiveTheme) -> AnyElement {
 fn approval_operation_title(operation: &OperationType) -> String {
     match operation {
         OperationType::ShellCommand(command) => {
-            format!("Shell command: {}", quick_start_actions::text_excerpt(command, 44))
+            format!(
+                "Shell command: {}",
+                quick_start_actions::text_excerpt(command, 44)
+            )
         }
         OperationType::FileDelete(path) => {
-            format!("Delete file: {}", quick_start_actions::text_excerpt(path, 44))
+            format!(
+                "Delete file: {}",
+                quick_start_actions::text_excerpt(path, 44)
+            )
         }
         OperationType::FileModify { path, .. } => {
             format!("Edit file: {}", quick_start_actions::text_excerpt(path, 44))

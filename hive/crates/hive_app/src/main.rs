@@ -302,9 +302,9 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         changes_applied: 0,
         auto_apply_enabled: config.auto_apply_enabled,
     });
-    cx.set_global(AppCortexStatusRx(std::sync::Arc::new(std::sync::Mutex::new(
-        cortex_status_rx,
-    ))));
+    cx.set_global(AppCortexStatusRx(std::sync::Arc::new(
+        std::sync::Mutex::new(cortex_status_rx),
+    )));
 
     // Privacy shield — load from persisted config.
     let shield = std::sync::Arc::new(hive_shield::HiveShield::new(config.shield.clone()));
@@ -453,7 +453,14 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         let collective = std::sync::Arc::clone(&cx.global::<AppCollectiveMemory>().0);
         let executor = cortex_runtime::build_autoresearch_executor(&cx.global::<AppAiService>().0);
         cortex_runtime::spawn_cortex_ui_bridge(cortex_ui_rx, cortex_status_tx.clone());
-        cortex_runtime::spawn_cortex_worker(cortex, learning, collective, rx, executor, cortex_status_tx);
+        cortex_runtime::spawn_cortex_worker(
+            cortex,
+            learning,
+            collective,
+            rx,
+            executor,
+            cortex_status_tx,
+        );
     }
 
     // Standup Service
@@ -1856,6 +1863,11 @@ fn start_ui_action_bridge(cx: &mut App) {
 }
 
 fn start_background_update_check(cx: &mut App) {
+    if cfg!(debug_assertions) {
+        info!("Skipping app update check for debug build");
+        return;
+    }
+
     if !(cx.has_global::<AppConfig>() && cx.global::<AppConfig>().0.get().auto_update) {
         return;
     }

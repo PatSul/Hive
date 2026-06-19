@@ -2,10 +2,10 @@ use gpui::*;
 use gpui_component::scroll::ScrollableElement;
 
 use super::{
-    sync_chat_cache, ActivityPanel, AgentsPanel, AssistantPanel, ChatPanel, CostsPanel,
-    FilesPanel, HelpPanel, HistoryPanel, HiveTheme, HiveWorkspace, KanbanPanel, LearningPanel,
-    LogsPanel, MonitorPanel, NetworkPanel, Panel, QuickStartPanel, ReviewPanel, RoutingPanel,
-    SkillsPanel, SpecsPanel, TerminalPanel, TokenLaunchPanel, ToolApprove, ToolReject,
+    ActivityPanel, AgentsPanel, AssistantPanel, ChatPanel, CostsPanel, FilesPanel, HelpPanel,
+    HistoryPanel, HiveTheme, HiveWorkspace, KanbanPanel, LearningPanel, LogsPanel, MonitorPanel,
+    NetworkPanel, Panel, QuickStartPanel, ReviewPanel, RoutingPanel, SkillsPanel, SpecsPanel,
+    TerminalPanel, TokenLaunchPanel, ToolApprove, ToolReject, sync_chat_cache,
 };
 
 pub(super) fn render_active_panel(
@@ -25,35 +25,62 @@ pub(super) fn render_active_panel(
             theme,
         )
         .into_any_element(),
-        Panel::History => HistoryPanel::render(&workspace.history_data, theme).into_any_element(),
-        Panel::Files => FilesPanel::render(&workspace.files_data, theme).into_any_element(),
+        Panel::History => HistoryPanel::render(
+            &workspace.history_data,
+            &workspace.history_search_input,
+            theme,
+        )
+        .into_any_element(),
+        Panel::Files => {
+            FilesPanel::render(&workspace.files_data, &workspace.files_search_input, theme)
+                .into_any_element()
+        }
         Panel::CodeMap => {
             hive_ui_panels::panels::code_map::render_code_map(&workspace.code_map_data, theme)
                 .into_any_element()
         }
-        Panel::PromptLibrary => {
-            hive_ui_panels::panels::prompt_library::render_prompt_library(
-                &workspace.prompt_library_data,
-                theme,
-            )
-            .into_any_element()
-        }
+        Panel::PromptLibrary => hive_ui_panels::panels::prompt_library::render_prompt_library(
+            &workspace.prompt_library_data,
+            theme,
+        )
+        .into_any_element(),
         Panel::Kanban => KanbanPanel::render(&workspace.kanban_data, theme).into_any_element(),
         Panel::Monitor => MonitorPanel::render(&workspace.monitor_data, theme).into_any_element(),
-        Panel::Activity => ActivityPanel::render(&workspace.activity_data, theme).into_any_element(),
-        Panel::Logs => LogsPanel::render(&workspace.logs_data, theme).into_any_element(),
+        Panel::Activity => {
+            ActivityPanel::render(&workspace.activity_data, theme).into_any_element()
+        }
+        Panel::Logs => LogsPanel::render(&workspace.logs_data, &workspace.logs_search_input, theme)
+            .into_any_element(),
         Panel::Costs => CostsPanel::render(&workspace.cost_data, theme).into_any_element(),
-        Panel::Review => ReviewPanel::render(&workspace.review_data, theme).into_any_element(),
-        Panel::Skills => SkillsPanel::render(&workspace.skills_data, theme).into_any_element(),
+        Panel::Review => {
+            let inputs = super::ReviewPanelInputs {
+                commit_message: workspace.review_commit_message_input.clone(),
+                pr_title: workspace.review_pr_title_input.clone(),
+                pr_body: workspace.review_pr_body_input.clone(),
+                pr_base: workspace.review_pr_base_input.clone(),
+                branch_name: workspace.review_branch_name_input.clone(),
+                lfs_pattern: workspace.review_lfs_pattern_input.clone(),
+                gitflow_name: workspace.review_gitflow_name_input.clone(),
+            };
+            ReviewPanel::render(&workspace.review_data, &inputs, theme).into_any_element()
+        }
+        Panel::Skills => SkillsPanel::render(
+            &workspace.skills_data,
+            &workspace.skills_search_input,
+            theme,
+        )
+        .into_any_element(),
         Panel::Routing => RoutingPanel::render(&workspace.routing_data, theme).into_any_element(),
         Panel::RoutingMatrix => workspace.routing_matrix_view.clone().into_any_element(),
         Panel::Workflows => workspace.workflow_builder_view.clone().into_any_element(),
         Panel::Channels => workspace.channels_view.clone().into_any_element(),
         Panel::Models => workspace.models_browser_view.clone().into_any_element(),
-        Panel::TokenLaunch => {
-            TokenLaunchPanel::render(&workspace.token_launch_data, &workspace.token_launch_inputs, theme)
-                .into_any_element()
-        }
+        Panel::TokenLaunch => TokenLaunchPanel::render(
+            &workspace.token_launch_data,
+            &workspace.token_launch_inputs,
+            theme,
+        )
+        .into_any_element(),
         Panel::Specs => SpecsPanel::render(&workspace.specs_data, theme).into_any_element(),
         Panel::Agents => AgentsPanel::render(
             &workspace.agents_data,
@@ -62,11 +89,17 @@ pub(super) fn render_active_panel(
         )
         .into_any_element(),
         Panel::Shield => workspace.shield_view.clone().into_any_element(),
-        Panel::Learning => LearningPanel::render(&workspace.learning_data, theme).into_any_element(),
-        Panel::Assistant => AssistantPanel::render(&workspace.assistant_data, theme).into_any_element(),
+        Panel::Learning => {
+            LearningPanel::render(&workspace.learning_data, theme).into_any_element()
+        }
+        Panel::Assistant => {
+            AssistantPanel::render(&workspace.assistant_data, theme).into_any_element()
+        }
         Panel::Settings => workspace.settings_view.clone().into_any_element(),
         Panel::Help => HelpPanel::render(theme).into_any_element(),
-        Panel::Network => NetworkPanel::render(&workspace.network_peer_data, theme).into_any_element(),
+        Panel::Network => {
+            NetworkPanel::render(&workspace.network_peer_data, theme).into_any_element()
+        }
         Panel::Terminal => div()
             .flex()
             .flex_col()
@@ -115,6 +148,7 @@ fn render_chat_cached(
         &streaming_content,
         is_streaming,
         &current_model,
+        workspace.streaming_animation_tick,
         &workspace.theme,
     );
 

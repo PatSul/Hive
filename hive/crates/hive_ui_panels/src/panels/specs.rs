@@ -134,7 +134,6 @@ fn render_header(spec_count: usize, theme: &HiveTheme) -> AnyElement {
         .child(header_title(theme))
         .child(div().flex_1())
         .child(spec_count_badge(spec_count, theme))
-        .child(new_spec_button(theme))
         .into_any_element()
 }
 
@@ -181,21 +180,6 @@ fn spec_count_badge(count: usize, theme: &HiveTheme) -> Div {
         .text_size(theme.font_size_xs)
         .text_color(theme.text_secondary)
         .child(format!("{count} specs"))
-}
-
-fn new_spec_button(theme: &HiveTheme) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .px(theme.space_3)
-        .py(theme.space_1)
-        .rounded(theme.radius_md)
-        .bg(theme.accent_cyan)
-        .text_size(theme.font_size_sm)
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(theme.text_on_accent)
-        .child("+ New Spec")
 }
 
 // ---------------------------------------------------------------------------

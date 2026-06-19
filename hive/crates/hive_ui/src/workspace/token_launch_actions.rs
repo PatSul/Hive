@@ -1,12 +1,30 @@
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 use tracing::info;
 
 use super::{
-    AppRpcConfig, AppWallets, HiveWorkspace, NotificationType, TokenLaunchCreateWallet,
+    AppRpcConfig, AppWallets, HiveWorkspace, NotificationType, Panel, TokenLaunchCreateWallet,
     TokenLaunchDeploy, TokenLaunchImportWallet, TokenLaunchResetRpcConfig,
-    TokenLaunchSaveRpcConfig, TokenLaunchSelectChain, TokenLaunchSelectWallet,
-    TokenLaunchSetStep,
+    TokenLaunchSaveRpcConfig, TokenLaunchSelectChain, TokenLaunchSelectWallet, TokenLaunchSetStep,
+    destructive_actions,
 };
+
+fn token_launch_labs_enabled(
+    workspace: &mut HiveWorkspace,
+    cx: &mut Context<HiveWorkspace>,
+) -> bool {
+    if Panel::TokenLaunch.is_visible() {
+        return true;
+    }
+
+    workspace.push_notification(
+        cx,
+        NotificationType::Warning,
+        "Labs",
+        "Token Launch is hidden until HIVE_ENABLE_LABS=1 is set.",
+    );
+    false
+}
 
 pub(super) fn handle_token_launch_set_step(
     workspace: &mut HiveWorkspace,
@@ -15,6 +33,10 @@ pub(super) fn handle_token_launch_set_step(
     cx: &mut Context<HiveWorkspace>,
 ) {
     use hive_ui_panels::panels::token_launch::WizardStep;
+
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
 
     info!("TokenLaunch: set step {}", action.step);
     workspace.token_launch_data.current_step = match action.step {
@@ -34,6 +56,10 @@ pub(super) fn handle_token_launch_select_chain(
 ) {
     use hive_ui_panels::panels::token_launch::ChainOption;
 
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
     info!("TokenLaunch: select chain {}", action.chain);
     workspace.token_launch_data.selected_chain = match action.chain.as_str() {
         "solana" => Some(ChainOption::Solana),
@@ -44,9 +70,12 @@ pub(super) fn handle_token_launch_select_chain(
 
     if let Some(chain) = workspace.token_launch_data.selected_chain {
         workspace.token_launch_data.decimals = chain.default_decimals();
-        workspace.token_launch_inputs.decimals.update(cx, |state, cx| {
-            state.set_value(chain.default_decimals().to_string(), window, cx);
-        });
+        workspace
+            .token_launch_inputs
+            .decimals
+            .update(cx, |state, cx| {
+                state.set_value(chain.default_decimals().to_string(), window, cx);
+            });
         workspace
             .token_launch_inputs
             .wallet_secret
@@ -84,6 +113,10 @@ pub(super) fn handle_token_launch_save_rpc_config(
     _window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
     let Some(option) = workspace.token_launch_data.selected_chain else {
         workspace.push_notification(
             cx,
@@ -157,6 +190,10 @@ pub(super) fn handle_token_launch_reset_rpc_config(
     window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
     let Some(option) = workspace.token_launch_data.selected_chain else {
         workspace.push_notification(
             cx,
@@ -207,6 +244,10 @@ pub(super) fn handle_token_launch_create_wallet(
     window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
     workspace.sync_token_launch_inputs_to_data(cx);
 
     let Some(option) = workspace.token_launch_data.selected_chain else {
@@ -292,9 +333,12 @@ pub(super) fn handle_token_launch_create_wallet(
     workspace.token_launch_data.wallet_address = Some(address);
     workspace.token_launch_data.wallet_balance = None;
     workspace.sync_token_launch_saved_wallets(true, window, cx);
-    workspace.token_launch_inputs.wallet_name.update(cx, |state, cx| {
-        state.set_value(wallet_name, window, cx);
-    });
+    workspace
+        .token_launch_inputs
+        .wallet_name
+        .update(cx, |state, cx| {
+            state.set_value(wallet_name, window, cx);
+        });
     workspace.clear_token_launch_wallet_secret(window, cx);
     workspace.refresh_token_launch_balance(cx);
     workspace.push_notification(
@@ -312,6 +356,10 @@ pub(super) fn handle_token_launch_import_wallet(
     window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
     workspace.sync_token_launch_inputs_to_data(cx);
 
     let Some(option) = workspace.token_launch_data.selected_chain else {
@@ -404,9 +452,12 @@ pub(super) fn handle_token_launch_import_wallet(
     workspace.token_launch_data.wallet_address = Some(address);
     workspace.token_launch_data.wallet_balance = None;
     workspace.sync_token_launch_saved_wallets(true, window, cx);
-    workspace.token_launch_inputs.wallet_name.update(cx, |state, cx| {
-        state.set_value(wallet_name, window, cx);
-    });
+    workspace
+        .token_launch_inputs
+        .wallet_name
+        .update(cx, |state, cx| {
+            state.set_value(wallet_name, window, cx);
+        });
     workspace.clear_token_launch_wallet_secret(window, cx);
     workspace.refresh_token_launch_balance(cx);
     workspace.push_notification(
@@ -424,6 +475,10 @@ pub(super) fn handle_token_launch_select_wallet(
     window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
     let Some(option) = workspace.token_launch_data.selected_chain else {
         workspace.push_notification(
             cx,
@@ -481,28 +536,31 @@ pub(super) fn handle_token_launch_select_wallet(
 pub(super) fn handle_token_launch_deploy(
     workspace: &mut HiveWorkspace,
     _action: &TokenLaunchDeploy,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
-    use hive_ui_panels::panels::token_launch::{ChainOption, DeployStatus};
+    use hive_ui_panels::panels::token_launch::DeployStatus;
+
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
 
     info!("TokenLaunch: deploy");
     workspace.sync_token_launch_inputs_to_data(cx);
 
-    if workspace.token_launch_data.selected_chain.is_none() {
+    let Some(selected_chain) = workspace.token_launch_data.selected_chain else {
         workspace.token_launch_data.deploy_status =
             DeployStatus::Failed("Select a target chain before deploying.".to_string());
         cx.notify();
         return;
-    }
+    };
 
     if workspace.token_launch_data.token_name.trim().is_empty()
         || workspace.token_launch_data.token_symbol.trim().is_empty()
         || workspace.token_launch_data.total_supply.trim().is_empty()
     {
-        workspace.token_launch_data.deploy_status = DeployStatus::Failed(
-            "Token name, symbol, and total supply are required.".to_string(),
-        );
+        workspace.token_launch_data.deploy_status =
+            DeployStatus::Failed("Token name, symbol, and total supply are required.".to_string());
         cx.notify();
         return;
     }
@@ -529,11 +587,72 @@ pub(super) fn handle_token_launch_deploy(
         return;
     }
 
-    let wallet_id = workspace
-        .token_launch_data
-        .wallet_id
-        .clone()
-        .unwrap_or_default();
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::TokenLaunchDeploy {
+            chain: selected_chain.name().to_string(),
+            token_symbol: workspace.token_launch_data.token_symbol.clone(),
+        });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_token_launch_deploy(
+    workspace: &mut HiveWorkspace,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    use hive_ui_panels::panels::token_launch::{ChainOption, DeployStatus};
+
+    if !token_launch_labs_enabled(workspace, cx) {
+        return;
+    }
+
+    info!("TokenLaunch: deploy confirmed");
+    workspace.sync_token_launch_inputs_to_data(cx);
+
+    let Some(selected_chain) = workspace.token_launch_data.selected_chain else {
+        workspace.token_launch_data.deploy_status =
+            DeployStatus::Failed("Select a target chain before deploying.".to_string());
+        cx.notify();
+        return;
+    };
+
+    if workspace.token_launch_data.token_name.trim().is_empty()
+        || workspace.token_launch_data.token_symbol.trim().is_empty()
+        || workspace.token_launch_data.total_supply.trim().is_empty()
+    {
+        workspace.token_launch_data.deploy_status =
+            DeployStatus::Failed("Token name, symbol, and total supply are required.".to_string());
+        cx.notify();
+        return;
+    }
+
+    if workspace.token_launch_data.wallet_address.is_none()
+        || workspace.token_launch_data.wallet_id.is_none()
+    {
+        workspace.token_launch_data.deploy_status =
+            DeployStatus::Failed("Connect a wallet before deploying.".to_string());
+        cx.notify();
+        return;
+    }
+
+    if let (Some(balance), Some(cost)) = (
+        workspace.token_launch_data.wallet_balance,
+        workspace.token_launch_data.estimated_cost,
+    ) && balance < cost
+    {
+        workspace.token_launch_data.deploy_status = DeployStatus::Failed(
+            "Connected wallet does not have enough funds for the estimated deployment cost."
+                .to_string(),
+        );
+        cx.notify();
+        return;
+    }
+
+    let Some(wallet_id) = workspace.token_launch_data.wallet_id.clone() else {
+        workspace.token_launch_data.deploy_status =
+            DeployStatus::Failed("Connect a wallet before deploying.".to_string());
+        cx.notify();
+        return;
+    };
     let private_key = if cx.has_global::<AppWallets>() {
         match cx
             .global::<AppWallets>()
@@ -555,7 +674,6 @@ pub(super) fn handle_token_launch_deploy(
         return;
     };
 
-    let selected_chain = workspace.token_launch_data.selected_chain.unwrap();
     let token_name = workspace.token_launch_data.token_name.clone();
     let token_symbol = workspace.token_launch_data.token_symbol.clone();
     let total_supply = workspace.token_launch_data.total_supply.clone();

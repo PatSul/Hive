@@ -42,6 +42,8 @@ actions!(
         OpenWorkspaceDirectory,
         ToggleProjectDropdown,
         ToggleCommandPalette,
+        DestructiveConfirm,
+        DestructiveCancel,
         // Files panel
         FilesNavigateBack,
         FilesRefresh,
@@ -221,11 +223,25 @@ pub struct HistoryDeleteConversation {
     pub conversation_id: String,
 }
 
+/// Update the search query in the History panel.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct HistorySetSearchQuery {
+    pub query: String,
+}
+
 /// Set log filter level.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = hive_workspace, no_json)]
 pub struct LogsSetFilter {
     pub level: String,
+}
+
+/// Update the search query in the Logs panel.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct LogsSetSearchQuery {
+    pub query: String,
 }
 
 /// Token Launch wizard: advance or go back a step.
@@ -468,6 +484,13 @@ pub struct ActivityDeny {
 #[action(namespace = hive_workspace, no_json)]
 pub struct ActivityExpandEvent {
     pub event_id: String,
+}
+
+/// Delete a custom Shield rule by ID.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = hive_workspace, no_json)]
+pub struct ShieldDeleteRule {
+    pub rule_id: String,
 }
 
 // ---------------------------------------------------------------------------

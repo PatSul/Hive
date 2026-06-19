@@ -1,9 +1,10 @@
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 use tracing::{error, info};
 
 use super::{
-    navigation, HiveWorkspace, Panel, PromptLibraryDelete, PromptLibraryLoad,
-    PromptLibraryRefresh, PromptLibrarySaveCurrent,
+    HiveWorkspace, Panel, PromptLibraryDelete, PromptLibraryLoad, PromptLibraryRefresh,
+    PromptLibrarySaveCurrent, destructive_actions, navigation,
 };
 
 pub(super) fn handle_prompt_library_save_current(
@@ -89,12 +90,24 @@ pub(super) fn handle_prompt_library_load(
 pub(super) fn handle_prompt_library_delete(
     workspace: &mut HiveWorkspace,
     action: &PromptLibraryDelete,
-    _window: &mut Window,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::PromptLibraryDelete {
+            prompt_id: action.prompt_id.clone(),
+        });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_prompt_library_delete(
+    workspace: &mut HiveWorkspace,
+    prompt_id: &str,
     cx: &mut Context<HiveWorkspace>,
 ) {
     use hive_agents::prompt_template;
 
-    if let Err(e) = prompt_template::delete_template(&action.prompt_id) {
+    if let Err(e) = prompt_template::delete_template(prompt_id) {
         error!("Failed to delete prompt template: {e}");
     } else {
         workspace.prompt_library_data.refresh();

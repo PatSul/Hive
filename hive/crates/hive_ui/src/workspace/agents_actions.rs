@@ -10,9 +10,7 @@ use super::{
 };
 
 pub(super) fn refresh_agents_data(workspace: &mut HiveWorkspace, cx: &App) {
-    use hive_ui_panels::panels::agents::{
-        PersonaDisplay, RemoteAgentDisplay, RunDisplay, WorkflowDisplay,
-    };
+    use hive_ui_panels::panels::agents::{PersonaDisplay, RemoteAgentDisplay, WorkflowDisplay};
 
     if cx.has_global::<super::AppPersonas>() {
         let registry = &cx.global::<super::AppPersonas>().0;
@@ -107,19 +105,22 @@ pub(super) fn refresh_agents_data(workspace: &mut HiveWorkspace, cx: &App) {
                 workspace.agents_data.selected_remote_skill = None;
             }
         }
-        workspace.agents_data.personas.extend(
-            workspace
-                .agents_data
-                .remote_agents
-                .iter()
-                .map(|agent| PersonaDisplay {
-                    name: agent.name.clone(),
-                    kind: "remote_a2a".into(),
-                    description: agent.description.clone(),
-                    model_tier: "Remote".into(),
-                    active: true,
-                }),
-        );
+        workspace
+            .agents_data
+            .personas
+            .extend(
+                workspace
+                    .agents_data
+                    .remote_agents
+                    .iter()
+                    .map(|agent| PersonaDisplay {
+                        name: agent.name.clone(),
+                        kind: "remote_a2a".into(),
+                        description: agent.description.clone(),
+                        model_tier: "Remote".into(),
+                        active: true,
+                    }),
+            );
     }
 
     if cx.has_global::<AppAutomation>() {
@@ -144,71 +145,19 @@ pub(super) fn refresh_agents_data(workspace: &mut HiveWorkspace, cx: &App) {
                 trigger: trigger_label(&workflow.trigger),
                 steps: workflow.steps.len(),
                 run_count: workflow.run_count as usize,
-                last_run: workflow
-                    .last_run
-                    .as_ref()
-                    .map(|timestamp: &chrono::DateTime<chrono::Utc>| {
+                last_run: workflow.last_run.as_ref().map(
+                    |timestamp: &chrono::DateTime<chrono::Utc>| {
                         timestamp.format("%Y-%m-%d %H:%M").to_string()
-                    }),
-            })
-            .collect();
-
-        workspace.agents_data.active_runs = automation
-            .list_workflows()
-            .iter()
-            .filter(|workflow| {
-                matches!(
-                    workflow.status,
-                    hive_agents::automation::WorkflowStatus::Active
-                        | hive_agents::automation::WorkflowStatus::Draft
-                )
-            })
-            .map(|workflow| RunDisplay {
-                id: workflow.id.clone(),
-                spec_title: workflow.name.clone(),
-                status: format!("{:?}", workflow.status),
-                progress: if workflow.steps.is_empty() { 0.0 } else { 1.0 },
-                tasks_done: workflow.steps.len(),
-                tasks_total: workflow.steps.len(),
-                cost: 0.0,
-                elapsed: workflow
-                    .last_run
-                    .as_ref()
-                    .map(|_| "recent".to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                tasks: vec![],
-                disclosure: Default::default(),
-            })
-            .collect();
-
-        workspace.agents_data.run_history = automation
-            .list_run_history()
-            .iter()
-            .rev()
-            .take(8)
-            .filter_map(|run| {
-                let workflow = automation.get_workflow(&run.workflow_id)?;
-                Some(RunDisplay {
-                    id: run.workflow_id.clone(),
-                    spec_title: workflow.name.clone(),
-                    status: if run.success {
-                        "Complete".into()
-                    } else {
-                        "Failed".into()
                     },
-                    progress: if run.success { 1.0 } else { 0.0 },
-                    tasks_done: run.steps_completed,
-                    tasks_total: workflow.steps.len(),
-                    cost: 0.0,
-                    elapsed: format!(
-                        "{}s",
-                        (run.completed_at - run.started_at).num_seconds().max(0)
-                    ),
-                    tasks: vec![],
-                    disclosure: Default::default(),
-                })
+                ),
             })
             .collect();
+
+        workspace
+            .run_store
+            .refresh_history_from_automation(automation);
+        workspace.agents_data.active_runs = workspace.run_store.active_displays();
+        workspace.agents_data.run_history = workspace.run_store.history_displays(8);
 
         workspace.agents_data.workflow_source_dir = hive_agents::USER_WORKFLOW_DIR.to_string();
         workspace.agents_data.workflow_hint = Some(format!(
@@ -585,6 +534,16 @@ pub(super) fn handle_agents_run_workflow(
     let Some(workflow) = workspace.make_workflow_for_run(action, cx) else {
         return;
     };
+    let run_id = workspace.run_store.start_workflow(
+        &workflow,
+        if action.source.is_empty() {
+            "Agents"
+        } else {
+            action.source.as_str()
+        },
+    );
+    workspace.agents_data.active_runs = workspace.run_store.active_displays();
+    cx.notify();
 
     if cx.has_global::<AppNotifications>() {
         cx.global_mut::<AppNotifications>()
@@ -619,11 +578,14 @@ pub(super) fn handle_agents_run_workflow(
             &workflow_for_thread,
             working_dir,
         );
-        *run_result_for_thread.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
+        *run_result_for_thread
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(result);
     });
 
     let run_result_for_ui = std::sync::Arc::clone(&run_result);
     let workflow_id_for_ui = workflow.id.clone();
+    let run_id_for_ui = run_id.clone();
 
     cx.spawn(async move |this, app: &mut AsyncApp| {
         loop {
@@ -641,6 +603,7 @@ pub(super) fn handle_agents_run_workflow(
                                 run.steps_completed,
                                 run.error.clone(),
                             );
+                            workspace.run_store.complete_workflow(&run_id_for_ui, &run);
 
                             if cx.has_global::<AppNotifications>() {
                                 let notification_type = if run.success {
@@ -672,6 +635,7 @@ pub(super) fn handle_agents_run_workflow(
                         }
                         Err(e) => {
                             warn!("Agents: workflow run error ({workflow_id_for_ui}): {e}");
+                            workspace.run_store.fail_workflow(&run_id_for_ui);
                             if cx.has_global::<AppNotifications>() {
                                 cx.global_mut::<AppNotifications>().0.push(
                                     AppNotification::new(

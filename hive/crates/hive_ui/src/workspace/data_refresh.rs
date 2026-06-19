@@ -509,9 +509,18 @@ pub(super) fn refresh_routing_data(workspace: &mut HiveWorkspace, cx: &App) {
 }
 
 pub(super) fn refresh_monitor_data(workspace: &mut HiveWorkspace, cx: &App) {
-    use hive_ui_panels::panels::monitor::ProviderStatus;
+    use hive_ui_panels::panels::monitor::{AgentSystemStatus, ProviderStatus};
 
     workspace.monitor_data.resources = status_sync::gather_system_resources(workspace);
+    let active_run_count = workspace.run_store.active_count();
+    workspace.monitor_data.status = if active_run_count > 0 {
+        AgentSystemStatus::Running
+    } else {
+        AgentSystemStatus::Idle
+    };
+    workspace.monitor_data.current_run_id = workspace.run_store.current_run_id();
+    workspace.monitor_data.total_runs = workspace.run_store.total_count();
+    workspace.monitor_data.run_history = workspace.run_store.monitor_history_entries(8);
 
     if cx.has_global::<AppConfig>() {
         let config = cx.global::<AppConfig>().0.get();

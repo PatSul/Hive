@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
+use gpui_component::input::{Input, InputState};
 use gpui_component::{Icon, IconName};
 
 use hive_ui_core::HiveTheme;
@@ -289,7 +290,11 @@ pub struct LogsPanel;
 
 impl LogsPanel {
     /// Main entry point -- renders the full panel.
-    pub fn render(data: &LogsData, theme: &HiveTheme) -> impl IntoElement {
+    pub fn render(
+        data: &LogsData,
+        search_input: &Entity<InputState>,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         div()
             .id("logs-panel")
             .flex()
@@ -297,7 +302,7 @@ impl LogsPanel {
             .size_full()
             .child(Self::header(data, theme))
             .child(Self::filter_bar(data, theme))
-            .child(Self::search_bar(data, theme))
+            .child(Self::search_bar(data, search_input, theme))
             .child(Self::log_container(data, theme))
     }
 
@@ -328,7 +333,6 @@ impl LogsPanel {
             .child(Self::count_pill(&count_label, theme))
             .child(div().flex_1())
             .child(Self::auto_scroll_toggle(data, theme))
-            .child(Self::header_btn("Refresh", theme))
             .child(Self::clear_btn(theme))
     }
 
@@ -348,21 +352,6 @@ impl LogsPanel {
             .bg(theme.bg_tertiary)
             .text_size(theme.font_size_xs)
             .text_color(theme.text_muted)
-            .child(label.to_string())
-    }
-
-    /// Small bordered button used in the header row (no action wired).
-    fn header_btn(label: &str, theme: &HiveTheme) -> impl IntoElement {
-        div()
-            .px(theme.space_2)
-            .py(theme.space_1)
-            .rounded(theme.radius_sm)
-            .bg(theme.bg_surface)
-            .border_1()
-            .border_color(theme.border)
-            .text_size(theme.font_size_xs)
-            .text_color(theme.text_secondary)
-            .cursor_pointer()
             .child(label.to_string())
     }
 
@@ -486,19 +475,11 @@ impl LogsPanel {
     // Search bar
     // ------------------------------------------------------------------
 
-    fn search_bar(data: &LogsData, theme: &HiveTheme) -> impl IntoElement {
-        let placeholder = if data.search_query.is_empty() {
-            "Search logs by message or source..."
-        } else {
-            &data.search_query
-        };
-
-        let text_color = if data.search_query.is_empty() {
-            theme.text_muted
-        } else {
-            theme.text_primary
-        };
-
+    fn search_bar(
+        data: &LogsData,
+        search_input: &Entity<InputState>,
+        theme: &HiveTheme,
+    ) -> impl IntoElement {
         div()
             .flex()
             .flex_row()
@@ -509,7 +490,7 @@ impl LogsPanel {
             .border_b_1()
             .border_color(theme.border)
             .bg(theme.bg_secondary)
-            .child(Self::search_input_field(placeholder, text_color, theme))
+            .child(Self::search_input_field(search_input, theme))
             // Show match count when searching
             .when(!data.search_query.is_empty(), |el: Div| {
                 let filtered = data.filtered_entries();
@@ -522,7 +503,7 @@ impl LogsPanel {
             })
     }
 
-    fn search_input_field(placeholder: &str, text_color: Hsla, theme: &HiveTheme) -> Div {
+    fn search_input_field(search_input: &Entity<InputState>, theme: &HiveTheme) -> Div {
         div()
             .flex()
             .flex_row()
@@ -541,10 +522,12 @@ impl LogsPanel {
                     .child(Icon::new(IconName::Search).size_3p5()),
             )
             .child(
-                div()
-                    .text_size(theme.font_size_sm)
-                    .text_color(text_color)
-                    .child(placeholder.to_string()),
+                div().flex_1().child(
+                    Input::new(search_input)
+                        .appearance(false)
+                        .cleanable(true)
+                        .text_size(theme.font_size_sm),
+                ),
             )
     }
 

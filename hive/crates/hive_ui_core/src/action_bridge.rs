@@ -186,6 +186,7 @@ register_ui_actions! {
     "switch_to_help"        => SwitchToHelp,        "Switch to Help panel";
     "switch_to_workflows"   => SwitchToWorkflows,   "Switch to Workflows panel";
     "switch_to_channels"    => SwitchToChannels,    "Switch to Channels panel";
+    "shield_delete_rule"    => ShieldDeleteRule { rule_id: (String) }, "Delete a custom Shield rule";
 
     // Files panel
     "open_workspace_directory" => OpenWorkspaceDirectory, "Open the workspace directory in the OS file manager";
@@ -206,6 +207,7 @@ register_ui_actions! {
     "history_clear_all_cancel"  => HistoryClearAllCancel,  "Cancel clearing all history";
     "history_load_conversation" => HistoryLoadConversation { conversation_id: (String) }, "Load a conversation by ID";
     "history_delete_conversation" => HistoryDeleteConversation { conversation_id: (String) }, "Delete a conversation by ID";
+    "history_set_search_query" => HistorySetSearchQuery { query: (String) }, "Set the History search query";
 
     // Kanban
     "kanban_add_task"       => KanbanAddTask,        "Add a new Kanban task";
@@ -214,6 +216,7 @@ register_ui_actions! {
     "logs_clear"            => LogsClear,            "Clear log output";
     "logs_toggle_auto_scroll" => LogsToggleAutoScroll, "Toggle auto-scroll in logs";
     "logs_set_filter"       => LogsSetFilter { level: (String) }, "Set the log filter level";
+    "logs_set_search_query" => LogsSetSearchQuery { query: (String) }, "Set the Logs search query";
 
     // Costs
     "costs_export_csv"      => CostsExportCsv,       "Export costs as CSV";

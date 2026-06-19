@@ -1,6 +1,44 @@
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation, ShieldDeleteRule};
 
-use super::{AppConfig, AppShield, HiveWorkspace};
+use super::{AppConfig, AppShield, HiveWorkspace, destructive_actions};
+
+pub(super) fn handle_shield_delete_rule(
+    workspace: &mut HiveWorkspace,
+    action: &ShieldDeleteRule,
+    window: &mut Window,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let exists = workspace
+        .shield_view
+        .read(cx)
+        .user_rules
+        .iter()
+        .any(|rule| rule.id == action.rule_id);
+    if !exists {
+        return;
+    }
+
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::ShieldDeleteRule {
+            rule_id: action.rule_id.clone(),
+        });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_shield_delete_rule(
+    workspace: &mut HiveWorkspace,
+    rule_id: &str,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let rule_id = rule_id.to_string();
+    workspace.shield_view.update(cx, |view, cx| {
+        view.user_rules.retain(|rule| rule.id != rule_id);
+        cx.emit(hive_ui_panels::panels::shield::ShieldConfigChanged);
+        cx.notify();
+    });
+    cx.notify();
+}
 
 pub(super) fn handle_shield_config_save(
     workspace: &mut HiveWorkspace,

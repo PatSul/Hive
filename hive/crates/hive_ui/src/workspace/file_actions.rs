@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
 use gpui::*;
+use hive_ui_core::{DestructiveActionKind, DestructiveConfirmation};
 use tracing::{error, info, warn};
 
 use super::{
     AppContextSelection, AppSemanticSearch, FilesClearChecked, FilesCloseViewer, FilesData,
     FilesDeleteEntry, FilesNavigateBack, FilesNavigateTo, FilesNewFile, FilesNewFolder,
     FilesOpenEntry, FilesRefresh, FilesSetSearchQuery, FilesToggleCheck, HiveWorkspace,
+    destructive_actions,
 };
 
 pub(super) fn handle_files_navigate_back(
@@ -115,11 +117,16 @@ pub(super) fn handle_files_clear_checked(
 pub(super) fn handle_files_set_search_query(
     workspace: &mut HiveWorkspace,
     action: &FilesSetSearchQuery,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
     workspace.files_data.search_query = action.query.clone();
     workspace.files_data.semantic_results.clear();
+    if workspace.files_search_input.read(cx).value() != action.query {
+        workspace.files_search_input.update(cx, |input, cx| {
+            input.set_value(action.query.clone(), window, cx);
+        });
+    }
 
     if !action.query.trim().is_empty()
         && workspace.files_data.filtered_sorted_entries().is_empty()
@@ -136,7 +143,7 @@ pub(super) fn handle_files_set_search_query(
 pub(super) fn handle_files_delete_entry(
     workspace: &mut HiveWorkspace,
     action: &FilesDeleteEntry,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
     let target = workspace.files_data.current_path.join(&action.name);
@@ -147,6 +154,31 @@ pub(super) fn handle_files_delete_entry(
             return;
         }
     };
+    let base = match workspace.files_data.current_path.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            error!("Files: cannot resolve base path: {e}");
+            return;
+        }
+    };
+    if !target.starts_with(&base) {
+        error!("Files: path traversal blocked: {}", target.display());
+        return;
+    }
+    let confirmation =
+        DestructiveConfirmation::for_action(DestructiveActionKind::FilesDeleteEntry {
+            target_path: target.display().to_string(),
+            is_directory: target.is_dir(),
+        });
+    destructive_actions::request_confirmation(workspace, confirmation, window, cx);
+}
+
+pub(super) fn execute_confirmed_files_delete(
+    workspace: &mut HiveWorkspace,
+    target_path: &str,
+    cx: &mut Context<HiveWorkspace>,
+) {
+    let target = PathBuf::from(target_path);
     let base = match workspace.files_data.current_path.canonicalize() {
         Ok(path) => path,
         Err(e) => {
@@ -220,7 +252,12 @@ fn sync_context_selection(workspace: &HiveWorkspace, cx: &App) {
     let paths = workspace.files_data.checked_paths();
     let total_tokens: usize = paths
         .iter()
-        .map(|path| std::fs::metadata(path).map(|meta| meta.len() as usize).unwrap_or(0) / 4)
+        .map(|path| {
+            std::fs::metadata(path)
+                .map(|meta| meta.len() as usize)
+                .unwrap_or(0)
+                / 4
+        })
         .sum();
     let selection = cx.global::<AppContextSelection>().0.clone();
     if let Ok(mut guard) = selection.lock() {

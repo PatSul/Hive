@@ -5,9 +5,9 @@ use gpui_component::{Icon, IconName, Sizable as _};
 use crate::command_palette::{CommandPalette, CommandPaletteAction, CommandPaletteItem};
 
 use super::{
-    navigation, project_context, quick_start_actions, HiveTheme, HiveWorkspace,
-    OpenWorkspaceDirectory, Panel, QuickStartSelectTemplate, ShellDestination,
-    SwitchToWorkspace, ToggleCommandPalette, TogglePinWorkspace,
+    HiveTheme, HiveWorkspace, OpenWorkspaceDirectory, Panel, QuickStartSelectTemplate,
+    ShellDestination, SwitchToWorkspace, ToggleCommandPalette, TogglePinWorkspace, navigation,
+    project_context, quick_start_actions,
 };
 
 pub(super) fn command_palette_items(workspace: &HiveWorkspace) -> Vec<CommandPaletteItem> {
@@ -33,12 +33,16 @@ pub(super) fn command_palette_items(workspace: &HiveWorkspace) -> Vec<CommandPal
     }
 
     for panel in Panel::ALL {
+        if !panel.is_visible() {
+            continue;
+        }
+
         let location = panel
             .shell_destination()
             .map(|destination| destination.label().to_string())
             .unwrap_or_else(|| "Utility".into());
         let group = if panel.shell_destination() == Some(active_destination) {
-            "Current Space"
+            "Current"
         } else {
             "Panel"
         };
@@ -152,7 +156,10 @@ pub(super) fn handle_command_palette_submit(
     window: &mut Window,
     cx: &mut Context<HiveWorkspace>,
 ) {
-    if let Some(item) = filtered_command_palette_items(workspace, cx).into_iter().next() {
+    if let Some(item) = filtered_command_palette_items(workspace, cx)
+        .into_iter()
+        .next()
+    {
         execute_command_palette_action(workspace, &item.action, window, cx);
     }
 }
@@ -181,7 +188,9 @@ pub(super) fn execute_command_palette_action(
     cx: &mut Context<HiveWorkspace>,
 ) {
     match action {
-        CommandPaletteAction::OpenPanel(panel) => navigation::switch_to_panel(workspace, *panel, cx),
+        CommandPaletteAction::OpenPanel(panel) => {
+            navigation::switch_to_panel(workspace, *panel, cx)
+        }
         CommandPaletteAction::SwitchWorkspace(path) => {
             navigation::handle_switch_to_workspace_action(
                 workspace,
