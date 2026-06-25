@@ -70,3 +70,34 @@ fn test_action_types_implement_action_trait() {
     assert_action::<ToggleCommandPalette>();
     assert_action::<ActivitySetView>();
 }
+
+#[test]
+fn command_palette_overlay_renders_above_workspace_content() {
+    let workspace_src = include_str!("../src/workspace.rs");
+    let overlays_src = include_str!("../src/workspace/overlays.rs");
+
+    let main_content_pos = workspace_src
+        .find(".child(chrome::render_main_content(")
+        .expect("workspace should render main content");
+    let status_bar_pos = workspace_src
+        .find(".child(self.status_bar.render(theme))")
+        .expect("workspace should render status bar");
+    let command_palette_pos = workspace_src
+        .find(".when(self.show_command_palette")
+        .expect("workspace should render command palette overlay");
+
+    assert!(
+        command_palette_pos > main_content_pos && command_palette_pos > status_bar_pos,
+        "command palette overlay must be mounted after main content/status so Jump opens above the workspace"
+    );
+
+    let palette_overlay_start = overlays_src
+        .find("pub(super) fn render_command_palette")
+        .expect("command palette overlay renderer should exist");
+    let palette_overlay = &overlays_src[palette_overlay_start..];
+    assert!(
+        palette_overlay.contains(".id(\"command-palette-backdrop\")")
+            && palette_overlay.contains(".occlude()"),
+        "command palette backdrop should be an occluding top-level overlay"
+    );
+}

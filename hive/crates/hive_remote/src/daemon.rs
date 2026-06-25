@@ -3078,9 +3078,38 @@ fn build_assistant_service(
     }
 
     if let Some(manager) = config_manager {
-        if let Some(token) = manager.get_oauth_token(AccountPlatform::Google) {
-            assistant.set_gmail_token(token.access_token.clone());
-            assistant.set_google_calendar_token(token.access_token);
+        let google_tokens = manager.oauth_tokens_for_platform(AccountPlatform::Google);
+        if google_tokens.is_empty() {
+            if let Some(token) = manager.get_oauth_token(AccountPlatform::Google) {
+                assistant.set_gmail_token(token.access_token.clone());
+                assistant.set_google_calendar_token(token.access_token);
+            }
+        } else {
+            assistant.set_gmail_accounts(
+                google_tokens
+                    .iter()
+                    .map(|(account, token)| {
+                        hive_assistant::GmailAccount::new(
+                            account.account_id.clone(),
+                            account.account_name.clone(),
+                            token.access_token.clone(),
+                        )
+                    })
+                    .collect(),
+            );
+            assistant.set_google_calendar_sources(
+                google_tokens
+                    .into_iter()
+                    .map(|(account, token)| {
+                        hive_assistant::GoogleCalendarSource::new(
+                            account.account_id,
+                            account.account_name,
+                            token.access_token,
+                        )
+                        .with_calendar_ids(account.settings.google_calendars)
+                    })
+                    .collect(),
+            );
         }
         if let Some(token) = manager.get_oauth_token(AccountPlatform::Microsoft) {
             assistant.set_outlook_token(token.access_token.clone());

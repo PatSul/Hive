@@ -121,7 +121,8 @@ pub(super) fn handle_account_connect_platform(
                             .build();
                         match runtime {
                             Ok(runtime) => {
-                                let exchange_result = runtime.block_on(oauth_client.exchange_code(&code));
+                                let exchange_result =
+                                    runtime.block_on(oauth_client.exchange_code(&code));
                                 match exchange_result {
                                     Ok(token) => {
                                         *result_for_thread
@@ -171,27 +172,53 @@ pub(super) fn handle_account_connect_platform(
                     Ok(token) => {
                         info!("OAuth: successfully connected {platform_label_ui}");
 
+                        let account_count = if cx.has_global::<AppConfig>() {
+                            cx.global::<AppConfig>()
+                                .0
+                                .get()
+                                .connected_accounts
+                                .iter()
+                                .filter(|account| account.platform == platform_for_ui)
+                                .count()
+                        } else {
+                            0
+                        };
+                        let account_id = format!(
+                            "{}-{}",
+                            platform_for_ui.label().to_lowercase(),
+                            uuid::Uuid::new_v4()
+                        );
+                        let account_name = if account_count == 0 {
+                            platform_label_ui.clone()
+                        } else {
+                            format!("{} {}", platform_label_ui, account_count + 1)
+                        };
+
                         if cx.has_global::<AppConfig>() {
                             let token_data = hive_core::config::OAuthTokenData {
                                 access_token: token.access_token.clone(),
                                 refresh_token: token.refresh_token.clone(),
                                 expires_at: token.expires_at.map(|time| time.to_rfc3339()),
                             };
-                            let _ = cx
-                                .global::<AppConfig>()
-                                .0
-                                .set_oauth_token(platform_for_ui, &token_data);
+                            let config_mgr = &cx.global::<AppConfig>().0;
+                            let _ = config_mgr
+                                .set_oauth_token_for_account(
+                                    platform_for_ui,
+                                    &account_id,
+                                    &token_data,
+                                );
+                            let _ = config_mgr.set_oauth_token(platform_for_ui, &token_data);
 
                             let account = hive_core::config::ConnectedAccount {
                                 platform: platform_for_ui,
-                                account_name: platform_label_ui.clone(),
-                                account_id: "oauth".to_string(),
+                                account_name: account_name.clone(),
+                                account_id: account_id.clone(),
                                 scopes: Vec::new(),
                                 connected_at: chrono::Utc::now().to_rfc3339(),
                                 last_synced: None,
                                 settings: hive_core::config::AccountSettings::default(),
                             };
-                            let _ = cx.global::<AppConfig>().0.add_connected_account(account);
+                            let _ = config_mgr.add_connected_account(account);
                         }
 
                         if cx.has_global::<AppAssistant>() {
@@ -199,8 +226,20 @@ pub(super) fn handle_account_connect_platform(
                             let assistant = &mut cx.global_mut::<AppAssistant>().0;
                             match platform_for_ui {
                                 hive_core::config::AccountPlatform::Google => {
-                                    assistant.set_gmail_token(access.clone());
-                                    assistant.set_google_calendar_token(access);
+                                    assistant.email_service.add_gmail_account(
+                                        hive_assistant::GmailAccount::new(
+                                            account_id.clone(),
+                                            account_name.clone(),
+                                            access.clone(),
+                                        ),
+                                    );
+                                    assistant.calendar_service.add_google_calendar_source(
+                                        hive_assistant::GoogleCalendarSource::new(
+                                            account_id,
+                                            account_name,
+                                            access,
+                                        ),
+                                    );
                                 }
                                 hive_core::config::AccountPlatform::Microsoft => {
                                     assistant.set_outlook_token(access.clone());
@@ -265,7 +304,7 @@ pub(super) fn handle_account_disconnect_platform(
 
     if cx.has_global::<AppConfig>() {
         let config = &cx.global::<AppConfig>().0;
-        let _ = config.remove_oauth_token(platform);
+        let _ = config.remove_oauth_tokens_for_platform(platform);
         let _ = config.remove_connected_account(platform);
     }
 
@@ -362,8 +401,7 @@ fn oauth_config_for_platform(
         AccountPlatform::Microsoft => hive_integrations::OAuthConfig {
             client_id: client_id.clone(),
             client_secret: None,
-            auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-                .to_string(),
+            auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".to_string(),
             token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
             redirect_uri: "http://127.0.0.1:8742/callback".to_string(),
             scopes: vec!["Mail.Read".to_string(), "Calendars.Read".to_string()],

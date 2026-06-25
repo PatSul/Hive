@@ -44,6 +44,242 @@ actions!(
 #[derive(Debug, Clone)]
 pub struct SettingsSaved;
 
+pub const MODEL_GUARDRAIL_FALLBACK_MODEL: &str = "llama3.2";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProviderKeyState {
+    pub anthropic: bool,
+    pub openai: bool,
+    pub openrouter: bool,
+    pub google: bool,
+    pub groq: bool,
+    pub xai: bool,
+    pub huggingface: bool,
+    pub litellm: bool,
+    pub mistral: bool,
+    pub venice: bool,
+    pub zai: bool,
+}
+
+impl ProviderKeyState {
+    pub fn from_config(cfg: &hive_core::HiveConfig) -> Self {
+        let has_key = |key: &Option<String>| key.as_ref().is_some_and(|k| !k.trim().is_empty());
+        Self {
+            anthropic: has_key(&cfg.anthropic_api_key),
+            openai: has_key(&cfg.openai_api_key),
+            openrouter: has_key(&cfg.openrouter_api_key),
+            google: has_key(&cfg.google_api_key),
+            groq: has_key(&cfg.groq_api_key),
+            xai: has_key(&cfg.xai_api_key),
+            huggingface: has_key(&cfg.huggingface_api_key),
+            litellm: cfg
+                .litellm_url
+                .as_ref()
+                .is_some_and(|url| !url.trim().is_empty()),
+            mistral: has_key(&cfg.mistral_api_key),
+            venice: has_key(&cfg.venice_api_key),
+            zai: has_key(&cfg.zai_api_key),
+        }
+    }
+
+    pub fn provider_available(self, provider: ProviderType) -> bool {
+        match provider {
+            ProviderType::Anthropic => self.anthropic,
+            ProviderType::OpenAI => self.openai,
+            ProviderType::OpenRouter => self.openrouter,
+            ProviderType::Google => self.google,
+            ProviderType::Groq => self.groq,
+            ProviderType::XAI => self.xai,
+            ProviderType::HuggingFace => self.huggingface,
+            ProviderType::LiteLLM => self.litellm,
+            ProviderType::Mistral => self.mistral,
+            ProviderType::Venice => self.venice,
+            ProviderType::Zai => self.zai,
+            ProviderType::Ollama
+            | ProviderType::LMStudio
+            | ProviderType::GenericLocal
+            | ProviderType::Kilo => true,
+            ProviderType::Doubao | ProviderType::HiveGateway => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelGuardrailResult {
+    pub model: String,
+    pub notice: Option<String>,
+}
+
+pub fn validate_model_selection(
+    model_id: &str,
+    privacy_mode: bool,
+    keys: ProviderKeyState,
+) -> ModelGuardrailResult {
+    let requested = model_id.trim();
+    if requested.is_empty() {
+        return ModelGuardrailResult {
+            model: MODEL_GUARDRAIL_FALLBACK_MODEL.to_string(),
+            notice: Some(format!(
+                "No default model was selected. Switched to {MODEL_GUARDRAIL_FALLBACK_MODEL}."
+            )),
+        };
+    }
+
+    let provider = model_provider_type(requested);
+    if privacy_mode && !provider_allowed_in_privacy_mode(provider) {
+        return ModelGuardrailResult {
+            model: MODEL_GUARDRAIL_FALLBACK_MODEL.to_string(),
+            notice: Some(format!(
+                "Privacy mode is on, so {requested} cannot be used. Switched default model to {MODEL_GUARDRAIL_FALLBACK_MODEL}."
+            )),
+        };
+    }
+
+    if !provider_allowed_in_privacy_mode(provider) && !keys.provider_available(provider) {
+        return ModelGuardrailResult {
+            model: MODEL_GUARDRAIL_FALLBACK_MODEL.to_string(),
+            notice: Some(format!(
+                "{requested} requires a {} API key. Switched default model to {MODEL_GUARDRAIL_FALLBACK_MODEL}.",
+                provider_label(provider)
+            )),
+        };
+    }
+
+    ModelGuardrailResult {
+        model: requested.to_string(),
+        notice: None,
+    }
+}
+
+pub fn reconcile_project_model_selection(
+    model_id: &str,
+    project_models: &[String],
+    privacy_mode: bool,
+    keys: ProviderKeyState,
+) -> Option<ModelGuardrailResult> {
+    if project_models.is_empty() {
+        return None;
+    }
+
+    let requested = model_id.trim();
+    let requested_guardrail = validate_model_selection(requested, privacy_mode, keys);
+    let requested_in_project = project_models
+        .iter()
+        .any(|candidate| candidate.trim() == requested);
+    if requested_in_project && requested_guardrail.model == requested {
+        return None;
+    }
+
+    for candidate in project_models.iter().map(|model| model.trim()) {
+        if candidate.is_empty() {
+            continue;
+        }
+
+        let candidate_guardrail = validate_model_selection(candidate, privacy_mode, keys);
+        if candidate_guardrail.model == candidate {
+            return Some(ModelGuardrailResult {
+                model: candidate.to_string(),
+                notice: Some(format!(
+                    "{requested} is not available in My Models. Switched active model to {candidate}."
+                )),
+            });
+        }
+    }
+
+    if requested_guardrail.model != requested {
+        Some(requested_guardrail)
+    } else {
+        None
+    }
+}
+
+pub fn model_provider_type(model_id: &str) -> ProviderType {
+    let trimmed = model_id.trim();
+    if trimmed.is_empty() {
+        return ProviderType::Ollama;
+    }
+    if let Some(model) = hive_ai::model_registry::resolve_model(trimmed) {
+        return model.provider_type;
+    }
+
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("ollama/") {
+        return ProviderType::Ollama;
+    }
+    if lower.starts_with("lmstudio/") {
+        return ProviderType::LMStudio;
+    }
+    if lower.starts_with("local/") {
+        return ProviderType::GenericLocal;
+    }
+    if lower.starts_with("litellm/") {
+        return ProviderType::LiteLLM;
+    }
+    if lower.starts_with("kilo/") || lower == "kilo" {
+        return ProviderType::Kilo;
+    }
+    if lower.starts_with("claude-") {
+        return ProviderType::Anthropic;
+    }
+    if lower.starts_with("gpt-")
+        || lower.starts_with("o1")
+        || lower.starts_with("o3")
+        || lower.starts_with("o4")
+    {
+        return ProviderType::OpenAI;
+    }
+    if lower.starts_with("gemini-") {
+        return ProviderType::Google;
+    }
+    if lower.starts_with("grok-") {
+        return ProviderType::XAI;
+    }
+    if lower.starts_with("mistral-") || lower.starts_with("codestral-") {
+        return ProviderType::Mistral;
+    }
+    if lower.starts_with("glm-") {
+        return ProviderType::Zai;
+    }
+    if lower.contains('/') {
+        return ProviderType::OpenRouter;
+    }
+
+    ProviderType::Ollama
+}
+
+pub fn provider_allowed_in_privacy_mode(provider: ProviderType) -> bool {
+    matches!(
+        provider,
+        ProviderType::Ollama
+            | ProviderType::LMStudio
+            | ProviderType::GenericLocal
+            | ProviderType::LiteLLM
+            | ProviderType::Kilo
+    )
+}
+
+fn provider_label(provider: ProviderType) -> &'static str {
+    match provider {
+        ProviderType::Anthropic => "Anthropic",
+        ProviderType::OpenAI => "OpenAI",
+        ProviderType::OpenRouter => "OpenRouter",
+        ProviderType::Google => "Google",
+        ProviderType::Groq => "Groq",
+        ProviderType::LiteLLM => "LiteLLM",
+        ProviderType::HuggingFace => "Hugging Face",
+        ProviderType::Ollama => "Ollama",
+        ProviderType::LMStudio => "LM Studio",
+        ProviderType::GenericLocal => "Local AI",
+        ProviderType::XAI => "xAI",
+        ProviderType::Mistral => "Mistral",
+        ProviderType::Doubao => "Doubao",
+        ProviderType::Venice => "Venice",
+        ProviderType::HiveGateway => "Hive Gateway",
+        ProviderType::Zai => "Z.AI",
+        ProviderType::Kilo => "Kilo",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SettingsData -- read-only snapshot for other panels
 // ---------------------------------------------------------------------------
@@ -299,6 +535,7 @@ pub struct SettingsView {
 
     // Model selector
     model_selector: Entity<ModelSelectorView>,
+    model_guardrail_notice: Option<String>,
 
     // Budget inputs
     daily_budget_input: Entity<InputState>,
@@ -656,7 +893,7 @@ impl SettingsView {
         };
         let focus_handle = cx.focus_handle();
 
-        let view = Self {
+        let mut view = Self {
             theme,
             anthropic_key_input,
             openai_key_input,
@@ -675,6 +912,7 @@ impl SettingsView {
             hue_bridge_ip_input,
             hue_api_key_input,
             model_selector,
+            model_guardrail_notice: None,
             daily_budget_input,
             monthly_budget_input,
             config_backup_password_input,
@@ -1227,6 +1465,7 @@ impl SettingsView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.sync_enabled_providers(cx);
         cx.emit(SettingsSaved);
     }
 
@@ -1356,40 +1595,91 @@ impl SettingsView {
         had_key || !input.read(cx).value().is_empty()
     }
 
+    fn current_provider_key_state(&self, cx: &Context<Self>) -> ProviderKeyState {
+        let mut state = ProviderKeyState {
+            anthropic: self.key_is_set(self.had_anthropic_key, &self.anthropic_key_input, cx),
+            openai: self.key_is_set(self.had_openai_key, &self.openai_key_input, cx),
+            openrouter: self.key_is_set(self.had_openrouter_key, &self.openrouter_key_input, cx),
+            google: self.key_is_set(self.had_google_key, &self.google_key_input, cx),
+            groq: self.key_is_set(self.had_groq_key, &self.groq_key_input, cx),
+            xai: self.key_is_set(self.had_xai_key, &self.xai_key_input, cx),
+            huggingface: self.key_is_set(self.had_huggingface_key, &self.huggingface_key_input, cx),
+            litellm: !self.litellm_url_input.read(cx).value().trim().is_empty(),
+            ..ProviderKeyState::default()
+        };
+
+        if cx.has_global::<AppConfig>() {
+            let saved = ProviderKeyState::from_config(&cx.global::<AppConfig>().0.get());
+            state.litellm = state.litellm || saved.litellm;
+            state.mistral = saved.mistral;
+            state.venice = saved.venice;
+            state.zai = saved.zai;
+        }
+
+        state
+    }
+
+    fn enforce_model_guardrails(
+        &mut self,
+        keys: ProviderKeyState,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let selected_model = self.model_selector.read(cx).current_model().to_string();
+        let result = validate_model_selection(&selected_model, self.privacy_mode, keys);
+
+        if result.model != selected_model {
+            let model = result.model.clone();
+            self.model_selector.update(cx, |selector, cx| {
+                selector.set_current_model(model, cx);
+            });
+        }
+
+        if self.model_guardrail_notice != result.notice {
+            self.model_guardrail_notice = result.notice.clone();
+            cx.notify();
+        }
+
+        result.notice
+    }
+
     /// Sync the model selector's enabled-provider set and API keys
     /// based on current input field values.
-    fn sync_enabled_providers(&self, cx: &mut Context<Self>) {
-        let anthropic_set = self.key_is_set(self.had_anthropic_key, &self.anthropic_key_input, cx);
-        let openai_set = self.key_is_set(self.had_openai_key, &self.openai_key_input, cx);
-        let openrouter_set =
-            self.key_is_set(self.had_openrouter_key, &self.openrouter_key_input, cx);
-        let google_set = self.key_is_set(self.had_google_key, &self.google_key_input, cx);
-        let groq_set = self.key_is_set(self.had_groq_key, &self.groq_key_input, cx);
-        let xai_set = self.key_is_set(self.had_xai_key, &self.xai_key_input, cx);
-        let huggingface_set =
-            self.key_is_set(self.had_huggingface_key, &self.huggingface_key_input, cx);
+    fn sync_enabled_providers(&mut self, cx: &mut Context<Self>) {
+        let keys = self.current_provider_key_state(cx);
 
         let mut providers = HashSet::new();
-        if anthropic_set {
+        if !self.privacy_mode && keys.anthropic {
             providers.insert(ProviderType::Anthropic);
         }
-        if openai_set {
+        if !self.privacy_mode && keys.openai {
             providers.insert(ProviderType::OpenAI);
         }
-        if openrouter_set {
+        if !self.privacy_mode && keys.openrouter {
             providers.insert(ProviderType::OpenRouter);
         }
-        if google_set {
+        if !self.privacy_mode && keys.google {
             providers.insert(ProviderType::Google);
         }
-        if groq_set {
+        if !self.privacy_mode && keys.groq {
             providers.insert(ProviderType::Groq);
         }
-        if xai_set {
+        if !self.privacy_mode && keys.xai {
             providers.insert(ProviderType::XAI);
         }
-        if huggingface_set {
+        if !self.privacy_mode && keys.huggingface {
             providers.insert(ProviderType::HuggingFace);
+        }
+        if keys.litellm {
+            providers.insert(ProviderType::LiteLLM);
+        }
+        if !self.privacy_mode && keys.mistral {
+            providers.insert(ProviderType::Mistral);
+        }
+        if !self.privacy_mode && keys.venice {
+            providers.insert(ProviderType::Venice);
+        }
+        if !self.privacy_mode && keys.zai {
+            providers.insert(ProviderType::Zai);
         }
 
         // Helper: resolve an API key from input field or saved config
@@ -1435,6 +1725,7 @@ impl SettingsView {
         });
 
         self.model_selector.update(cx, |selector, cx| {
+            selector.set_privacy_mode(self.privacy_mode, cx);
             selector.set_enabled_providers(providers, cx);
             selector.set_openrouter_api_key(or_key, cx);
             selector.set_openai_api_key(openai_key, cx);
@@ -1442,6 +1733,8 @@ impl SettingsView {
             selector.set_google_api_key(google_key, cx);
             selector.set_groq_api_key(groq_key, cx);
         });
+
+        self.enforce_model_guardrails(keys, cx);
     }
 
     /// Push the curated project model list into the model selector.
@@ -1462,6 +1755,14 @@ impl SettingsView {
             selector.set_local_models(models, cx);
         });
         cx.notify();
+    }
+
+    pub fn set_default_model(&mut self, model: String, cx: &mut Context<Self>) {
+        self.model_selector.update(cx, |selector, cx| {
+            selector.set_current_model(model, cx);
+        });
+        let keys = self.current_provider_key_state(cx);
+        self.enforce_model_guardrails(keys, cx);
     }
 }
 
@@ -1581,6 +1882,7 @@ impl Render for SettingsView {
             .on_action(
                 cx.listener(|this: &mut Self, _: &SettingsTogglePrivacy, _, cx| {
                     this.privacy_mode = !this.privacy_mode;
+                    this.sync_enabled_providers(cx);
                     cx.emit(SettingsSaved);
                     cx.notify();
                 }),
@@ -2067,6 +2369,12 @@ impl SettingsView {
                         "All requests will use the default model above."
                     }),
             )
+            .when(self.model_guardrail_notice.is_some(), |el| {
+                el.child(model_guardrail_banner(
+                    self.model_guardrail_notice.as_deref().unwrap_or_default(),
+                    theme,
+                ))
+            })
             .child(separator(theme))
             .child(
                 div()
@@ -3427,6 +3735,36 @@ fn status_banner(text: &str, busy: bool, theme: &HiveTheme) -> AnyElement {
             div()
                 .text_size(theme.font_size_xs)
                 .text_color(theme.text_muted)
+                .child(text.to_string()),
+        )
+        .into_any_element()
+}
+
+fn model_guardrail_banner(text: &str, theme: &HiveTheme) -> AnyElement {
+    let mut bg = theme.accent_yellow;
+    bg.a = 0.12;
+
+    div()
+        .flex()
+        .items_center()
+        .gap(theme.space_2)
+        .px(theme.space_3)
+        .py(theme.space_2)
+        .rounded(theme.radius_sm)
+        .bg(bg)
+        .border_1()
+        .border_color(theme.accent_yellow)
+        .child(
+            div()
+                .w(px(8.0))
+                .h(px(8.0))
+                .rounded(theme.radius_full)
+                .bg(theme.accent_yellow),
+        )
+        .child(
+            div()
+                .text_size(theme.font_size_xs)
+                .text_color(theme.text_secondary)
                 .child(text.to_string()),
         )
         .into_any_element()

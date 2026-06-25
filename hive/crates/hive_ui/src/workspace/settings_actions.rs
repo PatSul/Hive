@@ -12,6 +12,9 @@ use super::{
     ImportConfig, NotificationType, SettingsSave, SettingsView, ThemeChanged, project_context,
 };
 use hive_ui_core::AppCortexAutoApply;
+use hive_ui_panels::panels::settings::{
+    ProviderKeyState, reconcile_project_model_selection, validate_model_selection,
+};
 
 pub(super) fn handle_settings_save(
     _workspace: &mut HiveWorkspace,
@@ -376,19 +379,35 @@ pub(super) fn handle_project_models_changed(
 
     if !models.is_empty() {
         let current_model = workspace.chat_service.read(cx).current_model().to_string();
-        let model_set: HashSet<String> = models.iter().cloned().collect();
-        let is_local = current_model.starts_with("ollama/")
-            || current_model.starts_with("lmstudio/")
-            || current_model.starts_with("local/");
-        if !is_local && !model_set.contains(&current_model) {
-            let new_model = models[0].clone();
+        let (privacy_mode, keys) = if cx.has_global::<AppConfig>() {
+            let cfg = cx.global::<AppConfig>().0.get();
+            (cfg.privacy_mode, ProviderKeyState::from_config(&cfg))
+        } else {
+            (false, ProviderKeyState::default())
+        };
+        if let Some(guardrail) =
+            reconcile_project_model_selection(&current_model, models, privacy_mode, keys)
+        {
+            let new_model = guardrail.model.clone();
             info!(
                 "Models: active model '{}' not in project set, switching to '{}'",
                 current_model, new_model
             );
+            if let Some(notice) = guardrail.notice {
+                workspace.push_notification(
+                    cx,
+                    NotificationType::Warning,
+                    "Model adjusted",
+                    notice,
+                );
+            }
             workspace.chat_service.update(cx, |svc, _cx| {
                 svc.set_model(new_model.clone());
             });
+            workspace.settings_view.update(cx, |settings, cx| {
+                settings.set_default_model(new_model.clone(), cx);
+            });
+            workspace.status_bar.current_model = new_model.clone();
             if cx.has_global::<AppConfig>() {
                 let _ = cx.global::<AppConfig>().0.update(|cfg| {
                     cfg.default_model = new_model;
@@ -410,6 +429,12 @@ pub(super) fn handle_settings_save_from_view(
 
     if cx.has_global::<AppConfig>() {
         let config_manager = &cx.global::<AppConfig>().0;
+        let previous_config = config_manager.get();
+        let previous_model_guardrail = validate_model_selection(
+            &previous_config.default_model,
+            snapshot.privacy_mode,
+            ProviderKeyState::from_config(&previous_config),
+        );
 
         if let Err(e) = config_manager.update(|cfg| {
             cfg.ollama_url = snapshot.ollama_url.clone();
@@ -515,12 +540,39 @@ pub(super) fn handle_settings_save_from_view(
             }
         }
 
-        workspace.status_bar.current_model = if snapshot.default_model.is_empty() {
+        let saved_config = config_manager.get();
+        if cx.has_global::<AppAiService>() {
+            let ai_config = hive_ai::service::AiServiceConfig::from(&saved_config);
+            let project_models = saved_config.project_models.clone();
+            cx.global_mut::<AppAiService>().0.update_config(ai_config);
+            cx.global_mut::<AppAiService>()
+                .0
+                .rebuild_fallback_chain_from_project_models(&project_models);
+            cx.global_mut::<AppAiService>().0.start_discovery();
+        }
+
+        let saved_model = if snapshot.default_model.is_empty() {
             "Select Model".to_string()
         } else {
-            snapshot.default_model
+            snapshot.default_model.clone()
         };
+        workspace.status_bar.current_model = saved_model.clone();
+        workspace.chat_service.update(cx, |svc, _cx| {
+            svc.set_model(saved_model);
+        });
         workspace.status_bar.privacy_mode = snapshot.privacy_mode;
+
+        if previous_model_guardrail.notice.is_some()
+            && previous_model_guardrail.model == snapshot.default_model
+            && previous_config.default_model != snapshot.default_model
+        {
+            workspace.push_notification(
+                cx,
+                NotificationType::Warning,
+                "Model adjusted",
+                previous_model_guardrail.notice.unwrap_or_default(),
+            );
+        }
 
         if cx.has_global::<AppCortexAutoApply>() {
             cx.global::<AppCortexAutoApply>().0.store(

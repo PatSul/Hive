@@ -4,7 +4,13 @@ pub mod smart_scheduler;
 
 use hive_integrations::{GoogleCalendarClient, OutlookCalendarClient};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use tokio::runtime::Handle;
+
+const PRIMARY_GOOGLE_ACCOUNT_ID: &str = "primary";
+const PRIMARY_GOOGLE_ACCOUNT_NAME: &str = "Google Calendar";
+const DEFAULT_GOOGLE_CALENDAR_ID: &str = "primary";
+const DEFAULT_GOOGLE_CALENDAR_MAX_RESULTS: u32 = 50;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +35,64 @@ pub struct UnifiedEvent {
     pub provider: CalendarProvider,
     pub attendees: Vec<String>,
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar_id: Option<String>,
+}
+
+/// A configured Google Calendar account source.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GoogleCalendarSource {
+    pub account_id: String,
+    pub account_name: String,
+    pub access_token: String,
+    pub calendar_ids: Vec<String>,
+    pub max_results: u32,
+}
+
+impl GoogleCalendarSource {
+    pub fn new(
+        account_id: impl Into<String>,
+        account_name: impl Into<String>,
+        access_token: impl Into<String>,
+    ) -> Self {
+        Self {
+            account_id: account_id.into(),
+            account_name: account_name.into(),
+            access_token: access_token.into(),
+            calendar_ids: vec![DEFAULT_GOOGLE_CALENDAR_ID.to_string()],
+            max_results: DEFAULT_GOOGLE_CALENDAR_MAX_RESULTS,
+        }
+    }
+
+    pub fn with_calendar_ids(mut self, calendar_ids: Vec<String>) -> Self {
+        self.calendar_ids = normalize_calendar_ids(calendar_ids);
+        self
+    }
+
+    pub fn with_max_results(mut self, max_results: u32) -> Self {
+        self.max_results = max_results.max(1);
+        self
+    }
+
+    fn is_configured(&self) -> bool {
+        !self.access_token.trim().is_empty()
+    }
+}
+
+impl fmt::Debug for GoogleCalendarSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GoogleCalendarSource")
+            .field("account_id", &self.account_id)
+            .field("account_name", &self.account_name)
+            .field("access_token", &"<redacted>")
+            .field("calendar_ids", &self.calendar_ids)
+            .field("max_results", &self.max_results)
+            .finish()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -45,6 +109,7 @@ pub struct CalendarService {
     outlook_token: Option<String>,
     /// Google Calendar ID to use (defaults to `"primary"`).
     google_calendar_id: String,
+    google_sources: Vec<GoogleCalendarSource>,
 }
 
 impl CalendarService {
@@ -52,32 +117,103 @@ impl CalendarService {
         Self {
             google_token: None,
             outlook_token: None,
-            google_calendar_id: "primary".to_string(),
+            google_calendar_id: DEFAULT_GOOGLE_CALENDAR_ID.to_string(),
+            google_sources: Vec::new(),
         }
     }
 
     /// Create a service pre-configured with OAuth tokens.
     pub fn with_tokens(google_token: Option<String>, outlook_token: Option<String>) -> Self {
-        Self {
-            google_token,
-            outlook_token,
-            google_calendar_id: "primary".to_string(),
+        let mut service = Self::new();
+        if let Some(token) = google_token {
+            service.set_google_token(token);
         }
+        if let Some(token) = outlook_token {
+            service.set_outlook_token(token);
+        }
+        service
     }
 
     /// Update the Google Calendar OAuth access token at runtime.
     pub fn set_google_token(&mut self, token: String) {
-        self.google_token = Some(token);
+        if token.trim().is_empty() {
+            self.google_token = None;
+            self.google_sources
+                .retain(|source| source.account_id != PRIMARY_GOOGLE_ACCOUNT_ID);
+            return;
+        }
+
+        self.google_token = Some(token.clone());
+        self.add_google_calendar_source(
+            GoogleCalendarSource::new(
+                PRIMARY_GOOGLE_ACCOUNT_ID,
+                PRIMARY_GOOGLE_ACCOUNT_NAME,
+                token,
+            )
+            .with_calendar_ids(vec![self.google_calendar_id.clone()]),
+        );
     }
 
     /// Update the Outlook Calendar OAuth access token at runtime.
     pub fn set_outlook_token(&mut self, token: String) {
-        self.outlook_token = Some(token);
+        self.outlook_token = if token.trim().is_empty() {
+            None
+        } else {
+            Some(token)
+        };
     }
 
     /// Set the Google Calendar ID (defaults to `"primary"`).
     pub fn set_google_calendar_id(&mut self, id: String) {
-        self.google_calendar_id = id;
+        self.google_calendar_id = if id.trim().is_empty() {
+            DEFAULT_GOOGLE_CALENDAR_ID.to_string()
+        } else {
+            id
+        };
+        for source in &mut self.google_sources {
+            if source.account_id == PRIMARY_GOOGLE_ACCOUNT_ID {
+                source.calendar_ids = vec![self.google_calendar_id.clone()];
+            }
+        }
+    }
+
+    /// Replace all configured Google Calendar sources.
+    pub fn set_google_calendar_sources(&mut self, sources: Vec<GoogleCalendarSource>) {
+        self.google_sources = sources
+            .into_iter()
+            .filter(GoogleCalendarSource::is_configured)
+            .map(|mut source| {
+                source.calendar_ids = normalize_calendar_ids(source.calendar_ids);
+                source
+            })
+            .collect();
+        self.google_token = self
+            .google_sources
+            .first()
+            .map(|source| source.access_token.clone());
+    }
+
+    /// Add or update a Google Calendar source by account ID.
+    pub fn add_google_calendar_source(&mut self, mut source: GoogleCalendarSource) {
+        if !source.is_configured() {
+            self.google_sources
+                .retain(|existing| existing.account_id != source.account_id);
+            return;
+        }
+
+        source.calendar_ids = normalize_calendar_ids(source.calendar_ids);
+        self.google_sources
+            .retain(|existing| existing.account_id != source.account_id);
+        self.google_sources.push(source);
+        self.google_token = self
+            .google_sources
+            .first()
+            .map(|source| source.access_token.clone());
+    }
+
+    /// Return configured Google Calendar sources.
+    pub fn google_calendar_sources(&self) -> &[GoogleCalendarSource] {
+        &self.google_sources
     }
 
     /// Get today's events from all configured providers.
@@ -97,53 +233,23 @@ impl CalendarService {
     pub fn events_in_range(&self, start: &str, end: &str) -> Result<Vec<UnifiedEvent>, String> {
         let mut all_events = Vec::new();
 
-        // Fetch from Google Calendar
-        if let Some(token) = &self.google_token {
-            let token = token.clone();
-            let cal_id = self.google_calendar_id.clone();
-            let start = start.to_string();
-            let end = end.to_string();
-
-            let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
-            let google_events = handle.block_on(async {
-                let client = GoogleCalendarClient::new(&token);
-                let list = client
-                    .list_events(&cal_id, Some(&start), Some(&end), Some(50))
-                    .await
-                    .map_err(|e| format!("Google Calendar error: {e}"))?;
-
-                let events: Vec<UnifiedEvent> = list
-                    .items
-                    .into_iter()
-                    .map(|evt| {
-                        let start_str = evt
-                            .start
-                            .as_ref()
-                            .and_then(|s| s.date_time.clone().or(s.date.clone()))
-                            .unwrap_or_default();
-                        let end_str = evt
-                            .end
-                            .as_ref()
-                            .and_then(|e| e.date_time.clone().or(e.date.clone()))
-                            .unwrap_or_default();
-
-                        UnifiedEvent {
-                            id: evt.id,
-                            title: evt.summary.unwrap_or_default(),
-                            start: start_str,
-                            end: end_str,
-                            location: evt.location,
-                            provider: CalendarProvider::Google,
-                            attendees: evt.attendees.iter().map(|a| a.email.clone()).collect(),
-                            description: evt.description,
-                        }
-                    })
-                    .collect();
-
-                Ok::<Vec<UnifiedEvent>, String>(events)
-            })?;
-
-            all_events.extend(google_events);
+        // Fetch from Google Calendar.
+        if !self.google_sources.is_empty() {
+            for source in &self.google_sources {
+                all_events.extend(self.events_in_range_for_google_source(source, start, end)?);
+            }
+        } else if let Some(token) = self
+            .google_token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+        {
+            let source = GoogleCalendarSource::new(
+                PRIMARY_GOOGLE_ACCOUNT_ID,
+                PRIMARY_GOOGLE_ACCOUNT_NAME,
+                token,
+            )
+            .with_calendar_ids(vec![self.google_calendar_id.clone()]);
+            all_events.extend(self.events_in_range_for_google_source(&source, start, end)?);
         }
 
         // Fetch from Outlook Calendar
@@ -171,6 +277,9 @@ impl CalendarService {
                         provider: CalendarProvider::Outlook,
                         attendees: Vec::new(),
                         description: None,
+                        account_id: None,
+                        account_name: None,
+                        calendar_id: None,
                     })
                     .collect();
 
@@ -184,6 +293,65 @@ impl CalendarService {
         all_events.sort_by(|a, b| a.start.cmp(&b.start));
 
         Ok(all_events)
+    }
+
+    fn events_in_range_for_google_source(
+        &self,
+        source: &GoogleCalendarSource,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<UnifiedEvent>, String> {
+        if !source.is_configured() {
+            return Ok(Vec::new());
+        }
+
+        let start = start.to_string();
+        let end = end.to_string();
+        let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
+        handle.block_on(async {
+            let client = GoogleCalendarClient::new(&source.access_token);
+            let mut events = Vec::new();
+            for calendar_id in &source.calendar_ids {
+                let list = client
+                    .list_events(
+                        calendar_id,
+                        Some(&start),
+                        Some(&end),
+                        Some(source.max_results),
+                    )
+                    .await
+                    .map_err(|e| format!("Google Calendar error: {e}"))?;
+
+                events.extend(list.items.into_iter().map(|evt| {
+                    let start_str = evt
+                        .start
+                        .as_ref()
+                        .and_then(|s| s.date_time.clone().or(s.date.clone()))
+                        .unwrap_or_default();
+                    let end_str = evt
+                        .end
+                        .as_ref()
+                        .and_then(|e| e.date_time.clone().or(e.date.clone()))
+                        .unwrap_or_default();
+
+                    UnifiedEvent {
+                        id: evt.id,
+                        title: evt.summary.unwrap_or_default(),
+                        start: start_str,
+                        end: end_str,
+                        location: evt.location,
+                        provider: CalendarProvider::Google,
+                        attendees: evt.attendees.iter().map(|a| a.email.clone()).collect(),
+                        description: evt.description,
+                        account_id: Some(source.account_id.clone()),
+                        account_name: Some(source.account_name.clone()),
+                        calendar_id: Some(calendar_id.clone()),
+                    }
+                }));
+            }
+
+            Ok::<Vec<UnifiedEvent>, String>(events)
+        })
     }
 
     /// Create a new calendar event.
@@ -205,18 +373,23 @@ impl CalendarService {
     }
 
     fn create_google_event(&self, event: &UnifiedEvent) -> Result<String, String> {
-        let token = match &self.google_token {
-            Some(t) => t.clone(),
-            None => {
-                tracing::info!(
-                    title = event.title.as_str(),
-                    "Google Calendar event creation requested (no token configured)"
-                );
-                return Ok(event.id.clone());
-            }
+        let (token, cal_id) = match self.google_source_for_event(event) {
+            Some((source, calendar_id)) => (source.access_token.clone(), calendar_id),
+            None => match self
+                .google_token
+                .as_deref()
+                .filter(|token| !token.is_empty())
+            {
+                Some(t) => (t.to_string(), self.google_calendar_id.clone()),
+                None => {
+                    tracing::info!(
+                        title = event.title.as_str(),
+                        "Google Calendar event creation requested (no token configured)"
+                    );
+                    return Ok(event.id.clone());
+                }
+            },
         };
-
-        let cal_id = self.google_calendar_id.clone();
         let request = hive_integrations::CreateEventRequest {
             summary: Some(event.title.clone()),
             description: event.description.clone(),
@@ -258,6 +431,25 @@ impl CalendarService {
             "Calendar event created via Google Calendar"
         );
         Ok(created_id)
+    }
+
+    fn google_source_for_event(
+        &self,
+        event: &UnifiedEvent,
+    ) -> Option<(&GoogleCalendarSource, String)> {
+        let source = match event.account_id.as_deref() {
+            Some(account_id) => self
+                .google_sources
+                .iter()
+                .find(|source| source.account_id == account_id),
+            None => self.google_sources.first(),
+        }?;
+        let calendar_id = event
+            .calendar_id
+            .clone()
+            .or_else(|| source.calendar_ids.first().cloned())
+            .unwrap_or_else(|| DEFAULT_GOOGLE_CALENDAR_ID.to_string());
+        Some((source, calendar_id))
     }
 
     fn create_outlook_event(&self, event: &UnifiedEvent) -> Result<String, String> {
@@ -305,6 +497,24 @@ impl CalendarService {
     }
 }
 
+fn normalize_calendar_ids(calendar_ids: Vec<String>) -> Vec<String> {
+    let mut normalized: Vec<String> = calendar_ids
+        .into_iter()
+        .filter_map(|id| {
+            let trimmed = id.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+        .collect();
+    if normalized.is_empty() {
+        normalized.push(DEFAULT_GOOGLE_CALENDAR_ID.to_string());
+    }
+    normalized
+}
+
 impl Default for CalendarService {
     fn default() -> Self {
         Self::new()
@@ -317,7 +527,7 @@ impl Default for CalendarService {
 
 #[cfg(test)]
 mod tests {
-    use crate::calendar::{CalendarProvider, CalendarService, UnifiedEvent};
+    use crate::calendar::{CalendarProvider, CalendarService, GoogleCalendarSource, UnifiedEvent};
 
     fn make_event(id: &str, title: &str, start: &str, end: &str) -> UnifiedEvent {
         UnifiedEvent {
@@ -329,6 +539,9 @@ mod tests {
             provider: CalendarProvider::Google,
             attendees: Vec::new(),
             description: None,
+            account_id: None,
+            account_name: None,
+            calendar_id: None,
         }
     }
 
@@ -409,6 +622,35 @@ mod tests {
     }
 
     #[test]
+    fn test_set_google_calendar_sources_tracks_multiple_accounts_and_calendars() {
+        let mut service = CalendarService::new();
+        service.set_google_calendar_sources(vec![
+            GoogleCalendarSource::new("personal", "Personal Gmail", "tok-personal")
+                .with_calendar_ids(vec!["primary".into(), "family".into()]),
+            GoogleCalendarSource::new("work", "Work Gmail", "tok-work")
+                .with_calendar_ids(vec!["primary".into(), "team@example.com".into()]),
+        ]);
+
+        let sources = service.google_calendar_sources();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].account_id, "personal");
+        assert_eq!(sources[0].calendar_ids, vec!["primary", "family"]);
+        assert_eq!(sources[1].account_name, "Work Gmail");
+        assert_eq!(sources[1].calendar_ids[1], "team@example.com");
+    }
+
+    #[test]
+    fn test_empty_google_token_clears_primary_calendar_source() {
+        let mut service = CalendarService::with_tokens(Some("tok".into()), None);
+        assert_eq!(service.google_calendar_sources().len(), 1);
+
+        service.set_google_token(String::new());
+
+        assert!(service.google_calendar_sources().is_empty());
+        assert!(service.today_events().unwrap().is_empty());
+    }
+
+    #[test]
     fn test_unified_event_serialization() {
         let event = UnifiedEvent {
             id: "ev-ser".to_string(),
@@ -422,6 +664,9 @@ mod tests {
                 "bob@example.com".to_string(),
             ],
             description: Some("Weekly sync".to_string()),
+            account_id: None,
+            account_name: None,
+            calendar_id: None,
         };
         let json = serde_json::to_string(&event).unwrap();
         let deserialized: UnifiedEvent = serde_json::from_str(&json).unwrap();

@@ -2098,9 +2098,6 @@ impl Render for HiveWorkspace {
             .when(self.show_project_dropdown, |el| {
                 el.child(overlays::render_project_dropdown(self, cx))
             })
-            .when(self.show_command_palette, |el| {
-                el.child(overlays::render_command_palette(self, cx))
-            })
             .when(self.show_utility_drawer, |el| {
                 el.child(chrome::render_utility_drawer_backdrop(cx))
             })
@@ -2114,6 +2111,9 @@ impl Render for HiveWorkspace {
             ))
             // Status bar
             .child(self.status_bar.render(theme))
+            .when(self.show_command_palette, |el| {
+                el.child(overlays::render_command_palette(self, cx))
+            })
             .when(self.pending_destructive_confirmation.is_some(), |el| {
                 el.child(destructive_actions::render_destructive_confirmation(
                     self, cx,

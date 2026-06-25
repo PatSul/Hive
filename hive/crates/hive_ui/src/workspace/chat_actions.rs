@@ -6,13 +6,16 @@ use tracing::{error, info, warn};
 use hive_ai::speculative::SpeculativeConfig;
 use hive_ai::types::{ChatRequest, StreamChunk, ToolDefinition as AiToolDefinition};
 use hive_ui_core::{AppCollectiveMemory, AppCortexInteractionTracker};
+use hive_ui_panels::panels::settings::{
+    ProviderKeyState, reconcile_project_model_selection, validate_model_selection,
+};
 
 use super::{
     AiProvider, AppActivityService, AppAgentNotifications, AppAiService, AppConfig,
     AppContextEngine, AppContextSelection, AppHiveMemory, AppKnowledge, AppKnowledgeFiles,
     AppLearning, AppMcpServer, AppQuickIndex, AppRagService, AppSecurity, AppSemanticSearch,
     AppShield, AppSkillManager, AppTts, ApplyAllEdits, ApplyCodeBlock, ChatReadAloud, ClearChat,
-    HiveWorkspace, MessageRole, NewConversation, Panel, data_refresh,
+    HiveWorkspace, MessageRole, NewConversation, NotificationType, Panel, data_refresh,
 };
 
 fn stream_error_chunk(message: impl Into<String>) -> StreamChunk {
@@ -322,7 +325,43 @@ pub(super) fn handle_send_text(
         );
     }
 
-    let model = workspace.chat_service.read(cx).current_model().to_string();
+    let mut model = workspace.chat_service.read(cx).current_model().to_string();
+    if cx.has_global::<AppConfig>() {
+        let cfg = cx.global::<AppConfig>().0.get();
+        let keys = ProviderKeyState::from_config(&cfg);
+        let guardrail =
+            reconcile_project_model_selection(&model, &cfg.project_models, cfg.privacy_mode, keys)
+                .or_else(|| {
+                    let guardrail = validate_model_selection(&model, cfg.privacy_mode, keys);
+                    (guardrail.model != model).then_some(guardrail)
+                });
+        if let Some(guardrail) = guardrail {
+            if let Some(notice) = guardrail.notice.clone() {
+                workspace.push_notification(
+                    cx,
+                    NotificationType::Warning,
+                    "Model adjusted",
+                    notice,
+                );
+            }
+
+            let corrected_model = guardrail.model.clone();
+            if let Err(e) = cx.global::<AppConfig>().0.update(|cfg| {
+                cfg.default_model = corrected_model.clone();
+            }) {
+                warn!("Settings: failed to persist model guardrail correction: {e}");
+            }
+            workspace.chat_service.update(cx, |svc, _cx| {
+                svc.set_model(corrected_model.clone());
+            });
+            workspace.settings_view.update(cx, |settings, cx| {
+                settings.set_default_model(corrected_model.clone(), cx);
+            });
+            workspace.status_bar.current_model = corrected_model.clone();
+            workspace.status_bar.privacy_mode = cfg.privacy_mode;
+            model = corrected_model;
+        }
+    }
 
     // Shield: scan outgoing text before sending to AI.
     // Check if the shield is enabled in config.
@@ -868,7 +907,7 @@ pub(super) fn handle_send_text(
 
     // 5. Spawn async: call provider.stream_chat, then attach with tool loop.
     let chat_svc = workspace.chat_service.downgrade();
-    let model_for_attach = model.clone();
+    let model_for_attach = request.model.clone();
     let provider_for_loop = provider.clone();
     let request_for_loop = request.clone();
 

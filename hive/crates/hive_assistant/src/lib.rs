@@ -19,8 +19,8 @@ use storage::AssistantStorage;
 
 // Re-export key types at crate root for convenience.
 pub use approval::{ApprovalLevel, ApprovalRequest, ApprovalStatus};
-pub use calendar::UnifiedEvent;
-pub use email::{EmailDigest, EmailProvider, UnifiedEmail};
+pub use calendar::{GoogleCalendarSource, UnifiedEvent};
+pub use email::{EmailDigest, EmailProvider, GmailAccount, UnifiedEmail};
 pub use plugin::{AssistantCapability, AssistantPlugin};
 pub use plugins::{PluginRegistry, ReminderPlugin};
 pub use reminders::{Reminder, ReminderStatus, ReminderTrigger, TriggeredReminder as TriggeredRem};
@@ -146,6 +146,11 @@ impl AssistantService {
         self.email_service.set_gmail_token(token);
     }
 
+    /// Replace all Gmail account sources on the email sub-service.
+    pub fn set_gmail_accounts(&mut self, accounts: Vec<GmailAccount>) {
+        self.email_service.set_gmail_accounts(accounts);
+    }
+
     /// Set the Outlook OAuth token on the email sub-service.
     pub fn set_outlook_token(&mut self, token: String) {
         self.email_service.set_outlook_token(token);
@@ -154,6 +159,11 @@ impl AssistantService {
     /// Set the Google Calendar OAuth token on the calendar sub-service.
     pub fn set_google_calendar_token(&mut self, token: String) {
         self.calendar_service.set_google_token(token);
+    }
+
+    /// Replace all Google Calendar sources on the calendar sub-service.
+    pub fn set_google_calendar_sources(&mut self, sources: Vec<GoogleCalendarSource>) {
+        self.calendar_service.set_google_calendar_sources(sources);
     }
 
     /// Set the Outlook Calendar OAuth token on the calendar sub-service.
@@ -311,6 +321,28 @@ mod tests {
         let service = AssistantService::in_memory().unwrap();
         let events = service.calendar_service.today_events().unwrap();
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_assistant_accepts_multiple_google_accounts() {
+        let mut service = AssistantService::in_memory().unwrap();
+
+        service.set_gmail_accounts(vec![
+            crate::email::GmailAccount::new("personal", "Personal Gmail", "tok-personal"),
+            crate::email::GmailAccount::new("work", "Work Gmail", "tok-work"),
+        ]);
+        service.set_google_calendar_sources(vec![
+            crate::calendar::GoogleCalendarSource::new(
+                "personal",
+                "Personal Gmail",
+                "tok-personal",
+            ),
+            crate::calendar::GoogleCalendarSource::new("work", "Work Gmail", "tok-work")
+                .with_calendar_ids(vec!["primary".into(), "team@example.com".into()]),
+        ]);
+
+        assert_eq!(service.email_service.gmail_accounts().len(), 2);
+        assert_eq!(service.calendar_service.google_calendar_sources().len(), 2);
     }
 
     #[test]

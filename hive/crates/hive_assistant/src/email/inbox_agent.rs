@@ -223,6 +223,8 @@ mod tests {
             provider: EmailProvider::Gmail,
             read,
             important,
+            account_id: None,
+            account_name: None,
         }
     }
 

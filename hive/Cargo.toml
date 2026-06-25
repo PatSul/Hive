@@ -110,3 +110,12 @@ tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 [profile.release]
 opt-level = 3
 strip = true
+
+# Strip debug info from third-party dependencies (Arrow/DataFusion/Lance/etc.)
+# while keeping it for our own crates. Dramatically reduces link.exe peak memory
+# and link time on this RAM-constrained Windows box. See dev-verify.ps1.
+[profile.dev.package."*"]
+debug = false
+
+[profile.test.package."*"]
+debug = false

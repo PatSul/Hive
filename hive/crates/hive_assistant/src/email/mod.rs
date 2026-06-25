@@ -6,7 +6,12 @@ use hive_integrations::{
 };
 use hive_shield::HiveShield;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use tokio::runtime::Handle;
+
+const PRIMARY_GMAIL_ACCOUNT_ID: &str = "primary";
+const PRIMARY_GMAIL_ACCOUNT_NAME: &str = "Gmail";
+const DEFAULT_GMAIL_MAX_RESULTS: u32 = 20;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +37,10 @@ pub struct UnifiedEmail {
     pub provider: EmailProvider,
     pub read: bool,
     pub important: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_name: Option<String>,
 }
 
 /// A digest summarizing emails from a provider.
@@ -42,6 +51,50 @@ pub struct EmailDigest {
     pub summary: String,
     pub email_count: usize,
     pub created_at: String,
+}
+
+/// A configured Gmail account source.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GmailAccount {
+    pub account_id: String,
+    pub account_name: String,
+    pub access_token: String,
+    pub max_results: u32,
+}
+
+impl GmailAccount {
+    pub fn new(
+        account_id: impl Into<String>,
+        account_name: impl Into<String>,
+        access_token: impl Into<String>,
+    ) -> Self {
+        Self {
+            account_id: account_id.into(),
+            account_name: account_name.into(),
+            access_token: access_token.into(),
+            max_results: DEFAULT_GMAIL_MAX_RESULTS,
+        }
+    }
+
+    pub fn with_max_results(mut self, max_results: u32) -> Self {
+        self.max_results = max_results.max(1);
+        self
+    }
+
+    fn is_configured(&self) -> bool {
+        !self.access_token.trim().is_empty()
+    }
+}
+
+impl fmt::Debug for GmailAccount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GmailAccount")
+            .field("account_id", &self.account_id)
+            .field("account_name", &self.account_name)
+            .field("access_token", &"<redacted>")
+            .field("max_results", &self.max_results)
+            .finish()
+    }
 }
 
 /// Classification result for an email.
@@ -64,6 +117,7 @@ pub enum EmailClassification {
 /// are absent the methods degrade gracefully and return empty results.
 pub struct EmailService {
     gmail_token: Option<String>,
+    gmail_accounts: Vec<GmailAccount>,
     outlook_token: Option<String>,
     classifier: EmailClassifier,
 }
@@ -72,6 +126,7 @@ impl EmailService {
     pub fn new() -> Self {
         Self {
             gmail_token: None,
+            gmail_accounts: Vec::new(),
             outlook_token: None,
             classifier: EmailClassifier::new(),
         }
@@ -79,21 +134,74 @@ impl EmailService {
 
     /// Create a service pre-configured with OAuth tokens.
     pub fn with_tokens(gmail_token: Option<String>, outlook_token: Option<String>) -> Self {
-        Self {
-            gmail_token,
-            outlook_token,
-            classifier: EmailClassifier::new(),
+        let mut service = Self::new();
+        if let Some(token) = gmail_token {
+            service.set_gmail_token(token);
         }
+        if let Some(token) = outlook_token {
+            service.set_outlook_token(token);
+        }
+        service
     }
 
     /// Update the Gmail OAuth access token at runtime.
     pub fn set_gmail_token(&mut self, token: String) {
-        self.gmail_token = Some(token);
+        if token.trim().is_empty() {
+            self.gmail_token = None;
+            self.gmail_accounts
+                .retain(|account| account.account_id != PRIMARY_GMAIL_ACCOUNT_ID);
+            return;
+        }
+
+        self.gmail_token = Some(token.clone());
+        self.add_gmail_account(GmailAccount::new(
+            PRIMARY_GMAIL_ACCOUNT_ID,
+            PRIMARY_GMAIL_ACCOUNT_NAME,
+            token,
+        ));
+    }
+
+    /// Replace all configured Gmail account sources.
+    pub fn set_gmail_accounts(&mut self, accounts: Vec<GmailAccount>) {
+        self.gmail_accounts = accounts
+            .into_iter()
+            .filter(GmailAccount::is_configured)
+            .collect();
+        self.gmail_token = self
+            .gmail_accounts
+            .first()
+            .map(|account| account.access_token.clone());
+    }
+
+    /// Add or update a Gmail account source by account ID.
+    pub fn add_gmail_account(&mut self, account: GmailAccount) {
+        if !account.is_configured() {
+            self.gmail_accounts
+                .retain(|existing| existing.account_id != account.account_id);
+            return;
+        }
+
+        self.gmail_accounts
+            .retain(|existing| existing.account_id != account.account_id);
+        self.gmail_accounts.push(account);
+        self.gmail_token = self
+            .gmail_accounts
+            .first()
+            .map(|account| account.access_token.clone());
+    }
+
+    /// Return configured Gmail account sources.
+    pub fn gmail_accounts(&self) -> &[GmailAccount] {
+        &self.gmail_accounts
     }
 
     /// Update the Outlook OAuth access token at runtime.
     pub fn set_outlook_token(&mut self, token: String) {
-        self.outlook_token = Some(token);
+        self.outlook_token = if token.trim().is_empty() {
+            None
+        } else {
+            Some(token)
+        };
     }
 
     /// Fetch emails from a Gmail inbox.
@@ -102,18 +210,43 @@ impl EmailService {
     /// [`set_gmail_token`] or [`with_tokens`]. Returns an empty vec if
     /// no token is configured.
     pub fn fetch_gmail_inbox(&self) -> Result<Vec<UnifiedEmail>, String> {
-        let token = match &self.gmail_token {
-            Some(t) => t.clone(),
+        if !self.gmail_accounts.is_empty() {
+            let mut emails = Vec::new();
+            for account in &self.gmail_accounts {
+                emails.extend(self.fetch_gmail_inbox_for_account(account)?);
+            }
+            return Ok(emails);
+        }
+
+        let token = match self
+            .gmail_token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+        {
+            Some(t) => t.to_string(),
             None => return Ok(Vec::new()),
         };
+
+        let account =
+            GmailAccount::new(PRIMARY_GMAIL_ACCOUNT_ID, PRIMARY_GMAIL_ACCOUNT_NAME, token);
+        self.fetch_gmail_inbox_for_account(&account)
+    }
+
+    fn fetch_gmail_inbox_for_account(
+        &self,
+        account: &GmailAccount,
+    ) -> Result<Vec<UnifiedEmail>, String> {
+        if !account.is_configured() {
+            return Ok(Vec::new());
+        }
 
         // Use tokio Handle to run async code from sync context.
         let handle = Handle::try_current().map_err(|e| format!("No tokio runtime: {e}"))?;
 
         handle.block_on(async {
-            let client = GmailClient::new(&token);
+            let client = GmailClient::new(&account.access_token);
             let list = client
-                .list_messages(None, 20)
+                .list_messages(None, account.max_results)
                 .await
                 .map_err(|e| format!("Gmail list error: {e}"))?;
 
@@ -136,6 +269,8 @@ impl EmailService {
                             provider: EmailProvider::Gmail,
                             read,
                             important,
+                            account_id: Some(account.account_id.clone()),
+                            account_name: Some(account.account_name.clone()),
                         });
                     }
                     Err(e) => {
@@ -186,6 +321,8 @@ impl EmailService {
                         provider: EmailProvider::Outlook,
                         read: msg.is_read,
                         important: false,
+                        account_id: None,
+                        account_name: None,
                     }
                 })
                 .collect();
@@ -272,7 +409,7 @@ impl EmailService {
         };
 
         // Try Gmail first, then Outlook
-        if let Some(token) = &self.gmail_token {
+        if let Some(token) = self.primary_gmail_token() {
             let token = token.clone();
             let to = to.to_string();
             let subject = subject.to_string();
@@ -315,6 +452,14 @@ impl EmailService {
             "Email send requested (no provider configured)"
         );
         Ok(())
+    }
+
+    fn primary_gmail_token(&self) -> Option<&String> {
+        self.gmail_accounts
+            .iter()
+            .find(|account| account.is_configured())
+            .map(|account| &account.access_token)
+            .or_else(|| self.gmail_token.as_ref().filter(|token| !token.is_empty()))
     }
 
     /// Classify an email using the 5-layer classification engine.
@@ -361,7 +506,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::email::{
-        EmailClassification, EmailDigest, EmailProvider, EmailService, UnifiedEmail,
+        EmailClassification, EmailDigest, EmailProvider, EmailService, GmailAccount, UnifiedEmail,
     };
     use hive_shield::{HiveShield, ShieldConfig};
 
@@ -376,6 +521,8 @@ mod tests {
             provider: EmailProvider::Gmail,
             read: false,
             important,
+            account_id: None,
+            account_name: None,
         }
     }
 
@@ -503,6 +650,33 @@ mod tests {
         // Proves the setter compiles and works
         let result = service.fetch_gmail_inbox();
         assert!(result.is_err() || result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_set_gmail_accounts_tracks_multiple_accounts() {
+        let mut service = EmailService::new();
+        service.set_gmail_accounts(vec![
+            GmailAccount::new("personal", "Personal Gmail", "tok-personal"),
+            GmailAccount::new("work", "Work Gmail", "tok-work").with_max_results(10),
+        ]);
+
+        let accounts = service.gmail_accounts();
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(accounts[0].account_id, "personal");
+        assert_eq!(accounts[0].account_name, "Personal Gmail");
+        assert_eq!(accounts[1].account_id, "work");
+        assert_eq!(accounts[1].max_results, 10);
+    }
+
+    #[test]
+    fn test_empty_gmail_token_clears_primary_account() {
+        let mut service = EmailService::with_tokens(Some("tok".into()), None);
+        assert_eq!(service.gmail_accounts().len(), 1);
+
+        service.set_gmail_token(String::new());
+
+        assert!(service.gmail_accounts().is_empty());
+        assert!(service.fetch_gmail_inbox().unwrap().is_empty());
     }
 
     #[test]

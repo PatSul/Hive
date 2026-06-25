@@ -149,6 +149,94 @@ fn test_settings_data_debug() {
 }
 
 // ---------------------------------------------------------------------------
+// Model guardrails
+// ---------------------------------------------------------------------------
+
+#[test]
+fn model_guardrail_switches_cloud_model_to_local_in_privacy_mode() {
+    let result = validate_model_selection(
+        "claude-opus-4-8",
+        true,
+        ProviderKeyState {
+            anthropic: true,
+            ..ProviderKeyState::default()
+        },
+    );
+
+    assert_eq!(result.model, MODEL_GUARDRAIL_FALLBACK_MODEL);
+    let notice = result.notice.expect("expected privacy-mode notice");
+    assert!(notice.contains("Privacy mode"));
+    assert!(notice.contains("claude-opus-4-8"));
+}
+
+#[test]
+fn model_guardrail_allows_local_model_in_privacy_mode() {
+    let result = validate_model_selection("llama3.2", true, ProviderKeyState::default());
+
+    assert_eq!(result.model, "llama3.2");
+    assert!(result.notice.is_none());
+}
+
+#[test]
+fn model_guardrail_switches_cloud_model_without_key_to_local() {
+    let result = validate_model_selection("claude-opus-4-8", false, ProviderKeyState::default());
+
+    assert_eq!(result.model, MODEL_GUARDRAIL_FALLBACK_MODEL);
+    let notice = result.notice.expect("expected missing-key notice");
+    assert!(notice.contains("Anthropic API key"));
+    assert!(notice.contains("claude-opus-4-8"));
+}
+
+#[test]
+fn model_guardrail_allows_cloud_model_with_key_when_privacy_is_off() {
+    let result = validate_model_selection(
+        "claude-opus-4-8",
+        false,
+        ProviderKeyState {
+            anthropic: true,
+            ..ProviderKeyState::default()
+        },
+    );
+
+    assert_eq!(result.model, "claude-opus-4-8");
+    assert!(result.notice.is_none());
+}
+
+#[test]
+fn project_model_reconciliation_replaces_removed_local_model() {
+    let project_models = vec![
+        "claude-opus-4-8".to_string(),
+        "tinyllama:latest".to_string(),
+    ];
+
+    let result = reconcile_project_model_selection(
+        "llama3.2",
+        &project_models,
+        false,
+        ProviderKeyState::default(),
+    )
+    .expect("missing local model should be replaced by an available project model");
+
+    assert_eq!(result.model, "tinyllama:latest");
+    let notice = result.notice.expect("expected stale-model notice");
+    assert!(notice.contains("llama3.2"));
+}
+
+#[test]
+fn project_model_reconciliation_keeps_selected_current_model() {
+    let project_models = vec!["tinyllama:latest".to_string(), "glm-5.2:cloud".to_string()];
+
+    let result = reconcile_project_model_selection(
+        "tinyllama:latest",
+        &project_models,
+        false,
+        ProviderKeyState::default(),
+    );
+
+    assert!(result.is_none());
+}
+
+// ---------------------------------------------------------------------------
 // TTS settings
 // ---------------------------------------------------------------------------
 

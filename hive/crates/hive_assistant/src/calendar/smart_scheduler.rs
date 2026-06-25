@@ -124,6 +124,9 @@ mod tests {
             provider: CalendarProvider::Google,
             attendees: Vec::new(),
             description: None,
+            account_id: None,
+            account_name: None,
+            calendar_id: None,
         }
     }
 

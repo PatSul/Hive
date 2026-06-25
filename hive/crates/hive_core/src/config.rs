@@ -964,8 +964,7 @@ impl ConfigManager {
             config.discord_guild_id = get_secure_key(ss, &key_map, KEY_DISCORD_GUILD_ID);
             config.telegram_bot_token = get_secure_key(ss, &key_map, KEY_TELEGRAM_BOT_TOKEN);
             config.whatsapp_phone_id = get_secure_key(ss, &key_map, KEY_WHATSAPP_PHONE_ID);
-            config.whatsapp_access_token =
-                get_secure_key(ss, &key_map, KEY_WHATSAPP_ACCESS_TOKEN);
+            config.whatsapp_access_token = get_secure_key(ss, &key_map, KEY_WHATSAPP_ACCESS_TOKEN);
             config.signal_number = get_secure_key(ss, &key_map, KEY_SIGNAL_NUMBER);
             config.matrix_access_token = get_secure_key(ss, &key_map, KEY_MATRIX_ACCESS_TOKEN);
             config.google_chat_access_token =
@@ -1106,16 +1105,36 @@ impl ConfigManager {
         set_secure_key(ss, &mut key_map, KEY_CLOUD_JWT, &config.cloud_jwt)?;
 
         // Messaging provider tokens
-        set_secure_key(ss, &mut key_map, KEY_SLACK_BOT_TOKEN, &config.slack_bot_token)?;
-        set_secure_key(ss, &mut key_map, KEY_DISCORD_BOT_TOKEN, &config.discord_bot_token)?;
-        set_secure_key(ss, &mut key_map, KEY_DISCORD_GUILD_ID, &config.discord_guild_id)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_SLACK_BOT_TOKEN,
+            &config.slack_bot_token,
+        )?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_DISCORD_BOT_TOKEN,
+            &config.discord_bot_token,
+        )?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_DISCORD_GUILD_ID,
+            &config.discord_guild_id,
+        )?;
         set_secure_key(
             ss,
             &mut key_map,
             KEY_TELEGRAM_BOT_TOKEN,
             &config.telegram_bot_token,
         )?;
-        set_secure_key(ss, &mut key_map, KEY_WHATSAPP_PHONE_ID, &config.whatsapp_phone_id)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_WHATSAPP_PHONE_ID,
+            &config.whatsapp_phone_id,
+        )?;
         set_secure_key(
             ss,
             &mut key_map,
@@ -1135,7 +1154,12 @@ impl ConfigManager {
             KEY_GOOGLE_CHAT_ACCESS_TOKEN,
             &config.google_chat_access_token,
         )?;
-        set_secure_key(ss, &mut key_map, KEY_WEBCHAT_API_TOKEN, &config.webchat_api_token)?;
+        set_secure_key(
+            ss,
+            &mut key_map,
+            KEY_WEBCHAT_API_TOKEN,
+            &config.webchat_api_token,
+        )?;
 
         save_key_map(&self.keys_path, &key_map)
     }
@@ -1156,6 +1180,24 @@ impl ConfigManager {
         }
     }
 
+    /// Get the OAuth token for a specific connected account.
+    pub fn get_oauth_token_for_account(
+        &self,
+        platform: AccountPlatform,
+        account_id: &str,
+    ) -> Option<OAuthTokenData> {
+        let key = Self::oauth_key_for_account(platform, account_id)?;
+        let Some(ss) = &self.secure_storage else {
+            return None;
+        };
+        let key_map = load_key_map(&self.keys_path);
+        let encrypted = key_map.get(&key)?;
+        match ss.decrypt(encrypted) {
+            Ok(json) if !json.is_empty() => serde_json::from_str(&json).ok(),
+            _ => None,
+        }
+    }
+
     /// Store an OAuth token for a platform.
     pub fn set_oauth_token(&self, platform: AccountPlatform, token: &OAuthTokenData) -> Result<()> {
         let key = Self::oauth_key(platform);
@@ -1169,6 +1211,25 @@ impl ConfigManager {
         save_key_map(&self.keys_path, &key_map)
     }
 
+    /// Store an OAuth token for a specific connected account.
+    pub fn set_oauth_token_for_account(
+        &self,
+        platform: AccountPlatform,
+        account_id: &str,
+        token: &OAuthTokenData,
+    ) -> Result<()> {
+        let key = Self::oauth_key_for_account(platform, account_id)
+            .context("account_id cannot be empty")?;
+        let Some(ss) = &self.secure_storage else {
+            anyhow::bail!("SecureStorage unavailable");
+        };
+        let json = serde_json::to_string(token)?;
+        let mut key_map = load_key_map(&self.keys_path);
+        let encrypted = ss.encrypt(&json)?;
+        key_map.insert(key, encrypted);
+        save_key_map(&self.keys_path, &key_map)
+    }
+
     /// Remove an OAuth token for a platform.
     pub fn remove_oauth_token(&self, platform: AccountPlatform) -> Result<()> {
         let key = Self::oauth_key(platform);
@@ -1177,12 +1238,35 @@ impl ConfigManager {
         save_key_map(&self.keys_path, &key_map)
     }
 
+    /// Remove an OAuth token for a specific connected account.
+    pub fn remove_oauth_token_for_account(
+        &self,
+        platform: AccountPlatform,
+        account_id: &str,
+    ) -> Result<()> {
+        let Some(key) = Self::oauth_key_for_account(platform, account_id) else {
+            return Ok(());
+        };
+        let mut key_map = load_key_map(&self.keys_path);
+        key_map.remove(&key);
+        save_key_map(&self.keys_path, &key_map)
+    }
+
+    /// Remove all OAuth tokens stored for a platform, including account-scoped tokens.
+    pub fn remove_oauth_tokens_for_platform(&self, platform: AccountPlatform) -> Result<()> {
+        let key = Self::oauth_key(platform);
+        let prefix = format!("{key}:");
+        let mut key_map = load_key_map(&self.keys_path);
+        key_map.retain(|candidate, _| candidate != key && !candidate.starts_with(&prefix));
+        save_key_map(&self.keys_path, &key_map)
+    }
+
     /// Add a connected account to the config.
     pub fn add_connected_account(&self, account: ConnectedAccount) -> Result<()> {
         self.update(|config| {
             config
                 .connected_accounts
-                .retain(|a| a.platform != account.platform);
+                .retain(|a| a.platform != account.platform || a.account_id != account.account_id);
             config.connected_accounts.push(account);
         })
     }
@@ -1192,6 +1276,36 @@ impl ConfigManager {
         self.update(|config| {
             config.connected_accounts.retain(|a| a.platform != platform);
         })
+    }
+
+    /// Remove one connected account from the config.
+    pub fn remove_connected_account_for_account(
+        &self,
+        platform: AccountPlatform,
+        account_id: &str,
+    ) -> Result<()> {
+        self.update(|config| {
+            config
+                .connected_accounts
+                .retain(|a| a.platform != platform || a.account_id != account_id);
+        })
+    }
+
+    /// Return account-scoped OAuth tokens for all connected accounts on a platform.
+    pub fn oauth_tokens_for_platform(
+        &self,
+        platform: AccountPlatform,
+    ) -> Vec<(ConnectedAccount, OAuthTokenData)> {
+        self.get()
+            .connected_accounts
+            .into_iter()
+            .filter(|account| account.platform == platform)
+            .filter_map(|account| {
+                self.get_oauth_token_for_account(platform, &account.account_id)
+                    .or_else(|| self.get_oauth_token(platform))
+                    .map(|token| (account, token))
+            })
+            .collect()
     }
 
     // -- Config export/import -----------------------------------------------
@@ -1252,6 +1366,10 @@ impl ConfigManager {
         for platform in AccountPlatform::ALL {
             if let Some(token_data) = self.get_oauth_token(platform) {
                 oauth_tokens.insert(platform.label().to_lowercase(), token_data);
+            }
+            let label = platform.label().to_lowercase();
+            for (account, token_data) in self.oauth_tokens_for_platform(platform) {
+                oauth_tokens.insert(format!("{label}:{}", account.account_id), token_data);
             }
         }
 
@@ -1379,6 +1497,12 @@ impl ConfigManager {
             if let Some(token_data) = portable.oauth_tokens.get(&label) {
                 self.set_oauth_token(platform, token_data)?;
             }
+            let scoped_prefix = format!("{label}:");
+            for (key, token_data) in &portable.oauth_tokens {
+                if let Some(account_id) = key.strip_prefix(&scoped_prefix) {
+                    self.set_oauth_token_for_account(platform, account_id, token_data)?;
+                }
+            }
         }
 
         // 11. Re-populate in-memory API keys from the newly saved key store
@@ -1400,6 +1524,14 @@ impl ConfigManager {
             AccountPlatform::Discord => KEY_OAUTH_DISCORD,
             AccountPlatform::Telegram => KEY_OAUTH_TELEGRAM,
         }
+    }
+
+    fn oauth_key_for_account(platform: AccountPlatform, account_id: &str) -> Option<String> {
+        let account_id = account_id.trim();
+        if account_id.is_empty() {
+            return None;
+        }
+        Some(format!("{}:{account_id}", Self::oauth_key(platform)))
     }
 
     fn setup_watcher(
@@ -1827,6 +1959,134 @@ mod tests {
             keys_path: keys_path.clone(),
             _watcher: None,
         }
+    }
+
+    fn google_account(account_id: &str, account_name: &str) -> ConnectedAccount {
+        ConnectedAccount {
+            platform: AccountPlatform::Google,
+            account_name: account_name.to_string(),
+            account_id: account_id.to_string(),
+            scopes: vec![
+                "https://www.googleapis.com/auth/gmail.readonly".to_string(),
+                "https://www.googleapis.com/auth/calendar.readonly".to_string(),
+            ],
+            connected_at: "2026-06-20T12:00:00Z".to_string(),
+            last_synced: None,
+            settings: AccountSettings::default(),
+        }
+    }
+
+    #[test]
+    fn connected_accounts_allow_multiple_accounts_per_platform() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        mgr.add_connected_account(google_account("personal", "Personal Gmail"))
+            .unwrap();
+        mgr.add_connected_account(google_account("work", "Work Gmail"))
+            .unwrap();
+        mgr.add_connected_account(google_account("work", "Updated Work Gmail"))
+            .unwrap();
+
+        let config = mgr.get();
+        let google_accounts: Vec<_> = config
+            .connected_accounts
+            .iter()
+            .filter(|account| account.platform == AccountPlatform::Google)
+            .collect();
+
+        assert_eq!(google_accounts.len(), 2);
+        assert!(
+            google_accounts
+                .iter()
+                .any(|account| account.account_id == "personal")
+        );
+        assert!(
+            google_accounts
+                .iter()
+                .any(|account| account.account_id == "work"
+                    && account.account_name == "Updated Work Gmail")
+        );
+    }
+
+    #[test]
+    fn oauth_tokens_are_account_scoped() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        let personal = OAuthTokenData {
+            access_token: "tok-personal".into(),
+            refresh_token: Some("refresh-personal".into()),
+            expires_at: None,
+        };
+        let work = OAuthTokenData {
+            access_token: "tok-work".into(),
+            refresh_token: Some("refresh-work".into()),
+            expires_at: None,
+        };
+
+        mgr.set_oauth_token_for_account(AccountPlatform::Google, "personal", &personal)
+            .unwrap();
+        mgr.set_oauth_token_for_account(AccountPlatform::Google, "work", &work)
+            .unwrap();
+
+        assert_eq!(
+            mgr.get_oauth_token_for_account(AccountPlatform::Google, "personal")
+                .unwrap()
+                .access_token,
+            "tok-personal"
+        );
+        assert_eq!(
+            mgr.get_oauth_token_for_account(AccountPlatform::Google, "work")
+                .unwrap()
+                .access_token,
+            "tok-work"
+        );
+        assert!(mgr.get_oauth_token(AccountPlatform::Google).is_none());
+    }
+
+    #[test]
+    fn oauth_tokens_for_platform_uses_connected_account_identity() {
+        let (_tmp, config_path, keys_path) = make_temp_config_dir();
+        let mgr = test_config_manager(&config_path, &keys_path);
+
+        mgr.add_connected_account(google_account("personal", "Personal Gmail"))
+            .unwrap();
+        mgr.add_connected_account(google_account("work", "Work Gmail"))
+            .unwrap();
+        mgr.set_oauth_token_for_account(
+            AccountPlatform::Google,
+            "personal",
+            &OAuthTokenData {
+                access_token: "tok-personal".into(),
+                refresh_token: None,
+                expires_at: None,
+            },
+        )
+        .unwrap();
+        mgr.set_oauth_token_for_account(
+            AccountPlatform::Google,
+            "work",
+            &OAuthTokenData {
+                access_token: "tok-work".into(),
+                refresh_token: None,
+                expires_at: None,
+            },
+        )
+        .unwrap();
+
+        let tokens = mgr.oauth_tokens_for_platform(AccountPlatform::Google);
+
+        assert_eq!(tokens.len(), 2);
+        assert!(
+            tokens
+                .iter()
+                .any(|(account, token)| account.account_id == "personal"
+                    && token.access_token == "tok-personal")
+        );
+        assert!(tokens.iter().any(
+            |(account, token)| account.account_id == "work" && token.access_token == "tok-work"
+        ));
     }
 
     #[test]

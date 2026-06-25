@@ -1,6 +1,7 @@
 use chrono::Utc;
 use gpui::*;
 use hive_assistant::ReminderTrigger;
+use std::collections::BTreeMap;
 use tracing::warn;
 
 use super::{AppAssistant, AppConfig, HiveWorkspace};
@@ -99,11 +100,14 @@ pub(super) fn refresh_assistant_connected_data(
         return;
     }
 
-    let mut tokens: Vec<(AccountPlatform, String)> = Vec::new();
+    let mut tokens: Vec<(hive_core::config::ConnectedAccount, String)> = Vec::new();
     let config_mgr = &cx.global::<AppConfig>().0;
     for account in &connected {
-        if let Some(token_data) = config_mgr.get_oauth_token(account.platform) {
-            tokens.push((account.platform, token_data.access_token.clone()));
+        if let Some(token_data) = config_mgr
+            .get_oauth_token_for_account(account.platform, &account.account_id)
+            .or_else(|| config_mgr.get_oauth_token(account.platform))
+        {
+            tokens.push((account.clone(), token_data.access_token.clone()));
         }
     }
 
@@ -113,11 +117,24 @@ pub(super) fn refresh_assistant_connected_data(
 
     if cx.has_global::<AppAssistant>() {
         let svc = &mut cx.global_mut::<AppAssistant>().0;
-        for (platform, token) in &tokens {
-            match platform {
+        let mut gmail_accounts = Vec::new();
+        let mut google_calendar_sources = Vec::new();
+        for (account, token) in &tokens {
+            match account.platform {
                 AccountPlatform::Google => {
-                    svc.set_gmail_token(token.clone());
-                    svc.set_google_calendar_token(token.clone());
+                    gmail_accounts.push(hive_assistant::GmailAccount::new(
+                        account.account_id.clone(),
+                        account.account_name.clone(),
+                        token.clone(),
+                    ));
+                    google_calendar_sources.push(
+                        hive_assistant::GoogleCalendarSource::new(
+                            account.account_id.clone(),
+                            account.account_name.clone(),
+                            token.clone(),
+                        )
+                        .with_calendar_ids(account.settings.google_calendars.clone()),
+                    );
                 }
                 AccountPlatform::Microsoft => {
                     svc.set_outlook_token(token.clone());
@@ -126,23 +143,46 @@ pub(super) fn refresh_assistant_connected_data(
                 _ => {}
             }
         }
+        if !gmail_accounts.is_empty() {
+            svc.set_gmail_accounts(gmail_accounts);
+        }
+        if !google_calendar_sources.is_empty() {
+            svc.set_google_calendar_sources(google_calendar_sources);
+        }
     }
 
-    let mut gmail_token: Option<String> = None;
+    let mut gmail_accounts = Vec::new();
+    let mut google_calendar_sources = Vec::new();
     let mut outlook_token: Option<String> = None;
     let mut github_tokens: Vec<String> = Vec::new();
 
-    for (platform, token) in &tokens {
-        match platform {
-            AccountPlatform::Google => gmail_token = Some(token.clone()),
+    for (account, token) in &tokens {
+        match account.platform {
+            AccountPlatform::Google => {
+                gmail_accounts.push(hive_assistant::GmailAccount::new(
+                    account.account_id.clone(),
+                    account.account_name.clone(),
+                    token.clone(),
+                ));
+                google_calendar_sources.push(
+                    hive_assistant::GoogleCalendarSource::new(
+                        account.account_id.clone(),
+                        account.account_name.clone(),
+                        token.clone(),
+                    )
+                    .with_calendar_ids(account.settings.google_calendars.clone()),
+                );
+            }
             AccountPlatform::Microsoft => outlook_token = Some(token.clone()),
             AccountPlatform::GitHub => github_tokens.push(token.clone()),
             _ => {}
         }
     }
 
-    let email_svc = EmailService::with_tokens(gmail_token.clone(), outlook_token.clone());
-    let calendar_svc = CalendarService::with_tokens(gmail_token, outlook_token);
+    let mut email_svc = EmailService::with_tokens(None, outlook_token.clone());
+    email_svc.set_gmail_accounts(gmail_accounts);
+    let mut calendar_svc = CalendarService::with_tokens(None, outlook_token);
+    calendar_svc.set_google_calendar_sources(google_calendar_sources);
     let (tx, rx) = std::sync::mpsc::channel::<AssistantFetchResult>();
 
     std::thread::spawn(move || {
@@ -159,20 +199,23 @@ pub(super) fn refresh_assistant_connected_data(
         if let Ok(emails) = email_svc.fetch_gmail_inbox()
             && !emails.is_empty()
         {
-            let previews: Vec<EmailPreviewData> = emails
-                .iter()
-                .map(|email| EmailPreviewData {
+            let mut grouped: BTreeMap<String, Vec<EmailPreviewData>> = BTreeMap::new();
+            for email in &emails {
+                let provider = email
+                    .account_name
+                    .clone()
+                    .unwrap_or_else(|| "Gmail".to_string());
+                grouped.entry(provider).or_default().push(EmailPreviewData {
                     from: email.from.clone(),
                     subject: email.subject.clone(),
                     snippet: email.body.chars().take(120).collect(),
                     time: email.timestamp.clone(),
                     important: email.important,
-                })
-                .collect();
-            let _ = tx.send(AssistantFetchResult::Emails {
-                provider: "Gmail".into(),
-                previews,
-            });
+                });
+            }
+            for (provider, previews) in grouped {
+                let _ = tx.send(AssistantFetchResult::Emails { provider, previews });
+            }
         }
 
         if let Ok(events) = calendar_svc.today_events()
@@ -289,8 +332,10 @@ pub(super) fn refresh_assistant_connected_data(
                     }
 
                     if let Some(ref mut briefing) = workspace.assistant_data.briefing {
-                        let total_emails: usize =
-                            email_groups.iter().map(|(_, previews)| previews.len()).sum();
+                        let total_emails: usize = email_groups
+                            .iter()
+                            .map(|(_, previews)| previews.len())
+                            .sum();
                         briefing.unread_emails = total_emails;
                         briefing.event_count = workspace.assistant_data.events.len();
                     }

@@ -101,6 +101,8 @@ pub(super) fn render_command_palette(
     let items = filtered_command_palette_items(workspace, cx);
 
     div()
+        .id("command-palette-backdrop")
+        .occlude()
         .absolute()
         .top_0()
         .left_0()

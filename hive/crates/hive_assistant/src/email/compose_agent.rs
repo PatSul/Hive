@@ -191,6 +191,8 @@ mod tests {
             provider: EmailProvider::Gmail,
             read: true,
             important: true,
+            account_id: None,
+            account_name: None,
         }
     }
 

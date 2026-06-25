@@ -50,6 +50,7 @@ pub struct ModelSelectorView {
 
     // API key gating
     enabled_providers: HashSet<ProviderType>,
+    privacy_mode: bool,
 
     // Search / filter
     search_query: String,
@@ -125,6 +126,7 @@ impl ModelSelectorView {
             is_open: false,
             theme,
             enabled_providers: HashSet::new(),
+            privacy_mode: false,
             search_query: String::new(),
             search_input,
             fetched_or_models: Vec::new(),
@@ -151,6 +153,20 @@ impl ModelSelectorView {
 
     pub fn current_model(&self) -> &str {
         &self.current_model
+    }
+
+    pub fn set_current_model(&mut self, model_id: String, cx: &mut Context<Self>) {
+        if self.current_model != model_id {
+            self.current_model = model_id;
+            cx.notify();
+        }
+    }
+
+    pub fn set_privacy_mode(&mut self, privacy_mode: bool, cx: &mut Context<Self>) {
+        if self.privacy_mode != privacy_mode {
+            self.privacy_mode = privacy_mode;
+            cx.notify();
+        }
     }
 
     /// Update which providers have valid API keys configured.
@@ -253,7 +269,11 @@ impl ModelSelectorView {
             return true;
         }
         match model.provider_type {
-            ProviderType::Ollama | ProviderType::LMStudio | ProviderType::GenericLocal => true,
+            ProviderType::Ollama
+            | ProviderType::LMStudio
+            | ProviderType::GenericLocal
+            | ProviderType::LiteLLM
+            | ProviderType::Kilo => true,
             _ => self.project_models.contains(&model.id),
         }
     }
@@ -562,10 +582,22 @@ impl ModelSelectorView {
     }
 
     fn is_provider_enabled(&self, provider: ProviderType) -> bool {
-        match provider {
-            // Local providers don't need API keys — always enabled.
-            ProviderType::Ollama | ProviderType::LMStudio | ProviderType::GenericLocal => true,
-            _ => self.enabled_providers.contains(&provider),
+        if provider_is_local_or_user_hosted(provider) {
+            return true;
+        }
+        if self.privacy_mode {
+            return false;
+        }
+        self.enabled_providers.contains(&provider)
+    }
+
+    fn provider_disabled_reason(&self, provider: ProviderType) -> Option<&'static str> {
+        if self.is_provider_enabled(provider) {
+            None
+        } else if self.privacy_mode && !provider_is_local_or_user_hosted(provider) {
+            Some("Privacy mode")
+        } else {
+            Some("No API key")
         }
     }
 
@@ -717,7 +749,7 @@ impl ModelSelectorView {
         let mut total_visible = 0usize;
 
         for (ptype, label) in &provider_order {
-            let enabled = self.is_provider_enabled(*ptype);
+            let disabled_reason = self.provider_disabled_reason(*ptype);
             let models: Vec<&ModelInfo> = all_models
                 .iter()
                 .filter(|m| m.provider_type == *ptype)
@@ -729,7 +761,7 @@ impl ModelSelectorView {
             }
             total_visible += models.len();
             groups.push(
-                self.render_group(*ptype, label, &models, enabled, theme, cx)
+                self.render_group(*ptype, label, &models, disabled_reason, theme, cx)
                     .into_any_element(),
             );
         }
@@ -863,10 +895,11 @@ impl ModelSelectorView {
         provider: ProviderType,
         label: &str,
         models: &[&ModelInfo],
-        enabled: bool,
+        disabled_reason: Option<&'static str>,
         theme: &HiveTheme,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let enabled = disabled_reason.is_none();
         let is_collapsed = self.collapsed_providers.contains(&provider);
         let is_expanded = self.expanded_providers.contains(&provider);
         let total_count = models.len();
@@ -888,7 +921,7 @@ impl ModelSelectorView {
         let mut entries: Vec<AnyElement> = Vec::new();
         for model in &visible_models {
             entries.push(
-                self.render_entry(model, enabled, theme, cx)
+                self.render_entry(model, disabled_reason, theme, cx)
                     .into_any_element(),
             );
         }
@@ -939,7 +972,9 @@ impl ModelSelectorView {
             );
         }
 
-        let header_suffix = if !enabled { " \u{2014} No API key" } else { "" };
+        let header_suffix = disabled_reason
+            .map(|reason| format!(" - {reason}"))
+            .unwrap_or_default();
         let collapse_icon = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
         let header_ptype = provider;
 
@@ -1005,10 +1040,11 @@ impl ModelSelectorView {
     fn render_entry(
         &self,
         model: &ModelInfo,
-        enabled: bool,
+        disabled_reason: Option<&'static str>,
         theme: &HiveTheme,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let enabled = disabled_reason.is_none();
         let is_selected = model.id == self.current_model;
         let bg = if is_selected && enabled {
             theme.bg_tertiary
@@ -1107,7 +1143,7 @@ impl ModelSelectorView {
                                     .px(theme.space_2)
                                     .py(px(2.0))
                                     .rounded(theme.radius_full)
-                                    .child("No API key"),
+                                    .child(disabled_reason.unwrap_or("Unavailable")),
                             )
                         }),
                 )
@@ -1137,6 +1173,17 @@ impl ModelSelectorView {
 fn dimmed(mut color: Hsla) -> Hsla {
     color.a *= 0.4;
     color
+}
+
+fn provider_is_local_or_user_hosted(provider: ProviderType) -> bool {
+    matches!(
+        provider,
+        ProviderType::Ollama
+            | ProviderType::LMStudio
+            | ProviderType::GenericLocal
+            | ProviderType::LiteLLM
+            | ProviderType::Kilo
+    )
 }
 
 fn tier_style(tier: Option<ModelTier>, theme: &HiveTheme) -> (Hsla, &'static str) {
