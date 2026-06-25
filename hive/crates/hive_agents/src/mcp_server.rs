@@ -147,10 +147,7 @@ impl McpServer {
                     .get("category")
                     .and_then(|v| v.as_str())
                     .map(MemoryCategory::parse_str);
-                let limit = args
-                    .get("limit")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(20) as usize;
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
                 let entries = mem_list
                     .recall("", category, None, limit)
@@ -218,6 +215,72 @@ impl McpServer {
                         "score": score.score,
                     })).collect::<Vec<_>>()
                 }))
+            }),
+        );
+    }
+
+    /// Register self-work tools that let Hive select and remember its next
+    /// bounded improvement against the current repository.
+    pub fn wire_self_work_tools(
+        &mut self,
+        collective_memory: Arc<crate::collective_memory::CollectiveMemory>,
+        workspace_root: PathBuf,
+    ) {
+        self.register(
+            McpTool {
+                name: "plan_self_work".into(),
+                description: "Plan Hive's next autonomous self-improvement task for this repository."
+                    .into(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "objective_hint": { "type": "string", "description": "Optional high-level objective to bias task selection" },
+                        "max_candidates": { "type": "integer", "description": "Maximum candidates to return" },
+                        "verifier_command": { "type": "string", "description": "Command the loop should use as its verifier" },
+                        "require_human_approval": { "type": "boolean", "description": "Whether the generated loop should pause for approval before write-capable work" }
+                    }
+                }),
+            },
+            Box::new(move |args| {
+                let mut config =
+                    crate::loop_engineering::SelfWorkConfig::for_hive_repo(&workspace_root);
+
+                if let Some(hint) = args.get("objective_hint").and_then(|v| v.as_str()) {
+                    config = config.with_objective_hint(hint);
+                }
+                if let Some(max_candidates) = args.get("max_candidates").and_then(|v| v.as_u64())
+                {
+                    config = config.with_max_candidates(max_candidates as usize);
+                }
+                if let Some(command) = args.get("verifier_command").and_then(|v| v.as_str()) {
+                    config = config.with_verifier_command(command);
+                }
+                if let Some(require) = args.get("require_human_approval").and_then(|v| v.as_bool())
+                {
+                    config = config.require_human_approval(require);
+                }
+
+                let plan = crate::loop_engineering::SelfWorkPlanner::new(config).plan()?;
+
+                let mut entry = crate::collective_memory::MemoryEntry::new(
+                    crate::collective_memory::MemoryCategory::General,
+                    format!(
+                        "Self-work plan selected '{}' for Hive autonomous brain objective: {}",
+                        plan.selected.title, plan.selected.objective
+                    ),
+                );
+                entry.tags = vec![
+                    "self-work".into(),
+                    "level-5".into(),
+                    plan.selected.source.as_str().into(),
+                ];
+                entry.relevance_score = 0.9;
+                collective_memory
+                    .remember(&entry)
+                    .map_err(|e| format!("failed to remember self-work plan: {e}"))?;
+
+                serde_json::to_value(&plan)
+                    .map_err(|e| format!("failed to serialize self-work plan: {e}"))
             }),
         );
     }
@@ -855,6 +918,54 @@ mod tests {
             "expected at least 95 builtin/integration tools, got {}",
             tools.len()
         );
+    }
+
+    #[test]
+    fn plan_self_work_tool_returns_selected_loop_and_records_memory() {
+        let (dir, mut server) = setup_workspace();
+        std::fs::create_dir_all(dir.path().join(".planning")).unwrap();
+        std::fs::write(
+            dir.path().join(".planning/ISSUES.md"),
+            "- [ ] Teach Hive to autonomously improve Hive\n",
+        )
+        .unwrap();
+
+        let memory = Arc::new(crate::collective_memory::CollectiveMemory::in_memory().unwrap());
+        server.wire_self_work_tools(Arc::clone(&memory), dir.path().to_path_buf());
+
+        let value = server
+            .call_tool_value(
+                "plan_self_work",
+                json!({
+                    "objective_hint": "reach level 5 autonomous brain",
+                    "max_candidates": 3,
+                    "verifier_command": "cargo check -p hive_agents --lib"
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(value["selected"]["source"], "planning_issue");
+        assert!(
+            value["selected"]["objective"]
+                .as_str()
+                .unwrap()
+                .contains("autonomously improve Hive")
+        );
+        assert_eq!(value["loop_spec"]["id"], "hive-self-work");
+        assert_eq!(
+            value["loop_spec"]["verifier"]["command"],
+            "cargo check -p hive_agents --lib"
+        );
+
+        let remembered = memory
+            .recall(
+                "autonomous brain",
+                Some(crate::collective_memory::MemoryCategory::General),
+                None,
+                10,
+            )
+            .unwrap();
+        assert_eq!(remembered.len(), 1);
     }
 
     // -- Initialize tests --

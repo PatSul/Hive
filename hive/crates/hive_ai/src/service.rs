@@ -67,6 +67,34 @@ pub struct AiServiceConfig {
     pub routing_policy: hive_core::config::RoutingPolicy,
 }
 
+impl From<&hive_core::HiveConfig> for AiServiceConfig {
+    fn from(config: &hive_core::HiveConfig) -> Self {
+        Self {
+            anthropic_api_key: config.anthropic_api_key.clone(),
+            openai_api_key: config.openai_api_key.clone(),
+            openrouter_api_key: config.openrouter_api_key.clone(),
+            google_api_key: config.google_api_key.clone(),
+            groq_api_key: config.groq_api_key.clone(),
+            huggingface_api_key: config.huggingface_api_key.clone(),
+            xai_api_key: config.xai_api_key.clone(),
+            mistral_api_key: config.mistral_api_key.clone(),
+            venice_api_key: config.venice_api_key.clone(),
+            zai_api_key: config.zai_api_key.clone(),
+            litellm_url: config.litellm_url.clone(),
+            litellm_api_key: config.litellm_api_key.clone(),
+            ollama_url: config.ollama_url.clone(),
+            lmstudio_url: config.lmstudio_url.clone(),
+            local_provider_url: config.local_provider_url.clone(),
+            kilo_url: Some(config.kilo_url.clone()),
+            kilo_password: config.kilo_password.clone(),
+            privacy_mode: config.privacy_mode,
+            default_model: config.default_model.clone(),
+            auto_routing: config.auto_routing,
+            routing_policy: config.routing_policy.clone(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // AiService
 // ---------------------------------------------------------------------------
@@ -225,10 +253,8 @@ impl AiService {
         // covers all outbound egress. Secrets and registered API keys are
         // scrubbed from the assembled `ChatRequest` immediately before dispatch.
         for provider in providers.values_mut() {
-            let wrapped = RedactingProvider::with_shared_keys(
-                provider.clone(),
-                Arc::clone(&registered_keys),
-            );
+            let wrapped =
+                RedactingProvider::with_shared_keys(provider.clone(), Arc::clone(&registered_keys));
             *provider = Arc::new(wrapped);
         }
 
@@ -238,9 +264,10 @@ impl AiService {
         // from config. With a default/empty policy this leaves routing
         // behavior unchanged.
         let mut router = ModelRouter::new();
-        router.set_routing_policy(
-            crate::routing::policy::RuntimeRoutingPolicy::from_config(&config.routing_policy),
-        );
+        router.set_routing_policy(crate::routing::policy::RuntimeRoutingPolicy::from_config(
+            &config.routing_policy,
+        ));
+        mark_router_providers_available(&router, providers.keys().copied());
 
         Self {
             providers,
@@ -382,6 +409,9 @@ impl AiService {
             Arc::clone(&self.registered_keys),
         ));
         self.providers.insert(provider_type, wrapped);
+        self.router
+            .fallback_manager()
+            .set_available(map_to_router_provider(provider_type), true);
     }
 
     /// List all registered providers.
@@ -430,10 +460,7 @@ impl AiService {
     /// (unlimited) so the router's budget gate stays disabled and routing is
     /// byte-for-byte unchanged.
     fn compute_budget_remaining(&self) -> Option<f64> {
-        let daily = self
-            .cost_tracker
-            .daily_remaining()
-            .unwrap_or(f64::INFINITY);
+        let daily = self.cost_tracker.daily_remaining().unwrap_or(f64::INFINITY);
         let monthly = self
             .cost_tracker
             .monthly_remaining()
@@ -773,12 +800,23 @@ fn collect_registered_keys(config: &AiServiceConfig) -> Vec<String> {
         .collect()
 }
 
+fn mark_router_providers_available(
+    router: &ModelRouter,
+    providers: impl IntoIterator<Item = ProviderType>,
+) {
+    for provider in providers {
+        router
+            .fallback_manager()
+            .set_available(map_to_router_provider(provider), true);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared routing core (used by AiService and AiRoutingHandle)
 // ---------------------------------------------------------------------------
 
-/// Resolve a model ID to a provider using the router, falling back to the first
-/// available provider. Shared by [`AiService`] and [`AiRoutingHandle`].
+/// Resolve a model ID to the provider selected by the router. Shared by
+/// [`AiService`] and [`AiRoutingHandle`].
 fn resolve_provider_inner(
     providers: &HashMap<ProviderType, Arc<dyn AiProvider>>,
     router: &ModelRouter,
@@ -790,10 +828,10 @@ fn resolve_provider_inner(
     if let Some(provider) = providers.get(&provider_type) {
         return Some((provider_type, provider.clone()));
     }
-    // Fallback: pick the first available provider.
-    if let Some((pt, p)) = providers.iter().next() {
-        return Some((*pt, p.clone()));
-    }
+
+    // The routed provider is not registered. Do not dispatch a provider-specific
+    // model (for example, `claude-*`) to an unrelated local backend just because
+    // it happens to be present in the provider map.
     None
 }
 
@@ -817,6 +855,11 @@ fn resolve_provider_smart_inner(
     // If the user picked a specific model, use standard resolution.
     let is_auto = model == default_model || model == "auto";
     if !is_auto || !auto_routing {
+        let (pt, provider) = resolve_provider_inner(providers, router, model)?;
+        return Some((pt, provider, model.to_string()));
+    }
+
+    if available_models.is_empty() && model != "auto" {
         let (pt, provider) = resolve_provider_inner(providers, router, model)?;
         return Some((pt, provider, model.to_string()));
     }
@@ -1047,6 +1090,26 @@ mod tests {
     }
 
     #[test]
+    fn ai_service_config_from_hive_config_carries_api_keys() {
+        let mut hive_config = hive_core::HiveConfig::default();
+        hive_config.anthropic_api_key = Some("sk-ant".into());
+        hive_config.openai_api_key = Some("sk-openai".into());
+        hive_config.openrouter_api_key = Some("sk-or".into());
+        hive_config.google_api_key = Some("AIza-google".into());
+        hive_config.groq_api_key = Some("gsk-groq".into());
+        hive_config.default_model = "claude-opus-4-20250514".into();
+
+        let ai_config = AiServiceConfig::from(&hive_config);
+
+        assert_eq!(ai_config.anthropic_api_key.as_deref(), Some("sk-ant"));
+        assert_eq!(ai_config.openai_api_key.as_deref(), Some("sk-openai"));
+        assert_eq!(ai_config.openrouter_api_key.as_deref(), Some("sk-or"));
+        assert_eq!(ai_config.google_api_key.as_deref(), Some("AIza-google"));
+        assert_eq!(ai_config.groq_api_key.as_deref(), Some("gsk-groq"));
+        assert_eq!(ai_config.default_model, "claude-opus-4-20250514");
+    }
+
+    #[test]
     fn test_no_providers_returns_none() {
         let config = AiServiceConfig {
             privacy_mode: true,
@@ -1082,6 +1145,111 @@ mod tests {
         let svc = AiService::new(config);
         let result = svc.prepare_stream(vec![], "test-model", None, None);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_auto_routing_uses_single_registered_cloud_provider() {
+        let config = AiServiceConfig {
+            google_api_key: Some("AIza-test".into()),
+            default_model: "gemini-2.0-flash".into(),
+            auto_routing: true,
+            ollama_url: String::new(),
+            lmstudio_url: String::new(),
+            ..Default::default()
+        };
+        let svc = AiService::new(config);
+        let providers = svc.available_providers();
+        assert_eq!(providers.len(), 1);
+        assert!(providers.contains(&ProviderType::Google));
+
+        let messages = vec![ChatMessage::text(
+            MessageRole::User,
+            "Summarize this short note.",
+        )];
+        let (provider, request) = svc
+            .prepare_stream(messages, "gemini-2.0-flash", None, None)
+            .expect("registered Google provider should be routable in auto mode");
+
+        assert_eq!(provider.provider_type(), ProviderType::Google);
+        assert!(
+            request.model.starts_with("gemini-"),
+            "auto routing should stay within the registered Google provider"
+        );
+    }
+
+    #[test]
+    fn test_auto_routing_uses_default_model_when_no_models_are_discovered() {
+        let config = AiServiceConfig {
+            privacy_mode: true,
+            default_model: "llama3.2".into(),
+            auto_routing: true,
+            ollama_url: "http://localhost:11434".into(),
+            lmstudio_url: String::new(),
+            local_provider_url: None,
+            ..Default::default()
+        };
+        let svc = AiService::new(config);
+        let providers = svc.available_providers();
+        assert_eq!(providers.len(), 1);
+        assert!(providers.contains(&ProviderType::Ollama));
+        assert!(
+            svc.available_models_for_routing().is_empty(),
+            "local models are empty until discovery has completed"
+        );
+
+        let messages = vec![ChatMessage::text(
+            MessageRole::User,
+            "Write a detailed architecture review.",
+        )];
+        let (provider, request) = svc
+            .prepare_stream(messages, "llama3.2", None, None)
+            .expect("configured local default should be routable before discovery");
+
+        assert_eq!(provider.provider_type(), ProviderType::Ollama);
+        assert_eq!(request.model, "llama3.2");
+    }
+
+    #[test]
+    fn test_prepare_stream_explicit_cloud_model_without_provider_returns_none() {
+        let config = AiServiceConfig {
+            privacy_mode: true,
+            default_model: "llama3.2".into(),
+            ollama_url: "http://localhost:11434".into(),
+            lmstudio_url: "http://localhost:1234".into(),
+            ..Default::default()
+        };
+        let svc = AiService::new(config);
+        assert!(svc.available_providers().contains(&ProviderType::Ollama));
+        assert!(svc.available_providers().contains(&ProviderType::LMStudio));
+        assert!(!svc.available_providers().contains(&ProviderType::Anthropic));
+
+        let messages = vec![ChatMessage::text(MessageRole::User, "Hello")];
+        let result = svc.prepare_stream(messages, "claude-opus-4-20250514", None, None);
+
+        assert!(
+            result.is_none(),
+            "explicit Anthropic model should not be dispatched to an unrelated local provider"
+        );
+    }
+
+    #[test]
+    fn test_routing_handle_explicit_cloud_model_without_provider_returns_none() {
+        let config = AiServiceConfig {
+            privacy_mode: true,
+            default_model: "llama3.2".into(),
+            ollama_url: "http://localhost:11434".into(),
+            ..Default::default()
+        };
+        let svc = AiService::new(config);
+        let handle = svc.routing_handle();
+
+        let messages = vec![ChatMessage::text(MessageRole::User, "Hello")];
+        let result = handle.route(&messages, "claude-opus-4-20250514");
+
+        assert!(
+            result.is_none(),
+            "routing handle should not dispatch explicit Anthropic models to local providers"
+        );
     }
 
     #[test]

@@ -1,6 +1,4 @@
 pub mod activity;
-#[cfg(feature = "memory-tiering")]
-pub mod memory;
 pub mod auto_commit;
 pub mod automation;
 pub mod collective_memory;
@@ -13,8 +11,11 @@ pub mod hiveloop;
 pub mod hivemind;
 pub mod integration_tools;
 pub mod knowledge_acquisition;
+pub mod loop_engineering;
 pub mod mcp_client;
 pub mod mcp_server;
+#[cfg(feature = "memory-tiering")]
+pub mod memory;
 pub mod message_queue;
 pub mod mission;
 pub mod persistence;
@@ -62,10 +63,16 @@ pub use coordinator::{
 };
 pub use heartbeat::{AgentHeartbeat, HeartbeatService};
 pub use heartbeat_scheduler::{HeartbeatMode, HeartbeatScheduler, HeartbeatTask};
+pub use hiveloop::{Checkpoint, HiveLoop, LoopConfig, LoopStatus};
 pub use hivemind::AiExecutor;
 pub use knowledge_acquisition::{
     AcquisitionResult, CodeBlock, KnowledgeAcquisitionAgent, KnowledgeConfig, KnowledgePage,
     KnowledgeSummary,
+};
+pub use loop_engineering::{
+    BrainLesson, BrainPass, BrainSynthesis, DoneCriteria, GuardrailPolicy, LoopIterationOutcome,
+    LoopIterationRecord, LoopRunResult, LoopRunner, LoopSpec, MemoryPolicy, SelfWorkCandidate,
+    SelfWorkConfig, SelfWorkPlan, SelfWorkPlanner, SelfWorkSource, VerifierOutcome, VerifierSpec,
 };
 pub use message_queue::{
     AgentMessage, AgentMessageQueue, MessagePriority, SharedMessageQueue, classify_input,
@@ -74,9 +81,6 @@ pub use message_queue::{
 pub use mission::{
     BranchPusher, BuildOpts, BuildOutcome, GitBranchPusher, PrOpener, RiskTier, build_from_ticket,
     build_from_ticket_full, build_from_ticket_with_url, push_branch, ticket_branch_name,
-};
-pub use repo_context::{
-    DEFAULT_TOKEN_BUDGET, EDIT_FORMAT_INSTRUCTION, assemble_repo_context, build_grounded_objective,
 };
 pub use persistence::{AgentPersistenceService, AgentSnapshot, CompletedTask};
 pub use personas::{
@@ -92,6 +96,9 @@ pub use plugin_types::{
 };
 pub use prompt_template::PromptTemplate;
 pub use queen::Queen;
+pub use repo_context::{
+    DEFAULT_TOKEN_BUDGET, EDIT_FORMAT_INSTRUCTION, assemble_repo_context, build_grounded_objective,
+};
 pub use response_parser::{ParsedEdit, parse_edits};
 pub use skill_authoring::{
     DraftSkill, SkillAuthoringConfig, SkillAuthoringPipeline, SkillAuthoringRequest,

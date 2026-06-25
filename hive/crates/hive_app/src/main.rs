@@ -149,29 +149,7 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
 
     // Build AI service from config (needed before wiring LearnerTierAdjuster).
     let config = cx.global::<AppConfig>().0.get().clone();
-    let ai_config = AiServiceConfig {
-        anthropic_api_key: config.anthropic_api_key.clone(),
-        openai_api_key: config.openai_api_key.clone(),
-        openrouter_api_key: config.openrouter_api_key.clone(),
-        google_api_key: config.google_api_key.clone(),
-        groq_api_key: config.groq_api_key.clone(),
-        huggingface_api_key: config.huggingface_api_key.clone(),
-        xai_api_key: config.xai_api_key.clone(),
-        mistral_api_key: config.mistral_api_key.clone(),
-        venice_api_key: config.venice_api_key.clone(),
-        zai_api_key: config.zai_api_key.clone(),
-        litellm_url: config.litellm_url.clone(),
-        litellm_api_key: config.litellm_api_key.clone(),
-        ollama_url: config.ollama_url.clone(),
-        lmstudio_url: config.lmstudio_url.clone(),
-        local_provider_url: config.local_provider_url.clone(),
-        kilo_url: Some(config.kilo_url.clone()),
-        kilo_password: config.kilo_password.clone(),
-        privacy_mode: config.privacy_mode,
-        default_model: config.default_model.clone(),
-        auto_routing: config.auto_routing,
-        routing_policy: config.routing_policy.clone(),
-    };
+    let ai_config = AiServiceConfig::from(&config);
     cx.set_global(AppAiService(hive_ai::AiService::new(ai_config)));
 
     // Register Kilo coding agent provider (local, always attempted).
@@ -1368,13 +1346,21 @@ fn init_services(cx: &mut App) -> anyhow::Result<()> {
         cx.global_mut::<AppMcpServer>()
             .0
             .wire_integrations(services);
-        if cx.has_global::<AppCollectiveMemory>() && cx.has_global::<AppContextEngine>() {
+        if cx.has_global::<AppCollectiveMemory>() {
             let collective_memory = Arc::clone(&cx.global::<AppCollectiveMemory>().0);
-            let context_engine = Arc::clone(&cx.global::<AppContextEngine>().0);
+
+            if cx.has_global::<AppContextEngine>() {
+                let context_engine = Arc::clone(&cx.global::<AppContextEngine>().0);
+                cx.global_mut::<AppMcpServer>()
+                    .0
+                    .wire_memory_tools(Arc::clone(&collective_memory), context_engine);
+                info!("MCP memory/context tools wired to live services");
+            }
+
             cx.global_mut::<AppMcpServer>()
                 .0
-                .wire_memory_tools(collective_memory, context_engine);
-            info!("MCP memory/context tools wired to live services");
+                .wire_self_work_tools(collective_memory, workspace_root.clone());
+            info!("MCP self-work tools wired to live services");
         }
         info!("MCP integration tools wired to live services");
     }
